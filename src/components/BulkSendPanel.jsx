@@ -65,7 +65,8 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         }
         
         const num = parseFloat(row.amount);
-        const tokAmt = bulkMode === 'fiat' ? (num / liveRate) / tok.price : num;
+        const tokPrice = tok ? tok.price : 1;
+        const tokAmt = bulkMode === 'fiat' ? (num / liveRate) / tokPrice : num;
         
         resolvedRecipients.push({
           pubkey: recipientPubkey,
@@ -170,18 +171,21 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
   };
 
   const validRows = rows.filter(r => r.valid && r.amount);
+  const tokPrice = tok ? tok.price : 1;
+  const tokSymbol = tok ? tok.symbol : 'Token';
+
   const totalUSD = validRows.reduce((s,r) => {
     const n = parseFloat(r.amount)||0;
-    return s + (bulkMode==='fiat' ? n/liveRate : n*tok.price);
+    return s + (bulkMode==='fiat' ? n/liveRate : n*tokPrice);
   }, 0);
-  const totalTok = totalUSD / tok.price;
+  const totalTok = totalUSD / tokPrice;
   const globalNum = parseFloat(globalAmt)||0;
-  const perTok  = bulkMode==='fiat'   ? (globalNum/liveRate)/tok.price : globalNum;
-  const perFiat = bulkMode==='crypto' ? globalNum*tok.price*liveRate   : globalNum;
+  const perTok  = bulkMode==='fiat'   ? (globalNum/liveRate)/tokPrice : globalNum;
+  const perFiat = bulkMode==='crypto' ? globalNum*tokPrice*liveRate   : globalNum;
   const convertedLabel = globalNum > 0
-    ? (bulkMode==='fiat' ? `≈ ${fmtTok(perTok)} ${tok.symbol} each` : `≈ ${fmtFiat(perFiat,bulkCurr)} each`)
+    ? (bulkMode==='fiat' ? `≈ ${tok ? fmtTok(perTok) : '0'} ${tokSymbol} each` : `≈ ${fmtFiat(perFiat,bulkCurr)} each`)
     : '';
-  const colLabel = bulkMode==='fiat' ? bulkCurr : tok.symbol;
+  const colLabel = bulkMode==='fiat' ? bulkCurr : tokSymbol;
 
   return (
     <div>
@@ -197,10 +201,16 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
               <input className="amount-num" type="number" value={globalAmt}
                 onChange={e => setGlobalAmt(e.target.value)} placeholder="0" style={{fontSize:18}} />
             </div>
-            {bulkMode==='crypto' && (
+            {bulkMode==='crypto' && tok && (
               <div style={{display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:9,padding:'7px 10px',fontSize:13,fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',flexShrink:0}}>
-                <div className="tok-icon" style={{background:tok.bg,color:tok.color,width:22,height:22,fontSize:8}}>{tok.symbol.slice(0,3)}</div>
-                {tok.symbol}
+                <div className="tok-icon" style={{background:tok.bg,color:tok.color,width:22,height:22,fontSize:8}}>{tokSymbol.slice(0,3)}</div>
+                {tokSymbol}
+              </div>
+            )}
+            {bulkMode==='crypto' && !tok && (
+              <div style={{display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:9,padding:'7px 10px',fontSize:13,fontWeight:600,color:'var(--text3)',whiteSpace:'nowrap',flexShrink:0}}>
+                <div className="tok-icon" style={{background:'rgba(255,255,255,0.05)',color:'var(--text3)',width:22,height:22,fontSize:8}}>?</div>
+                Select
               </div>
             )}
           </div>
@@ -209,14 +219,16 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
             <span className="amount-converted">{convertedLabel || <span style={{color:'var(--text3)'}}>Enter amount above</span>}</span>
             <div className="input-mode-toggle">
               <button className={`imt-btn ${bulkMode==='fiat'?'active':''}`} onClick={() => setBulkMode('fiat')}>{bulkCurr}</button>
-              <button className={`imt-btn ${bulkMode==='crypto'?'active':''}`} onClick={() => setBulkMode('crypto')}>{tok.symbol}</button>
+              <button className={`imt-btn ${bulkMode==='crypto'?'active':''}`} disabled={!tok} onClick={() => setBulkMode('crypto')}>{tokSymbol}</button>
             </div>
           </div>
         </div>
-        <div className="rate-badge" style={{marginTop:8}}>
-          <span className="rate-dot" />
-          1 {tok.symbol} = ${tok.price < 0.001 ? tok.price.toFixed(7) : tok.price.toLocaleString()} USD
-        </div>
+        {tok && (
+          <div className="rate-badge" style={{marginTop:8}}>
+            <span className="rate-dot" />
+            1 {tokSymbol} = ${tokPrice < 0.001 ? tokPrice.toFixed(7) : tokPrice.toLocaleString()} USD
+          </div>
+        )}
         {globalAmt && (
           <button className="tmpl-btn" style={{width:'100%',marginTop:8,padding:'7px 12px',fontSize:12}} onClick={applyGlobal}>
             Apply this amount to all recipients
@@ -268,7 +280,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           </div>
           <div className="bulk-sum">
             <div className="sum-item"><div className="sum-val">{validRows.length}</div><div className="sum-lbl">Recipients</div></div>
-            <div className="sum-item"><div className="sum-val">{fmtTok(totalTok)}</div><div className="sum-lbl">Total {tok.symbol}</div></div>
+            <div className="sum-item"><div className="sum-val">{tok ? fmtTok(totalTok) : '0'}</div><div className="sum-lbl">Total {tokSymbol}</div></div>
             <div className="sum-item"><div className="sum-val">${totalUSD.toFixed(2)}</div><div className="sum-lbl">Est. USD</div></div>
           </div>
           <button className="add-manual" onClick={addManual}>＋ Add recipient manually</button>
@@ -283,8 +295,8 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           )}
         </>
       )}
-      <button className="send-btn" disabled={!connected || validRows.length === 0 || ['resolving','signing','sending'].includes(sendingState)} onClick={handleBulkSend}>
-        {!connected ? 'Connect wallet to send' : validRows.length === 0 ? 'Add recipients to continue' : ['resolving','signing','sending'].includes(sendingState) ? 'Processing...' : `Send ${tok.symbol} to ${validRows.length} recipient${validRows.length!==1?'s':''}`}
+      <button className="send-btn" disabled={!connected || !tok || validRows.length === 0 || ['resolving','signing','sending'].includes(sendingState)} onClick={handleBulkSend}>
+        {!connected ? 'Connect wallet to send' : !tok ? 'Select a token to continue' : validRows.length === 0 ? 'Add recipients to continue' : ['resolving','signing','sending'].includes(sendingState) ? 'Processing...' : `Send ${tokSymbol} to ${validRows.length} recipient${validRows.length!==1?'s':''}`}
       </button>
     </div>
   );

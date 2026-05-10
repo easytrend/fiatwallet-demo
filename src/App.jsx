@@ -36,7 +36,7 @@ export default function App() {
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [inputMode, setInputMode] = useState('fiat');
-  const [token, setToken] = useState('USDC');
+  const [token, setToken] = useState('');
   const [showModal, setShowModal] = useState(false);
 
   const { liveRates, ratesLoading } = useLiveRates();
@@ -103,15 +103,15 @@ export default function App() {
     return TOKENS.map(t => ({ ...t, price: getLiveTokPrice(t.symbol) || t.price || 0 }));
   }, [connected, walletTokenList, liveRates]);
 
-  const tok = (walletTokenList && walletTokenList.find(t => t.symbol === token))
-    || TOKENS.find(t => t.symbol === token) || TOKENS[1];
+  const tok = token ? ((walletTokenList && walletTokenList.find(t => t.symbol === token))
+    || TOKENS.find(t => t.symbol === token)) : null;
   const curr = CURRENCIES.find(c => c.code === currency) || CURRENCIES[0];
   const currRate = getLiveCurrRate(currency);
-  const tokPrice = getLiveTokPrice(tok.symbol) || tok.price || 1;
+  const tokPrice = tok ? (getLiveTokPrice(tok.symbol) || tok.price || 1) : 1;
   const num = parseFloat(amount) || 0;
   const tokAmt = inputMode === 'fiat' ? (num / currRate) / tokPrice : num;
   const dispTok = fmtTok(tokAmt);
-  const tokLive = { ...tok, price: tokPrice };
+  const tokLive = tok ? { ...tok, price: tokPrice } : null;
 
   // Fetch real on-chain balances using the wallet-adapter connection object
   const fetchBalances = useCallback(async () => {
@@ -309,27 +309,45 @@ export default function App() {
             <div className="field">
               <div className="field-label">Select Token</div>
               <div className="token-row" onClick={() => setShowModal(true)}>
-                <div className="tok-left">
-                  <div className="tok-icon" style={{background:tokLive.bg,color:tokLive.color}}>{tokLive.symbol.slice(0,4)}</div>
-                  <div>
-                    <span className="tok-sym">{tokLive.symbol}</span>
-                    <span style={{fontSize:11,color:'var(--text3)',marginLeft:6}}>${tokLive.price < 0.01 ? tokLive.price.toFixed(6) : tokLive.price.toLocaleString()}</span>
-                  </div>
-                </div>
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  {!bulkMode && <span className="tok-equiv">≈ {dispTok} {tokLive.symbol}</span>}
-                  <span className="tok-chevron">›</span>
-                </div>
+                {tokLive ? (
+                  <>
+                    <div className="tok-left">
+                      <div className="tok-icon" style={{background:tokLive.bg,color:tokLive.color}}>{tokLive.symbol.slice(0,4)}</div>
+                      <div>
+                        <span className="tok-sym">{tokLive.symbol}</span>
+                        <span style={{fontSize:11,color:'var(--text3)',marginLeft:6}}>${tokLive.price < 0.01 ? tokLive.price.toFixed(6) : tokLive.price.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      {!bulkMode && <span className="tok-equiv">≈ {dispTok} {tokLive.symbol}</span>}
+                      <span className="tok-chevron">›</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="tok-left">
+                      <div className="tok-icon" style={{background:'rgba(255,255,255,0.05)',color:'var(--text3)'}}>?</div>
+                      <div>
+                        <span className="tok-sym" style={{color:'var(--text2)'}}>Select Token</span>
+                      </div>
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span className="tok-chevron">›</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="rate-badge" style={{marginBottom:'0.75rem'}}>
-              <span className="rate-dot" />
-              1 {tokLive.symbol} = <strong>${tokLive.price < 0.0001 ? tokLive.price.toFixed(8) : tokLive.price < 1 ? tokLive.price.toFixed(4) : tokLive.price.toLocaleString()}</strong> USD
-              <span className="rate-sep">·</span>
-              1 USD = <strong>{fmtRate(currRate)}</strong> {currency}
-              {liveRates.updatedAt && <span style={{color:'var(--text3)',fontSize:10}}> · live</span>}
-            </div>
+            {tokLive && (
+              <div className="rate-badge" style={{marginBottom:'0.75rem'}}>
+                <span className="rate-dot" />
+                1 {tokLive.symbol} = <strong>${tokLive.price < 0.0001 ? tokLive.price.toFixed(8) : tokLive.price < 1 ? tokLive.price.toFixed(4) : tokLive.price.toLocaleString()}</strong> USD
+                <span className="rate-sep">·</span>
+                1 USD = <strong>{fmtRate(currRate)}</strong> {currency}
+                {liveRates.updatedAt && <span style={{color:'var(--text3)',fontSize:10}}> · live</span>}
+              </div>
+            )}
 
             {bulkMode ? (
               <BulkSendPanel tok={tokLive} connected={connected} getLiveRate={getLiveCurrRate}
@@ -343,8 +361,8 @@ export default function App() {
                     currency={currency} setCurrency={setCurrency} tok={tokLive} currRate={currRate} />
                 </div>
                 {walletError && <div style={{fontSize:12, color:'#f87171', marginBottom:12, padding:'8px 12px', background:'rgba(248,113,113,0.1)', borderRadius:8}}>{walletError}</div>}
-                <button className="send-btn" disabled={!connected || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress) || sending} onClick={handleSend}>
-                  {sending ? 'Sending…' : !connected ? 'Connect wallet to send' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
+                <button className="send-btn" disabled={!connected || !tokLive || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress) || sending} onClick={handleSend}>
+                  {sending ? 'Sending…' : !connected ? 'Connect wallet to send' : !tokLive ? 'Select a token to continue' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
                 </button>
               </>
             )}
