@@ -387,7 +387,7 @@ export default function App() {
       <div className="hex-bg" />
       <nav>
         <div className="nav-logo-wrap">
-          <img src={logoImg} alt="Solpay Logo" className="nav-logo" />
+          <img src={logoImg} alt="Fiatwallet Logo" className="nav-logo" />
         </div>
 
         <div className="nav-actions">
