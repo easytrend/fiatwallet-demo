@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { TOKENS, KNOWN_MINTS, TOKEN_PROGRAM } from './data/tokens';
+import { PublicKey } from '@solana/web3.js';
+import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
 import { useLiveRates } from './hooks/useLiveRates';
-import { fmtTok, fmtFiat, fmtRate, rpcFetch } from './utils';
+import { fmtTok, fmtFiat, fmtRate } from './utils';
 import CurrDrop from './components/CurrDrop';
 import AmountInput from './components/AmountInput';
 import BulkSendPanel from './components/BulkSendPanel';
@@ -13,8 +14,12 @@ import TokenModal from './components/TokenModal';
 const SNS_LINK = 'https://www.sns.id?easytrend.sol';
 
 export default function App() {
+  const { connection } = useConnection();
   const { publicKey, connected, disconnect } = useWallet();
   const { setVisible } = useWalletModal();
+
+  // SPL Token Program ID
+  const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
   const [bulkMode, setBulkMode] = useState(false);
   const [solBalance, setSolBalance] = useState(null);
@@ -43,21 +48,26 @@ export default function App() {
 
   const liveSolPrice = liveRates.crypto['SOL'] || 148.5;
 
+  // Build wallet token list — SOL + real SPL tokens from chain
   const walletTokenList = useMemo(() => {
     if (!connected) return null;
-    const solEntry = { symbol:'SOL', name:'Solana', color:'#9945FF', bg:'#2d1a4e', price: liveSolPrice, balance: solBalance };
+    const solEntry = {
+      symbol: 'SOL', name: 'Solana', color: '#9945FF', bg: '#2d1a4e',
+      price: liveSolPrice, balance: solBalance
+    };
     const splEntries = splTokens.map(t => {
-      const meta = TOKENS.find(x => x.symbol === t.symbol) || { color:'#aaa', bg:'rgba(255,255,255,0.08)' };
+      const meta = TOKENS.find(x => x.symbol === t.symbol) || { color: '#aaa', bg: 'rgba(255,255,255,0.08)' };
       return { ...meta, ...t, price: liveRates.crypto[t.symbol] || t.price || meta.price || 0 };
     });
     return [solEntry, ...splEntries];
   }, [connected, solBalance, splTokens, liveRates]);
 
-  const selectableTokens = useMemo(() => TOKENS.map(t => {
-    const wt = walletTokenList && walletTokenList.find(w => w.symbol === t.symbol);
-    const livePrice = getLiveTokPrice(t.symbol) || t.price || 0;
-    return wt ? { ...t, price: livePrice, balance: wt.balance } : { ...t, price: livePrice };
-  }), [walletTokenList, liveRates]);
+  // When connected → show ONLY real wallet tokens
+  // When not connected → show full static list so user can browse
+  const selectableTokens = useMemo(() => {
+    if (connected && walletTokenList) return walletTokenList;
+    return TOKENS.map(t => ({ ...t, price: getLiveTokPrice(t.symbol) || t.price || 0 }));
+  }, [connected, walletTokenList, liveRates]);
 
   const tok = (walletTokenList && walletTokenList.find(t => t.symbol === token))
     || TOKENS.find(t => t.symbol === token) || TOKENS[1];
@@ -69,34 +79,59 @@ export default function App() {
   const dispTok = fmtTok(tokAmt);
   const tokLive = { ...tok, price: tokPrice };
 
-  async function fetchBalances(pubkey) {
-    setWalletLoading(true); setWalletError(null);
+  // Fetch real on-chain balances using the wallet-adapter connection object
+  const fetchBalances = useCallback(async () => {
+    if (!publicKey || !connected) return;
+    setWalletLoading(true);
+    setWalletError(null);
     try {
-      const balRes = await rpcFetch('getBalance', [pubkey, { commitment:'confirmed' }]);
-      setSolBalance(balRes.value / 1e9);
-      const tokRes = await rpcFetch('getTokenAccountsByOwner', [
-        pubkey, { programId: TOKEN_PROGRAM }, { encoding:'jsonParsed', commitment:'confirmed' }
-      ]);
-      const toks = (tokRes.value || []).map(a => {
-        const info = a.account.data.parsed.info;
-        const mint = info.mint;
-        const uiAmount = info.tokenAmount.uiAmount || 0;
-        const meta = KNOWN_MINTS[mint] || {};
-        return { mint, uiAmount, symbol: meta.symbol, name: meta.name, price: meta.price };
-      }).filter(t => t.uiAmount > 0).sort((a,b) => (b.uiAmount*(b.price||0)) - (a.uiAmount*(a.price||0)));
-      setSplTokens(toks);
-    } catch(e) { setWalletError(e.message || 'RPC error'); }
-    setWalletLoading(false);
-  }
+      // SOL balance
+      const lamports = await connection.getBalance(publicKey, 'confirmed');
+      setSolBalance(lamports / 1e9);
 
-  // Auto-fetch balances when wallet connects
-  useMemo(() => {
-    if (connected && walletPubkey) fetchBalances(walletPubkey);
-  }, [connected, walletPubkey]);
+      // All SPL token accounts owned by this wallet
+      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        publicKey,
+        { programId: TOKEN_PROGRAM_ID }
+      );
+
+      const toks = tokenAccounts.value
+        .map(account => {
+          const info = account.account.data.parsed.info;
+          const mint = info.mint;
+          const uiAmount = info.tokenAmount.uiAmount || 0;
+          const meta = KNOWN_MINTS[mint] || {};
+          return {
+            mint,
+            uiAmount,
+            // Use known metadata if available, otherwise show truncated mint
+            symbol: meta.symbol || mint.slice(0, 4) + '…',
+            name:   meta.name   || 'Unknown (' + mint.slice(0, 8) + '…)',
+            price:  meta.price  || 0,
+            color:  meta.color  || '#aaa',
+            bg:     meta.bg     || 'rgba(255,255,255,0.08)',
+          };
+        })
+        .filter(t => t.uiAmount > 0)
+        .sort((a, b) => (b.uiAmount * (b.price || 0)) - (a.uiAmount * (a.price || 0)));
+
+      setSplTokens(toks);
+    } catch (e) {
+      setWalletError(e.message || 'Failed to fetch balances');
+      console.error('fetchBalances error:', e);
+    }
+    setWalletLoading(false);
+  }, [connection, publicKey, connected, TOKEN_PROGRAM_ID]);
+
+  // Auto-fetch when wallet connects or changes
+  useEffect(() => {
+    if (connected && publicKey) fetchBalances();
+    else { setSolBalance(null); setSplTokens([]); setWalletError(null); }
+  }, [connected, publicKey?.toString()]);
 
   function handleDisconnect() {
     disconnect();
-    setSolBalance(null); setSplTokens([]); setWalletError(null);
+    // state cleanup handled by useEffect watching [connected]
   }
 
   return (
@@ -234,6 +269,7 @@ export default function App() {
           solBalance={solBalance}
           onSelect={sym => { setToken(sym); setShowModal(false); }}
           onClose={() => setShowModal(false)}
+          onRefresh={fetchBalances}
         />
       )}
     </div>
