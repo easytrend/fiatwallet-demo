@@ -56,7 +56,31 @@ nav {
 }
 .live-dot { width:7px; height:7px; border-radius:50%; background:var(--green); animation:pulse 2s infinite; flex-shrink:0; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-.main { flex:1; display:flex; justify-content:center; padding:2.5rem 1rem 4rem; gap:2rem; flex-wrap:wrap; align-items:flex-start; }
+.main { 
+  flex:1; 
+  display:flex; 
+  justify-content:center; 
+  padding:2.5rem 1rem 4rem; 
+  gap:2rem; 
+  flex-wrap:wrap; 
+  align-items:flex-start; 
+}
+@media (min-width: 1100px) {
+  .main {
+    display: grid;
+    grid-template-columns: 290px 1fr 290px;
+    gap: 0;
+  }
+  .app-card {
+    grid-column: 2;
+    justify-self: center;
+  }
+  .info-cards {
+    grid-column: 3;
+    justify-self: end;
+    margin-top: 0;
+  }
+}
 .app-card {
   background:var(--card); border:1px solid var(--border); border-radius:22px;
   width:100%; max-width:420px; position:relative;
