@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import { getDomainKeySync, NameRegistryState, performReverseLookup, getFavoriteDomain } from '@bonfida/spl-name-service';
+import { getDomainKeySync, NameRegistryState, performReverseLookup, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
@@ -52,9 +52,12 @@ export default function App() {
         setResolveError(null);
         setResolvedAddress(null);
         try {
-          const { pubkey } = getDomainKeySync(recipient);
-          const registry = await NameRegistryState.retrieve(connection, pubkey);
-          setResolvedAddress(registry.registry.owner.toBase58());
+          // Promise.race to prevent infinite 429 retries
+          const address = await Promise.race([
+            resolve(connection, recipient),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 7000))
+          ]);
+          setResolvedAddress(address.toBase58());
         } catch (err) {
           setResolveError('Domain not found or invalid');
         }

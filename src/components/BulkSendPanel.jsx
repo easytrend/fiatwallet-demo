@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import { getDomainKeySync, NameRegistryState } from '@bonfida/spl-name-service';
+import { resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { CURRENCIES } from '../data/currencies';
 import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate } from '../utils';
@@ -49,9 +49,8 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         
         if (addressStr.endsWith('.sol')) {
           try {
-            const { pubkey } = getDomainKeySync(addressStr);
-            const registry = await NameRegistryState.retrieve(connection, pubkey);
-            addressStr = registry.registry.owner.toBase58();
+            const address = await resolve(connection, addressStr);
+            addressStr = address.toBase58();
           } catch (err) {
             throw new Error(`Failed to resolve domain: ${row.domain}`);
           }
