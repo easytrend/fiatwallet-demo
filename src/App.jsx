@@ -297,6 +297,10 @@ export default function App() {
       const finalRecipient = new PublicKey(resolvedAddress || recipient);
       const transaction = new Transaction();
 
+      const { ComputeBudgetProgram } = await import('@solana/web3.js');
+      const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 });
+      transaction.add(addPriorityFee);
+
       if (tokLive.symbol === 'SOL') {
         const lamports = Math.round(tokAmt * 1e9);
         transaction.add(

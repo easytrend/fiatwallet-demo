@@ -108,14 +108,19 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         decimals = mintInfo.value.data.parsed.info.decimals;
       }
 
-      // 3. Chunk instructions (max 10 per tx to be safe)
-      const chunkSize = 10;
+      // 3. Chunk instructions (5 per tx for max compatibility and stability)
+      const chunkSize = 5;
       const transactions = [];
-      const latestBlockhash = await connection.getLatestBlockhash();
+      const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+      
+      // Compute Budget instructions for better reliability
+      const { ComputeBudgetProgram } = await import('@solana/web3.js');
+      const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }); // Low priority fee for reliability
 
       for (let i = 0; i < resolvedRecipients.length; i += chunkSize) {
         const chunk = resolvedRecipients.slice(i, i + chunkSize);
         const tx = new Transaction();
+        tx.add(addPriorityFee); // Add priority fee to every batch
         tx.recentBlockhash = latestBlockhash.blockhash;
         tx.feePayer = publicKey;
 
