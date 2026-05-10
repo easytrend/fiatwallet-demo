@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import { getDomainKeySync, NameRegistryState, performReverseLookup, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
+import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
@@ -180,10 +180,10 @@ export default function App() {
   useEffect(() => {
     if (connected && publicKey) {
       fetchBalances();
-      getFavoriteDomain(connection, publicKey)
-        .then(fav => {
-          if (fav && fav.reverse) setWalletDomain(fav.reverse + '.sol');
-          else throw new Error("No favorite");
+      getPrimaryDomain(connection, publicKey)
+        .then(primary => {
+          if (primary && primary.reverse) setWalletDomain(primary.reverse + '.sol');
+          else throw new Error("No primary");
         })
         .catch(() => {
           performReverseLookup(connection, publicKey)
