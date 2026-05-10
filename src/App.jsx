@@ -134,30 +134,46 @@ export default function App() {
       const lamports = await connection.getBalance(publicKey, 'confirmed');
       setSolBalance(lamports / 1e9);
 
-      // Use a fast indexed RPC specifically for fetching all token accounts at once
-      const fastConn = new Connection('https://api.mainnet-beta.solana.com');
-      const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-      
-      const allTokensResp = await fastConn.getParsedTokenAccountsByOwner(
-        publicKey,
-        { programId: tokenProgramId }
-      ).catch(() => ({ value: [] }));
-      
-      const results = allTokensResp.value || [];
+      let results = [];
+      try {
+        // Try fast bulk fetch first on mainnet-beta (supports programId filtering)
+        const fastConn = new Connection('https://api.mainnet-beta.solana.com');
+        const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+        const resp = await fastConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId });
+        results = resp.value || [];
+      } catch (e) {
+        console.warn('Fast bulk fetch failed, falling back to mint-by-mint:', e);
+      }
+
       const toks = [];
       const mintMap = {};
-      
-      // Group balances by mint (in case of multiple ATAs for same mint)
-      results.forEach(account => {
-        const parsed = account.account.data.parsed.info;
-        const mint = parsed.mint;
-        const amt = parsed.tokenAmount.uiAmount || 0;
-        if (amt > 0) {
-          mintMap[mint] = (mintMap[mint] || 0) + amt;
-        }
-      });
 
-      // Filter against KNOWN_MINTS
+      if (results.length > 0) {
+        // Success with bulk fetch
+        results.forEach(account => {
+          const parsed = account.account.data.parsed.info;
+          const mint = parsed.mint;
+          const amt = parsed.tokenAmount.uiAmount || 0;
+          if (amt > 0) mintMap[mint] = (mintMap[mint] || 0) + amt;
+        });
+      } else {
+        // Fallback: fetch known mints individually on the primary connection (publicnode)
+        const mintKeys = Object.keys(KNOWN_MINTS);
+        const tokenPromises = mintKeys.map(mint => 
+          connection.getParsedTokenAccountsByOwner(publicKey, { mint: new PublicKey(mint) })
+            .catch(() => ({ value: [] }))
+        );
+        const fallbackResults = await Promise.all(tokenPromises);
+        fallbackResults.forEach((res, i) => {
+          if (!res.value || res.value.length === 0) return;
+          const mint = mintKeys[i];
+          let totalAmount = 0;
+          res.value.forEach(acc => { totalAmount += acc.account.data.parsed.info.tokenAmount.uiAmount || 0; });
+          if (totalAmount > 0) mintMap[mint] = totalAmount;
+        });
+      }
+
+      // Final mapping
       Object.keys(mintMap).forEach(mint => {
         if (KNOWN_MINTS[mint]) {
           const meta = KNOWN_MINTS[mint];

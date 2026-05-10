@@ -152,7 +152,7 @@ nav {
 .m-name { font-size:13px; font-weight:600; color:var(--text); }
 .m-full { font-size:11px; color:var(--text3); }
 .m-price { margin-left:auto; font-size:11px; color:var(--text2); font-family:var(--mono); }
-.info-panel { width:100%; max-width:290px; display:flex; flex-direction:column; gap:14px; padding-top:0.5rem; }
+.info-cards { width:100%; max-width:290px; display:flex; flex-direction:column; gap:14px; padding-top:0.5rem; }
 .info-card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:1.2rem; }
 .info-card h3 { font-size:12px; font-weight:700; color:var(--lime); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.06em; }
 .info-card p { font-size:13px; color:var(--text2); line-height:1.6; }
@@ -227,3 +227,24 @@ footer a { color:var(--lime); text-decoration:none; }
 .no-wallet-icon{font-size:36px;margin-bottom:14px}
 .no-wallet-title{font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px}
 .no-wallet-sub{font-size:13px;color:var(--text2)}
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+  nav { padding: 0.7rem 1rem; gap: 8px; }
+  .nav-logo { height: 24px; }
+  .btn-connect, .btn-connected, .btn-register { padding: 6px 10px; font-size: 11px; }
+  .main { padding: 1.5rem 0.75rem 3rem; gap: 1.5rem; }
+  .app-card { border-radius: 18px; }
+  .card-body { padding: 1.1rem; }
+  .card-title { font-size: 1.35rem; }
+  .field-label { font-size: 10px; }
+  .amount-num { font-size: 20px; }
+  .info-cards { max-width: 100%; order: 2; }
+  .app-card { order: 1; }
+  .modal-sheet { padding: 1.2rem 1.2rem 1.8rem; }
+}
+
+@media (max-width: 480px) {
+  nav { justify-content: space-between; }
+  .nav-addr { display: none; } /* Hide raw address on tiny screens to save space */
+  .btn-connect, .btn-connected { flex: 1; justify-content: center; }
+}
