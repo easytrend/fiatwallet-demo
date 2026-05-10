@@ -173,10 +173,29 @@ export default function App() {
         });
       }
 
-      // Final mapping
+      // 1. Fetch metadata from Jupiter for identified mints to get logos
+      const identifiedMints = Object.keys(mintMap).filter(m => KNOWN_MINTS[m]);
+      let jupMeta = {};
+      if (identifiedMints.length > 0) {
+        try {
+          const metaPromises = identifiedMints.map(m => 
+            fetch(`https://tokens.jup.ag/token/${m}`).then(r => r.json()).catch(() => null)
+          );
+          const metaResults = await Promise.all(metaPromises);
+          metaResults.forEach((m, idx) => {
+            if (m) jupMeta[identifiedMints[idx]] = m;
+          });
+        } catch (e) {
+          console.warn('Jupiter Metadata fetch failed:', e);
+        }
+      }
+
+      // 2. Final mapping with logos
+      const toks = [];
       Object.keys(mintMap).forEach(mint => {
         if (KNOWN_MINTS[mint]) {
           const meta = KNOWN_MINTS[mint];
+          const dynamic = jupMeta[mint] || {};
           toks.push({
             mint,
             uiAmount: mintMap[mint],
@@ -185,6 +204,7 @@ export default function App() {
             price: meta.price || 0,
             color: meta.color || '#aaa',
             bg: meta.bg || 'rgba(255,255,255,0.08)',
+            logoURI: dynamic.logoURI
           });
         }
       });
@@ -436,7 +456,11 @@ export default function App() {
                 {tokLive ? (
                   <>
                     <div className="tok-left">
-                      <div className="tok-icon" style={{background:tokLive.bg,color:tokLive.color}}>{tokLive.symbol.slice(0,4)}</div>
+                      {tokLive.logoURI ? (
+                        <img src={tokLive.logoURI} alt={tokLive.symbol} className="tok-icon" style={{width:32, height:32, borderRadius:'50%'}} />
+                      ) : (
+                        <div className="tok-icon" style={{background:tokLive.bg,color:tokLive.color}}>{tokLive.symbol.slice(0,4)}</div>
+                      )}
                       <div>
                         <span className="tok-sym">{tokLive.symbol}</span>
                         <span style={{fontSize:11,color:'var(--text3)',marginLeft:6}}>${tokLive.price < 0.01 ? tokLive.price.toFixed(6) : tokLive.price.toLocaleString()}</span>
