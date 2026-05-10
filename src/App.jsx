@@ -35,6 +35,8 @@ export default function App() {
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState(null);
   const [sending, setSending] = useState(false);
+  const [sendSuccess, setSendSuccess] = useState(null);
+  const [sendSuccessSig, setSendSuccessSig] = useState(null);
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [inputMode, setInputMode] = useState('fiat');
@@ -206,6 +208,8 @@ export default function App() {
 
   async function handleSend() {
     if (!publicKey || !connection || !num) return;
+    setSendSuccess(null);
+    setSendSuccessSig(null);
     
     setSending(true);
     setWalletError(null);
@@ -262,20 +266,53 @@ export default function App() {
 
       const signature = await sendTransaction(transaction, connection);
       console.log('Transaction sent:', signature);
-      
-      await connection.confirmTransaction({
-        signature,
-        blockhash: latestBlockhash.blockhash,
-        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
-      }, 'confirmed');
-      
-      alert(`Successfully sent ${dispTok} ${tokLive.symbol}!`);
-      
-      fetchBalances();
-      setAmount('');
-      setRecipient('');
-      setResolvedAddress(null);
-      
+
+      // Poll for confirmation instead of relying on the WS subscription
+      // This prevents false "failed" messages when the RPC drops the WS but
+      // the transaction is already finalized on-chain.
+      let confirmed = false;
+      const deadline = Date.now() + 60_000; // 60 second timeout
+      while (Date.now() < deadline) {
+        try {
+          const status = await connection.getSignatureStatus(signature);
+          const conf = status?.value?.confirmationStatus;
+          if (conf === 'confirmed' || conf === 'finalized') {
+            confirmed = true;
+            break;
+          }
+          // If the transaction errored on-chain, throw immediately
+          if (status?.value?.err) {
+            throw new Error('Transaction rejected by network: ' + JSON.stringify(status.value.err));
+          }
+        } catch (pollErr) {
+          if (pollErr.message.startsWith('Transaction rejected')) throw pollErr;
+          // RPC blip — keep polling
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      if (!confirmed) {
+        // Last resort — check once more; if it's there, treat as success
+        const finalStatus = await connection.getSignatureStatus(signature);
+        const finalConf = finalStatus?.value?.confirmationStatus;
+        if (finalConf === 'confirmed' || finalConf === 'finalized') {
+          confirmed = true;
+        }
+      }
+
+      if (confirmed) {
+        setWalletError(null);
+        setSendSuccess(`✓ Sent ${dispTok} ${tokLive.symbol}! View on Solscan`);
+        setSendSuccessSig(signature);
+        fetchBalances();
+        setAmount('');
+        setRecipient('');
+        setResolvedAddress(null);
+      } else {
+        // Transaction is pending — it may still confirm; show a neutral message
+        setWalletError(`Transaction submitted but confirmation timed out. Check Solscan for signature: ${signature.slice(0,8)}…`);
+      }
+
     } catch (err) {
       console.error('Send failed:', err);
       setWalletError(err.message || 'Transaction failed');
@@ -388,6 +425,17 @@ export default function App() {
                     currency={currency} setCurrency={setCurrency} tok={tokLive} currRate={currRate} />
                 </div>
                 {walletError && <div style={{fontSize:12, color:'#f87171', marginBottom:12, padding:'8px 12px', background:'rgba(248,113,113,0.1)', borderRadius:8}}>{walletError}</div>}
+                {sendSuccess && (
+                  <div style={{fontSize:12, color:'var(--green)', marginBottom:12, padding:'8px 12px', background:'rgba(74,222,128,0.08)', border:'1px solid rgba(74,222,128,0.2)', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap'}}>
+                    <span>{sendSuccess}</span>
+                    {sendSuccessSig && (
+                      <a href={`https://solscan.io/tx/${sendSuccessSig}`} target="_blank" rel="noopener noreferrer"
+                        style={{fontSize:11,color:'var(--lime)',fontFamily:'var(--mono)',textDecoration:'none',flexShrink:0}}>
+                        {sendSuccessSig.slice(0,8)}… ↗
+                      </a>
+                    )}
+                  </div>
+                )}
                 <button className="send-btn" disabled={!connected || !tokLive || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress) || sending} onClick={handleSend}>
                   {sending ? 'Sending…' : !connected ? 'Connect wallet to send' : !tokLive ? 'Select a token to continue' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
                 </button>
