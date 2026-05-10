@@ -10,7 +10,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
   const [rows, setRows] = useState([]);
   const [drag, setDrag] = useState(false);
   const [globalAmt, setGlobalAmt] = useState('');
-  const [bulkCurr, setBulkCurr] = useState('NGN');
+  const [bulkCurr, setBulkCurr] = useState('USD');
   const [bulkMode, setBulkMode] = useState('fiat');
   const fileRef = useRef(null);
 
