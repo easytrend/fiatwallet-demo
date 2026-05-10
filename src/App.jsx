@@ -145,7 +145,7 @@ export default function App() {
         console.warn('Fast bulk fetch failed, falling back to mint-by-mint:', e);
       }
 
-      const toks = [];
+
       const mintMap = {};
 
       if (results.length > 0) {
