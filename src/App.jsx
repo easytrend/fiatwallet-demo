@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { PublicKey } from '@solana/web3.js';
-import { getDomainKeySync, NameRegistryState } from '@solana/spl-name-service';
+import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
+import { getDomainKeySync, NameRegistryState } from '@bonfida/spl-name-service';
+import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
 import { useLiveRates } from './hooks/useLiveRates';
@@ -16,7 +17,7 @@ const SNS_LINK = 'https://www.sns.id?easytrend.sol';
 
 export default function App() {
   const { connection } = useConnection();
-  const { publicKey, connected, disconnect } = useWallet();
+  const { publicKey, connected, disconnect, sendTransaction } = useWallet();
   const { setVisible } = useWalletModal();
 
   // SPL Token Program ID
@@ -31,6 +32,7 @@ export default function App() {
   const [resolvedAddress, setResolvedAddress] = useState(null);
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState(null);
+  const [sending, setSending] = useState(false);
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [inputMode, setInputMode] = useState('fiat');
@@ -166,6 +168,82 @@ export default function App() {
     // state cleanup handled by useEffect watching [connected]
   }
 
+  async function handleSend() {
+    if (!publicKey || !connection || !num) return;
+    
+    setSending(true);
+    setWalletError(null);
+    try {
+      const finalRecipient = new PublicKey(resolvedAddress || recipient);
+      const transaction = new Transaction();
+
+      if (tokLive.symbol === 'SOL') {
+        const lamports = Math.round(tokAmt * 1e9);
+        transaction.add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: finalRecipient,
+            lamports
+          })
+        );
+      } else {
+        const mintPubkey = new PublicKey(tokLive.mint);
+        
+        // Fetch decimals from on-chain mint info
+        const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
+        if (!mintInfo.value) throw new Error("Invalid token mint");
+        const decimals = mintInfo.value.data.parsed.info.decimals;
+        
+        const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
+
+        const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey);
+        const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient);
+
+        transaction.add(
+          createAssociatedTokenAccountIdempotentInstruction(
+            publicKey, // payer
+            receiverATA, // ata
+            finalRecipient, // owner
+            mintPubkey // mint
+          )
+        );
+
+        transaction.add(
+          createTransferCheckedInstruction(
+            senderATA, // source
+            mintPubkey, // mint
+            receiverATA, // destination
+            publicKey, // owner of source
+            amountUnits, // amount
+            decimals // decimals
+          )
+        );
+      }
+
+      const signature = await sendTransaction(transaction, connection);
+      console.log('Transaction sent:', signature);
+      
+      const latestBlockhash = await connection.getLatestBlockhash();
+      await connection.confirmTransaction({
+        signature,
+        blockhash: latestBlockhash.blockhash,
+        lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+      }, 'confirmed');
+      
+      alert(`Successfully sent ${dispTok} ${tokLive.symbol}!`);
+      
+      fetchBalances();
+      setAmount('');
+      setRecipient('');
+      setResolvedAddress(null);
+      
+    } catch (err) {
+      console.error('Send failed:', err);
+      setWalletError(err.message || 'Transaction failed');
+    }
+    setSending(false);
+  }
+
   return (
     <div className="page">
       <div className="hex-bg" />
@@ -247,8 +325,9 @@ export default function App() {
                   <AmountInput amount={amount} setAmount={setAmount} inputMode={inputMode} setInputMode={setInputMode}
                     currency={currency} setCurrency={setCurrency} tok={tokLive} currRate={currRate} />
                 </div>
-                <button className="send-btn" disabled={!connected || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress)}>
-                  {!connected ? 'Connect wallet to send' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
+                {walletError && <div style={{fontSize:12, color:'#f87171', marginBottom:12, padding:'8px 12px', background:'rgba(248,113,113,0.1)', borderRadius:8}}>{walletError}</div>}
+                <button className="send-btn" disabled={!connected || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress) || sending} onClick={handleSend}>
+                  {sending ? 'Sending…' : !connected ? 'Connect wallet to send' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
                 </button>
               </>
             )}
