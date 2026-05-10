@@ -123,31 +123,43 @@ export default function App() {
       const lamports = await connection.getBalance(publicKey, 'confirmed');
       setSolBalance(lamports / 1e9);
 
-      // All SPL token accounts owned by this wallet
-      const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-        publicKey,
-        { programId: TOKEN_PROGRAM_ID }
+      // We must fetch by mint because publicnode RPC blocks querying by programId
+      const mintKeys = Object.keys(KNOWN_MINTS);
+      const tokenPromises = mintKeys.map(mint => 
+        connection.getParsedTokenAccountsByOwner(
+          publicKey,
+          { mint: new PublicKey(mint) }
+        ).catch(() => ({ value: [] })) // Handle individual failures gracefully
       );
-
-      const toks = tokenAccounts.value
-        .map(account => {
-          const info = account.account.data.parsed.info;
-          const mint = info.mint;
-          const uiAmount = info.tokenAmount.uiAmount || 0;
-          const meta = KNOWN_MINTS[mint] || {};
-          return {
+      
+      const results = await Promise.all(tokenPromises);
+      const toks = [];
+      
+      results.forEach((res, i) => {
+        if (!res.value || res.value.length === 0) return;
+        const mint = mintKeys[i];
+        let totalAmount = 0;
+        
+        // A user might have multiple token accounts for the same mint
+        res.value.forEach(account => {
+          totalAmount += account.account.data.parsed.info.tokenAmount.uiAmount || 0;
+        });
+        
+        if (totalAmount > 0) {
+          const meta = KNOWN_MINTS[mint];
+          toks.push({
             mint,
-            uiAmount,
-            // Use known metadata if available, otherwise show truncated mint
-            symbol: meta.symbol || mint.slice(0, 4) + '…',
-            name:   meta.name   || 'Unknown (' + mint.slice(0, 8) + '…)',
-            price:  meta.price  || 0,
-            color:  meta.color  || '#aaa',
-            bg:     meta.bg     || 'rgba(255,255,255,0.08)',
-          };
-        })
-        .filter(t => t.uiAmount > 0)
-        .sort((a, b) => (b.uiAmount * (b.price || 0)) - (a.uiAmount * (a.price || 0)));
+            uiAmount: totalAmount,
+            symbol: meta.symbol,
+            name: meta.name,
+            price: meta.price || 0,
+            color: meta.color || '#aaa',
+            bg: meta.bg || 'rgba(255,255,255,0.08)',
+          });
+        }
+      });
+      
+      toks.sort((a, b) => (b.uiAmount * (b.price || 0)) - (a.uiAmount * (a.price || 0)));
 
       setSplTokens(toks);
     } catch (e) {
