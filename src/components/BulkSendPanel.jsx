@@ -32,9 +32,29 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
   const handleDrop = e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); };
   const handleFile = e => { if (e.target.files[0]) processFile(e.target.files[0]); e.target.value = ''; };
   const removeRow = id => setRows(r => r.filter(x => x.id !== id));
-  const addManual = () => setRows(r => [...r, {id:Date.now()+Math.random(),domain:'',amount:'',valid:false}]);
-  const updateRow = (id,field,val) => setRows(r => r.map(x => x.id===id ? {...x,[field]:val,valid:field==='domain'?val.length>2:x.valid} : x));
+  const addManual = () => setRows(r => [...r, {id:Date.now()+Math.random(),domain:'',amount:'',valid:false,resolved:null}]);
+  const updateRow = (id,field,val) => setRows(r => r.map(x => x.id===id ? {...x,[field]:val,valid:field==='domain'?(val.length>30||val.includes('.')):x.valid,resolved:field==='domain'?null:x.resolved} : x));
   const applyGlobal = () => { if (globalAmt) setRows(r => r.map(x => ({...x, amount:globalAmt}))); };
+
+  // Inline resolution for responsive feedback
+  const [resolvingIds, setResolvingIds] = useState(new Set());
+  useState(() => {
+    const timer = setTimeout(async () => {
+      const target = rows.find(r => r.domain.endsWith('.sol') && !r.resolved && !resolvingIds.has(r.id));
+      if (!target) return;
+
+      setResolvingIds(prev => new Set(prev).add(target.id));
+      try {
+        const addr = await resolve(connection, target.domain);
+        setRows(curr => curr.map(r => r.id === target.id ? { ...r, resolved: addr.toBase58(), valid: true } : r));
+      } catch (e) {
+        setRows(curr => curr.map(r => r.id === target.id ? { ...r, valid: false } : r));
+      } finally {
+        setResolvingIds(prev => { const n = new Set(prev); n.delete(target.id); return n; });
+      }
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [rows]);
 
   // Poll signature status instead of relying on WS confirmTransaction
   async function pollConfirmation(connection, signature, timeoutMs = 60000) {
@@ -292,13 +312,15 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
                 <div className="rt-domain">
                   <input style={{background:'transparent',border:'none',outline:'none',color:'var(--text)',fontFamily:'var(--mono)',fontSize:11,width:'100%'}}
                     value={row.domain} placeholder="wallet or .sol" onChange={e => updateRow(row.id,'domain',e.target.value)} />
+                  {row.resolved && <div style={{fontSize:9,color:'var(--text3)',marginTop:2,overflow:'hidden',textOverflow:'ellipsis'}}>{row.resolved.slice(0,12)}…</div>}
                 </div>
                 <div className="rt-amount">
                   <input style={{background:'transparent',border:'none',outline:'none',color:'var(--text2)',fontFamily:'var(--mono)',fontSize:11,width:'90%'}}
                     value={row.amount} placeholder="0" type="number" onChange={e => updateRow(row.id,'amount',e.target.value)} />
                 </div>
                 <div className={`rt-status ${row.valid&&row.amount?'s-ok':'s-err'}`}>
-                  <span className="s-dot" />{row.valid&&row.amount?'Ready':!row.valid?'Invalid':'No amt'}
+                  <span className="s-dot" />
+                  <span className="s-txt">{row.valid&&row.amount?'OK':!row.valid?'Err':'Amt'}</span>
                 </div>
                 <button className="rt-del" onClick={() => removeRow(row.id)}>✕</button>
               </div>

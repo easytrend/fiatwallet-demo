@@ -202,16 +202,17 @@ footer a { color:var(--lime); text-decoration:none; }
 .clear-btn { background:none; border:none; font-size:11px; color:rgba(248,113,113,0.7); cursor:pointer; font-family:var(--ff); font-weight:600; }
 .clear-btn:hover { color:var(--red); }
 .recip-table { border:1px solid var(--border); border-radius:11px; overflow:hidden; margin-bottom:1rem; max-height:210px; overflow-y:auto; }
-.rt-head { display:grid; grid-template-columns:2fr 1.4fr 1fr 26px; padding:7px 12px; background:rgba(255,255,255,0.05); border-bottom:1px solid var(--border); font-size:10px; font-weight:600; color:var(--text3); text-transform:uppercase; letter-spacing:0.05em; }
-.rt-row { display:grid; grid-template-columns:2fr 1.4fr 1fr 26px; padding:7px 12px; border-bottom:1px solid rgba(255,255,255,0.04); align-items:center; }
+.rt-head { display:grid; grid-template-columns:1.8fr 1.2fr 0.8fr 26px; padding:7px 12px; background:rgba(255,255,255,0.05); border-bottom:1px solid var(--border); font-size:9px; font-weight:600; color:var(--text3); text-transform:uppercase; letter-spacing:0.05em; }
+.rt-row { display:grid; grid-template-columns:1.8fr 1.2fr 0.8fr 26px; padding:7px 12px; border-bottom:1px solid rgba(255,255,255,0.04); align-items:center; }
 .rt-row:last-child { border-bottom:none; }
 .rt-row:hover { background:rgba(255,255,255,0.025); }
-.rt-domain { font-size:12px; color:var(--text); font-family:var(--mono); }
-.rt-amount { font-size:12px; color:var(--text2); font-family:var(--mono); }
-.rt-status { display:flex; align-items:center; gap:4px; font-size:10px; font-weight:600; }
+.rt-domain { font-size:11px; color:var(--text); font-family:var(--mono); overflow:hidden; }
+.rt-amount { font-size:11px; color:var(--text2); font-family:var(--mono); }
+.rt-status { display:flex; align-items:center; gap:3px; font-size:9px; font-weight:700; }
 .s-ok { color:var(--green); }
 .s-err { color:var(--red); }
-.s-dot { width:5px; height:5px; border-radius:50%; background:currentColor; }
+.s-dot { width:5px; height:5px; border-radius:50%; background:currentColor; flex-shrink:0; }
+.s-txt { white-space:nowrap; }
 .rt-del { background:none; border:none; color:var(--text3); cursor:pointer; font-size:12px; padding:2px; }
 .rt-del:hover { color:var(--red); }
 .bulk-sum { background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:11px; padding:10px 14px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:1rem; }
