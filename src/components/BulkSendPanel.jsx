@@ -128,8 +128,8 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         decimals = mintInfo.value.data.parsed.info.decimals;
       }
 
-      // 3. Chunk instructions (5 per tx for max compatibility and stability)
-      const chunkSize = 5;
+      // 3. Chunk instructions (10 per tx for speed, compatible with most wallets)
+      const chunkSize = 10;
       const transactions = [];
       const latestBlockhash = await connection.getLatestBlockhash('confirmed');
       
