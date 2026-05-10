@@ -13,6 +13,7 @@ import CurrDrop from './components/CurrDrop';
 import AmountInput from './components/AmountInput';
 import BulkSendPanel from './components/BulkSendPanel';
 import TokenModal from './components/TokenModal';
+import Toast from './components/Toast';
 
 const SNS_LINK = 'https://www.sns.id?easytrend.sol';
 
@@ -35,8 +36,7 @@ export default function App() {
   const [resolving, setResolving] = useState(false);
   const [resolveError, setResolveError] = useState(null);
   const [sending, setSending] = useState(false);
-  const [sendSuccess, setSendSuccess] = useState(null);
-  const [sendSuccessSig, setSendSuccessSig] = useState(null);
+  const [toast, setToast] = useState(null); // { type, title, message, link }
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [inputMode, setInputMode] = useState('fiat');
@@ -208,8 +208,7 @@ export default function App() {
 
   async function handleSend() {
     if (!publicKey || !connection || !num) return;
-    setSendSuccess(null);
-    setSendSuccessSig(null);
+    setToast(null);
     
     setSending(true);
     setWalletError(null);
@@ -302,15 +301,18 @@ export default function App() {
 
       if (confirmed) {
         setWalletError(null);
-        setSendSuccess(`✓ Sent ${dispTok} ${tokLive.symbol}! View on Solscan`);
-        setSendSuccessSig(signature);
+        setToast({
+          type: 'success',
+          title: `✓ Sent ${dispTok} ${tokLive.symbol}`,
+          message: `Transaction confirmed on Solana.`,
+          link: { href: `https://solscan.io/tx/${signature}`, label: `${signature.slice(0,8)}… View on Solscan` }
+        });
         fetchBalances();
         setAmount('');
         setRecipient('');
         setResolvedAddress(null);
       } else {
-        // Transaction is pending — it may still confirm; show a neutral message
-        setWalletError(`Transaction submitted but confirmation timed out. Check Solscan for signature: ${signature.slice(0,8)}…`);
+        setWalletError(`Transaction submitted but confirmation timed out. Check Solscan: ${signature.slice(0,8)}…`);
       }
 
     } catch (err) {
@@ -425,17 +427,6 @@ export default function App() {
                     currency={currency} setCurrency={setCurrency} tok={tokLive} currRate={currRate} />
                 </div>
                 {walletError && <div style={{fontSize:12, color:'#f87171', marginBottom:12, padding:'8px 12px', background:'rgba(248,113,113,0.1)', borderRadius:8}}>{walletError}</div>}
-                {sendSuccess && (
-                  <div style={{fontSize:12, color:'var(--green)', marginBottom:12, padding:'8px 12px', background:'rgba(74,222,128,0.08)', border:'1px solid rgba(74,222,128,0.2)', borderRadius:8, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8, flexWrap:'wrap'}}>
-                    <span>{sendSuccess}</span>
-                    {sendSuccessSig && (
-                      <a href={`https://solscan.io/tx/${sendSuccessSig}`} target="_blank" rel="noopener noreferrer"
-                        style={{fontSize:11,color:'var(--lime)',fontFamily:'var(--mono)',textDecoration:'none',flexShrink:0}}>
-                        {sendSuccessSig.slice(0,8)}… ↗
-                      </a>
-                    )}
-                  </div>
-                )}
                 <button className="send-btn" disabled={!connected || !tokLive || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress) || sending} onClick={handleSend}>
                   {sending ? 'Sending…' : !connected ? 'Connect wallet to send' : !tokLive ? 'Select a token to continue' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
                 </button>
@@ -480,6 +471,16 @@ export default function App() {
           onSelect={sym => { setToken(sym); setShowModal(false); }}
           onClose={() => setShowModal(false)}
           onRefresh={fetchBalances}
+        />
+      )}
+      {toast && (
+        <Toast
+          type={toast.type}
+          title={toast.title}
+          message={toast.message}
+          link={toast.link}
+          onClose={() => setToast(null)}
+          duration={5000}
         />
       )}
     </div>

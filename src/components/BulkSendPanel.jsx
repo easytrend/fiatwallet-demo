@@ -5,6 +5,7 @@ import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentIn
 import { CURRENCIES } from '../data/currencies';
 import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate } from '../utils';
 import CurrDrop from './CurrDrop';
+import Toast from './Toast';
 
 export default function BulkSendPanel({ tok, connected, getLiveRate, connection, publicKey, sendTransaction, signAllTransactions }) {
   const [rows, setRows] = useState([]);
@@ -12,6 +13,10 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
   const [globalAmt, setGlobalAmt] = useState('');
   const [bulkCurr, setBulkCurr] = useState('USD');
   const [bulkMode, setBulkMode] = useState('fiat');
+  const [sendingState, setSendingState] = useState(null); // null | 'resolving' | 'signing' | 'sending' | 'done' | 'error'
+  const [errorMsg, setErrorMsg] = useState('');
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [toast, setToast] = useState(null);
   const fileRef = useRef(null);
 
   const staticCurr = CURRENCIES.find(c => c.code === bulkCurr) || CURRENCIES[0];
@@ -31,57 +36,75 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
   const updateRow = (id,field,val) => setRows(r => r.map(x => x.id===id ? {...x,[field]:val,valid:field==='domain'?val.length>2:x.valid} : x));
   const applyGlobal = () => { if (globalAmt) setRows(r => r.map(x => ({...x, amount:globalAmt}))); };
 
-  const [sendingState, setSendingState] = useState(null); // null | 'resolving' | 'signing' | 'sending' | 'done' | 'error'
-  const [errorMsg, setErrorMsg] = useState('');
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  // Poll signature status instead of relying on WS confirmTransaction
+  async function pollConfirmation(connection, signature, timeoutMs = 60000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        const status = await connection.getSignatureStatus(signature);
+        const conf = status?.value?.confirmationStatus;
+        if (conf === 'confirmed' || conf === 'finalized') return true;
+        if (status?.value?.err) throw new Error('Transaction rejected: ' + JSON.stringify(status.value.err));
+      } catch (pollErr) {
+        if (pollErr.message.startsWith('Transaction rejected')) throw pollErr;
+        // RPC blip — keep polling
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    // Final check
+    const finalStatus = await connection.getSignatureStatus(signature);
+    const finalConf = finalStatus?.value?.confirmationStatus;
+    return finalConf === 'confirmed' || finalConf === 'finalized';
+  }
 
   const handleBulkSend = async () => {
     if (!connected || !publicKey || validRows.length === 0) return;
     setSendingState('resolving');
     setErrorMsg('');
-    
+    setToast(null);
+
     try {
       // 1. Resolve all domains and validate recipients
       const resolvedRecipients = [];
       for (let i = 0; i < validRows.length; i++) {
         const row = validRows[i];
         let addressStr = row.domain;
-        
+
         if (addressStr.endsWith('.sol')) {
           try {
-            const address = await resolve(connection, addressStr);
+            const address = await Promise.race([
+              resolve(connection, addressStr),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 7000))
+            ]);
             addressStr = address.toBase58();
           } catch (err) {
             throw new Error(`Failed to resolve domain: ${row.domain}`);
           }
         }
-        
+
         let recipientPubkey;
         try {
           recipientPubkey = new PublicKey(addressStr);
         } catch (err) {
           throw new Error(`Invalid address for ${row.domain}`);
         }
-        
+
         const num = parseFloat(row.amount);
         const tokPrice = tok ? tok.price : 1;
         const tokAmt = bulkMode === 'fiat' ? (num / liveRate) / tokPrice : num;
-        
-        resolvedRecipients.push({
-          pubkey: recipientPubkey,
-          tokAmt
-        });
+
+        resolvedRecipients.push({ pubkey: recipientPubkey, tokAmt });
       }
 
       setSendingState('signing');
-      
+
       // 2. Fetch mint info if SPL token
       let decimals = 9;
       let mintPubkey = null;
       if (tok.symbol !== 'SOL') {
         mintPubkey = new PublicKey(tok.mint);
         const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
-        if (!mintInfo.value) throw new Error("Invalid token mint");
+        if (!mintInfo.value) throw new Error('Invalid token mint');
         decimals = mintInfo.value.data.parsed.info.decimals;
       }
 
@@ -89,7 +112,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       const chunkSize = 10;
       const transactions = [];
       const latestBlockhash = await connection.getLatestBlockhash();
-      
+
       for (let i = 0; i < resolvedRecipients.length; i += chunkSize) {
         const chunk = resolvedRecipients.slice(i, i + chunkSize);
         const tx = new Transaction();
@@ -99,73 +122,72 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         if (tok.symbol === 'SOL') {
           for (const rec of chunk) {
             const lamports = Math.round(rec.tokAmt * 1e9);
-            tx.add(SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: rec.pubkey,
-              lamports
-            }));
+            tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: rec.pubkey, lamports }));
           }
         } else {
           const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey);
           for (const rec of chunk) {
             const amountUnits = BigInt(Math.round(rec.tokAmt * Math.pow(10, decimals)));
             const receiverATA = getAssociatedTokenAddressSync(mintPubkey, rec.pubkey);
-            
-            tx.add(createAssociatedTokenAccountIdempotentInstruction(
-              publicKey, receiverATA, rec.pubkey, mintPubkey
-            ));
-            
-            tx.add(createTransferCheckedInstruction(
-              senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals
-            ));
+            tx.add(createAssociatedTokenAccountIdempotentInstruction(publicKey, receiverATA, rec.pubkey, mintPubkey));
+            tx.add(createTransferCheckedInstruction(senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals));
           }
         }
         transactions.push(tx);
       }
-      
-      // 4. Sign and send
+
+      // 4. Sign and send with polling confirmation
       setProgress({ current: 0, total: transactions.length });
-      
+      const signatures = [];
+
       if (transactions.length > 1 && signAllTransactions) {
         const signedTxs = await signAllTransactions(transactions);
         setSendingState('sending');
-        
+
         for (let i = 0; i < signedTxs.length; i++) {
-          const tx = signedTxs[i];
-          const rawTx = tx.serialize();
-          const signature = await connection.sendRawTransaction(rawTx);
-          await connection.confirmTransaction({
-            signature,
-            blockhash: latestBlockhash.blockhash,
-            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
-          }, 'confirmed');
+          const rawTx = signedTxs[i].serialize();
+          const sig = await connection.sendRawTransaction(rawTx);
+          signatures.push(sig);
+          const confirmed = await pollConfirmation(connection, sig);
+          if (!confirmed) throw new Error(`Batch ${i + 1} timed out — check Solscan for: ${sig.slice(0,8)}…`);
           setProgress(p => ({ ...p, current: i + 1 }));
         }
       } else {
         setSendingState('sending');
         for (let i = 0; i < transactions.length; i++) {
-          const tx = transactions[i];
-          const signature = await sendTransaction(tx, connection);
-          await connection.confirmTransaction({
-            signature,
-            blockhash: latestBlockhash.blockhash,
-            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
-          }, 'confirmed');
+          const sig = await sendTransaction(transactions[i], connection);
+          signatures.push(sig);
+          const confirmed = await pollConfirmation(connection, sig);
+          if (!confirmed) throw new Error(`Batch ${i + 1} timed out — check Solscan for: ${sig.slice(0,8)}…`);
           setProgress(p => ({ ...p, current: i + 1 }));
         }
       }
 
       setSendingState('done');
+
+      // Build Solscan link: single tx or first batch tx
+      const firstSig = signatures[0];
+      setToast({
+        type: 'success',
+        title: `✓ Sent to ${validRows.length} recipient${validRows.length !== 1 ? 's' : ''}`,
+        message: `${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} confirmed on Solana.`,
+        link: firstSig
+          ? { href: `https://solscan.io/tx/${firstSig}`, label: `${firstSig.slice(0,8)}… View on Solscan` }
+          : undefined,
+      });
+
       setTimeout(() => {
         setSendingState(null);
         setRows([]);
         setGlobalAmt('');
-      }, 3000);
+      }, 2000);
 
     } catch (err) {
       console.error(err);
-      setErrorMsg(err.message || "An error occurred");
+      const msg = err.message || 'An error occurred';
+      setErrorMsg(msg);
       setSendingState('error');
+      setToast({ type: 'error', title: 'Bulk send failed', message: msg });
     }
   };
 
@@ -283,20 +305,41 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
             <div className="sum-item"><div className="sum-val">${totalUSD.toFixed(2)}</div><div className="sum-lbl">Est. USD</div></div>
           </div>
           <button className="add-manual" onClick={addManual}>＋ Add recipient manually</button>
+
+          {/* Progress/status area */}
           {sendingState && (
             <div style={{marginTop:12, padding:'12px', background:'rgba(255,255,255,0.05)', borderRadius:8, fontSize:13}}>
               {sendingState === 'resolving' && <span style={{color:'var(--text2)'}}>🔍 Resolving domains...</span>}
-              {sendingState === 'signing' && <span style={{color:'var(--text2)'}}>✍️ Please sign the transaction(s) in your wallet...</span>}
-              {sendingState === 'sending' && <span style={{color:'var(--lime)'}}>🚀 Sending batch {progress.current + 1} of {progress.total}...</span>}
-              {sendingState === 'done' && <span style={{color:'var(--lime)'}}>✅ All {validRows.length} recipients successfully paid!</span>}
-              {sendingState === 'error' && <span style={{color:'#f87171'}}>✕ Error: {errorMsg}</span>}
+              {sendingState === 'signing'   && <span style={{color:'var(--text2)'}}>✍️ Please sign the transaction(s) in your wallet...</span>}
+              {sendingState === 'sending'   && <span style={{color:'var(--lime)'}}>🚀 Confirming batch {progress.current + 1} of {progress.total}...</span>}
+              {sendingState === 'done'      && <span style={{color:'var(--lime)'}}>✅ All {validRows.length} recipients paid!</span>}
+              {sendingState === 'error'     && <span style={{color:'#f87171'}}>✕ {errorMsg}</span>}
             </div>
           )}
         </>
       )}
-      <button className="send-btn" disabled={!connected || !tok || validRows.length === 0 || ['resolving','signing','sending'].includes(sendingState)} onClick={handleBulkSend}>
-        {!connected ? 'Connect wallet to send' : !tok ? 'Select a token to continue' : validRows.length === 0 ? 'Add recipients to continue' : ['resolving','signing','sending'].includes(sendingState) ? 'Processing...' : `Send ${tokSymbol} to ${validRows.length} recipient${validRows.length!==1?'s':''}`}
+
+      <button className="send-btn"
+        disabled={!connected || !tok || validRows.length === 0 || ['resolving','signing','sending'].includes(sendingState)}
+        onClick={handleBulkSend}>
+        {!connected ? 'Connect wallet to send'
+          : !tok ? 'Select a token to continue'
+          : validRows.length === 0 ? 'Add recipients to continue'
+          : ['resolving','signing','sending'].includes(sendingState) ? 'Processing...'
+          : `Send ${tokSymbol} to ${validRows.length} recipient${validRows.length!==1?'s':''}`}
       </button>
+
+      {/* Toast popup */}
+      {toast && (
+        <Toast
+          type={toast.type}
+          title={toast.title}
+          message={toast.message}
+          link={toast.link}
+          onClose={() => setToast(null)}
+          duration={5000}
+        />
+      )}
     </div>
   );
 }
