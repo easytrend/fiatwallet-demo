@@ -363,13 +363,15 @@ export default function App() {
           <img src={logoImg} alt="Solpay Logo" className="nav-logo" />
         </div>
 
-        {connected && walletPubkey && (
-          <span className="nav-addr" title={walletPubkey}>{walletDomain || (walletPubkey.slice(0,4) + '…' + walletPubkey.slice(-4))}</span>
-        )}
-        {connected
-          ? <button className="btn-connected" onClick={handleDisconnect}><span className="live-dot" />Disconnect ▾</button>
-          : <button className="btn-connect" onClick={() => setVisible(true)}>Connect Wallet</button>
-        }
+        <div className="nav-actions">
+          {connected && walletPubkey && (
+            <span className="nav-addr" title={walletPubkey}>{walletDomain || (walletPubkey.slice(0,4) + '…' + walletPubkey.slice(-4))}</span>
+          )}
+          {connected
+            ? <button className="btn-connected" onClick={handleDisconnect}><span className="live-dot" />Disconnect ▾</button>
+            : <button className="btn-connect" onClick={() => setVisible(true)}>Connect Wallet</button>
+          }
+        </div>
       </nav>
 
       <div className="main">

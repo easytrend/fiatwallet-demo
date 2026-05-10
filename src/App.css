@@ -21,11 +21,12 @@ body {
 }
 .page { position:relative; z-index:1; min-height:100vh; display:flex; flex-direction:column; }
 nav {
-  display:flex; align-items:center; justify-content:flex-end; gap:10px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
   padding:0.85rem 1.5rem; border-bottom:1px solid var(--border);
   background:rgba(10,22,40,0.75); backdrop-filter:blur(14px);
   position:sticky; top:0; z-index:50;
 }
+.nav-actions { display:flex; align-items:center; gap:8px; }
 .nav-logo-wrap {
   margin-right:auto; display:flex; align-items:center;
 }
@@ -229,22 +230,24 @@ footer a { color:var(--lime); text-decoration:none; }
 .no-wallet-sub{font-size:13px;color:var(--text2)}
 /* Mobile Responsiveness */
 @media (max-width: 768px) {
-  nav { padding: 0.7rem 1rem; gap: 8px; }
-  .nav-logo { height: 24px; }
-  .btn-connect, .btn-connected, .btn-register { padding: 6px 10px; font-size: 11px; }
-  .main { padding: 1.5rem 0.75rem 3rem; gap: 1.5rem; }
-  .app-card { border-radius: 18px; }
-  .card-body { padding: 1.1rem; }
-  .card-title { font-size: 1.35rem; }
+  nav { padding: 0.6rem 0.85rem; gap: 6px; }
+  .nav-logo { height: 22px; }
+  .nav-actions { gap: 6px; }
+  .nav-addr { font-size: 10px; padding: 4px 8px; max-width: 100px; }
+  .btn-connect, .btn-connected, .btn-register { padding: 5px 9px; font-size: 10px; }
+  .main { padding: 1rem 0.5rem 2.5rem; gap: 1rem; }
+  .app-card { border-radius: 16px; max-width: 100%; }
+  .card-body { padding: 1rem; }
+  .card-title { font-size: 1.25rem; }
   .field-label { font-size: 10px; }
-  .amount-num { font-size: 20px; }
-  .info-cards { max-width: 100%; order: 2; }
+  .amount-num { font-size: 19px; }
+  .info-cards { max-width: 100%; order: 2; margin-top: 0.5rem; }
   .app-card { order: 1; }
-  .modal-sheet { padding: 1.2rem 1.2rem 1.8rem; }
+  .modal-sheet { padding: 1rem 1rem 1.5rem; border-radius: 16px 16px 0 0; }
 }
 
-@media (max-width: 480px) {
-  nav { justify-content: space-between; }
-  .nav-addr { display: none; } /* Hide raw address on tiny screens to save space */
-  .btn-connect, .btn-connected { flex: 1; justify-content: center; }
+@media (max-width: 400px) {
+  .nav-addr { max-width: 85px; }
+  .btn-connected { padding: 5px 7px; }
 }
+
