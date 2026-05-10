@@ -4,6 +4,7 @@ import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
 import { getDomainKeySync, NameRegistryState, performReverseLookup, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
+import logoImg from './assets/logo.png';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
 import { useLiveRates } from './hooks/useLiveRates';
@@ -286,6 +287,9 @@ export default function App() {
     <div className="page">
       <div className="hex-bg" />
       <nav>
+        <div className="nav-logo-wrap">
+          <img src={logoImg} alt="Solpay Logo" className="nav-logo" />
+        </div>
         {liveRates.updatedAt && (
           <span style={{fontSize:10,color:'var(--green)',fontFamily:'var(--mono)',background:'rgba(74,222,128,0.08)',border:'1px solid rgba(74,222,128,0.2)',borderRadius:8,padding:'3px 8px',whiteSpace:'nowrap'}}>
             {ratesLoading ? '⟳ updating…' : `⚡ Live · ${liveRates.updatedAt}`}
