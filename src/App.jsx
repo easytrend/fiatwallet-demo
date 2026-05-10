@@ -130,33 +130,36 @@ export default function App() {
       const lamports = await connection.getBalance(publicKey, 'confirmed');
       setSolBalance(lamports / 1e9);
 
-      // We must fetch by mint because publicnode RPC blocks querying by programId
-      const mintKeys = Object.keys(KNOWN_MINTS);
-      const tokenPromises = mintKeys.map(mint => 
-        connection.getParsedTokenAccountsByOwner(
-          publicKey,
-          { mint: new PublicKey(mint) }
-        ).catch(() => ({ value: [] })) // Handle individual failures gracefully
-      );
+      // Use a fast indexed RPC specifically for fetching all token accounts at once
+      const fastConn = new Connection('https://api.mainnet-beta.solana.com');
+      const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
       
-      const results = await Promise.all(tokenPromises);
+      const allTokensResp = await fastConn.getParsedTokenAccountsByOwner(
+        publicKey,
+        { programId: tokenProgramId }
+      ).catch(() => ({ value: [] }));
+      
+      const results = allTokensResp.value || [];
       const toks = [];
+      const mintMap = {};
       
-      results.forEach((res, i) => {
-        if (!res.value || res.value.length === 0) return;
-        const mint = mintKeys[i];
-        let totalAmount = 0;
-        
-        // A user might have multiple token accounts for the same mint
-        res.value.forEach(account => {
-          totalAmount += account.account.data.parsed.info.tokenAmount.uiAmount || 0;
-        });
-        
-        if (totalAmount > 0) {
+      // Group balances by mint (in case of multiple ATAs for same mint)
+      results.forEach(account => {
+        const parsed = account.account.data.parsed.info;
+        const mint = parsed.mint;
+        const amt = parsed.tokenAmount.uiAmount || 0;
+        if (amt > 0) {
+          mintMap[mint] = (mintMap[mint] || 0) + amt;
+        }
+      });
+
+      // Filter against KNOWN_MINTS
+      Object.keys(mintMap).forEach(mint => {
+        if (KNOWN_MINTS[mint]) {
           const meta = KNOWN_MINTS[mint];
           toks.push({
             mint,
-            uiAmount: totalAmount,
+            uiAmount: mintMap[mint],
             symbol: meta.symbol,
             name: meta.name,
             price: meta.price || 0,
@@ -166,6 +169,7 @@ export default function App() {
         }
       });
       
+
       toks.sort((a, b) => (b.uiAmount * (b.price || 0)) - (a.uiAmount * (a.price || 0)));
 
       setSplTokens(toks);
@@ -180,6 +184,7 @@ export default function App() {
   useEffect(() => {
     if (connected && publicKey) {
       fetchBalances();
+      // Use performReverseLookup as the primary fallback, which works reliably for tokenized domains
       getPrimaryDomain(connection, publicKey)
         .then(primary => {
           if (primary && primary.reverse) setWalletDomain(primary.reverse + '.sol');
@@ -189,9 +194,17 @@ export default function App() {
           performReverseLookup(connection, publicKey)
             .then(domain => {
               if (domain) setWalletDomain(domain + '.sol');
-              else setWalletDomain(null);
+              else throw new Error("No reverse");
             })
-            .catch(() => setWalletDomain(null));
+            .catch(() => {
+              // Try the legacy getFavoriteDomain if both fail
+              getFavoriteDomain(connection, publicKey)
+                .then(fav => {
+                  if (fav && fav.reverse) setWalletDomain(fav.reverse + '.sol');
+                  else setWalletDomain(null);
+                })
+                .catch(() => setWalletDomain(null));
+            });
         });
     } else { 
       setSolBalance(null); 
@@ -329,11 +342,7 @@ export default function App() {
         <div className="nav-logo-wrap">
           <img src={logoImg} alt="Solpay Logo" className="nav-logo" />
         </div>
-        {liveRates.updatedAt && (
-          <span style={{fontSize:10,color:'var(--green)',fontFamily:'var(--mono)',background:'rgba(74,222,128,0.08)',border:'1px solid rgba(74,222,128,0.2)',borderRadius:8,padding:'3px 8px',whiteSpace:'nowrap'}}>
-            {ratesLoading ? '⟳ updating…' : `⚡ Live · ${liveRates.updatedAt}`}
-          </span>
-        )}
+
         {connected && walletPubkey && (
           <span className="nav-addr" title={walletPubkey}>{walletDomain || (walletPubkey.slice(0,4) + '…' + walletPubkey.slice(-4))}</span>
         )}
