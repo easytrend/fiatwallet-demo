@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey, Transaction, SystemProgram, Connection } from '@solana/web3.js';
-import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve, getReverseNameAccount } from '@bonfida/spl-name-service';
+import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
@@ -261,21 +261,8 @@ export default function App() {
             return null;
           })();
 
-          // The user specifically mentioned getReverseNameAccount
-          const userSuggestedPromise = (async () => {
-            try {
-              const conn = new Connection('https://api.mainnet-beta.solana.com');
-              const revAccount = await getReverseNameAccount(connection, publicKey);
-              if (revAccount) {
-                 const name = await performReverseLookup(conn, publicKey).catch(() => null);
-                 return name ? name + '.sol' : null;
-              }
-            } catch(e) {}
-            return null;
-          })();
-
-          // Race all methods
-          const winner = await Promise.race([apiPromise, rpcPromise, userSuggestedPromise].filter(p => p !== null));
+          // Race all valid methods
+          const winner = await Promise.race([apiPromise, rpcPromise].filter(p => p !== null));
           
           if (winner) {
             setWalletDomain(winner);
