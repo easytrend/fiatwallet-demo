@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey, Transaction, SystemProgram, Connection } from '@solana/web3.js';
-import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, resolve } from '@bonfida/spl-name-service';
+import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
@@ -203,27 +203,54 @@ export default function App() {
   // Auto-fetch when wallet connects or changes
   useEffect(() => {
     if (connected && publicKey) {
+      const pubkeyStr = publicKey.toString();
       fetchBalances();
-      // Use performReverseLookup as the primary fallback, which works reliably for tokenized domains
-      getPrimaryDomain(connection, publicKey)
+
+      // 1. Try Cache first for instant load
+      const cached = localStorage.getItem(`sns_${pubkeyStr}`);
+      if (cached) {
+        setWalletDomain(cached);
+      }
+
+      // 2. Fresh background lookup with a dedicated high-speed connection
+      const snsConn = new Connection('https://solana-rpc.publicnode.com');
+      getPrimaryDomain(snsConn, publicKey)
         .then(primary => {
-          if (primary && primary.reverse) setWalletDomain(primary.reverse + '.sol');
-          else throw new Error("No primary");
+          if (primary && primary.reverse) {
+            const domain = primary.reverse + '.sol';
+            setWalletDomain(domain);
+            localStorage.setItem(`sns_${pubkeyStr}`, domain);
+          } else {
+            throw new Error("No primary");
+          }
         })
         .catch(() => {
-          performReverseLookup(connection, publicKey)
+          performReverseLookup(snsConn, publicKey)
             .then(domain => {
-              if (domain) setWalletDomain(domain + '.sol');
-              else throw new Error("No reverse");
+              if (domain) {
+                const fullDomain = domain + '.sol';
+                setWalletDomain(fullDomain);
+                localStorage.setItem(`sns_${pubkeyStr}`, fullDomain);
+              } else {
+                throw new Error("No reverse");
+              }
             })
             .catch(() => {
-              // Try the legacy getFavoriteDomain if both fail
-              getFavoriteDomain(connection, publicKey)
+              getFavoriteDomain(snsConn, publicKey)
                 .then(fav => {
-                  if (fav && fav.reverse) setWalletDomain(fav.reverse + '.sol');
-                  else setWalletDomain(null);
+                  if (fav && fav.reverse) {
+                    const domain = fav.reverse + '.sol';
+                    setWalletDomain(domain);
+                    localStorage.setItem(`sns_${pubkeyStr}`, domain);
+                  } else {
+                    setWalletDomain(null);
+                    localStorage.removeItem(`sns_${pubkeyStr}`);
+                  }
                 })
-                .catch(() => setWalletDomain(null));
+                .catch(() => {
+                  setWalletDomain(null);
+                  localStorage.removeItem(`sns_${pubkeyStr}`);
+                });
             });
         });
     } else { 
