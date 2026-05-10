@@ -89,6 +89,7 @@ export default function TokenModal({ filteredTokens, connected, walletLoading, s
                   {t.balance != null && (
                     <div style={{ fontSize: 10, color: 'var(--lime)', fontFamily: 'var(--mono)', marginTop: 2, fontWeight: 600 }}>
                       {t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} held
+                      {t.price > 0 && t.balance > 0 && ` ($${(t.balance * t.price).toFixed(2)})`}
                     </div>
                   )}
                   {/* For SPL tokens without price, show uiAmount */}

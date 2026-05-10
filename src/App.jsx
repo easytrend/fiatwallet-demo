@@ -27,8 +27,8 @@ export default function App() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState(null);
   const [recipient, setRecipient] = useState('');
-  const [amount, setAmount] = useState('1000');
-  const [currency, setCurrency] = useState('NGN');
+  const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState('USD');
   const [inputMode, setInputMode] = useState('fiat');
   const [token, setToken] = useState('USDC');
   const [showModal, setShowModal] = useState(false);
@@ -62,11 +62,21 @@ export default function App() {
     return [solEntry, ...splEntries];
   }, [connected, solBalance, splTokens, liveRates]);
 
-  // When connected → show ONLY real wallet tokens
-  // When not connected → show full static list so user can browse
+  // Show all static tokens (with balances if held) + any extra tokens from the wallet
   const selectableTokens = useMemo(() => {
-    if (connected && walletTokenList) return walletTokenList;
-    return TOKENS.map(t => ({ ...t, price: getLiveTokPrice(t.symbol) || t.price || 0 }));
+    if (!connected || !walletTokenList) {
+      return TOKENS.map(t => ({ ...t, price: getLiveTokPrice(t.symbol) || t.price || 0 }));
+    }
+    
+    const staticWithBalances = TOKENS.map(t => {
+      const wt = walletTokenList.find(w => w.symbol === t.symbol);
+      const livePrice = getLiveTokPrice(t.symbol) || t.price || 0;
+      return wt ? { ...t, price: livePrice, balance: wt.balance } : { ...t, price: livePrice };
+    });
+    
+    const extraTokens = walletTokenList.filter(wt => !TOKENS.find(t => t.symbol === wt.symbol));
+    
+    return [...staticWithBalances, ...extraTokens];
   }, [connected, walletTokenList, liveRates]);
 
   const tok = (walletTokenList && walletTokenList.find(t => t.symbol === token))
@@ -138,10 +148,6 @@ export default function App() {
     <div className="page">
       <div className="hex-bg" />
       <nav>
-        <a href={SNS_LINK} target="_blank" rel="noopener noreferrer" className="btn-register">
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="#a3e635" strokeWidth="1.4"/><path d="M5.5 8.5c.8-.8 4.5-.8 4.5 0s-1.8 2-2.25 2" stroke="#a3e635" strokeWidth="1.3" strokeLinecap="round"/><circle cx="8" cy="5.5" r="0.7" fill="#a3e635"/></svg>
-          Register .sol domain
-        </a>
         {liveRates.updatedAt && (
           <span style={{fontSize:10,color:'var(--green)',fontFamily:'var(--mono)',background:'rgba(74,222,128,0.08)',border:'1px solid rgba(74,222,128,0.2)',borderRadius:8,padding:'3px 8px',whiteSpace:'nowrap'}}>
             {ratesLoading ? '⟳ updating…' : `⚡ Live · ${liveRates.updatedAt}`}
@@ -167,12 +173,6 @@ export default function App() {
               </div>
             </div>
             <p className="card-sub">{bulkMode ? 'Send to up to 1,000 wallets or .sol domains at once.' : 'Send tokens easily using .sol domains.'}</p>
-
-            <div className="sns-banner">
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="#a3e635" strokeWidth="1.3"/><circle cx="8" cy="5.5" r="0.7" fill="#a3e635"/><path d="M8 8v3.5" stroke="#a3e635" strokeWidth="1.3" strokeLinecap="round"/></svg>
-              {bulkMode ? 'Ensure recipients have .sol domains —' : 'No .sol domain yet?'}&nbsp;
-              <a href={SNS_LINK} target="_blank" rel="noopener noreferrer">{bulkMode ? 'Register on SNS →' : 'Register yours on SNS →'}</a>
-            </div>
 
             {!bulkMode && (
               <div className="field">
@@ -243,14 +243,6 @@ export default function App() {
           <div className="info-card">
             <h3>Bulk Send</h3>
             <p>Toggle Bulk Send to pay up to 1,000 wallets in one go. Upload CSV or XLSX, set amounts in fiat or crypto, and fire one transaction.</p>
-          </div>
-          <div className="info-card">
-            <h3>No .sol domain yet?</h3>
-            <p>Register yours on SNS and use it across all Solana apps as your Web3 identity.</p>
-            <a href={SNS_LINK} target="_blank" rel="noopener noreferrer"
-              style={{display:'inline-block',marginTop:10,color:'#a3e635',fontSize:13,fontWeight:600,textDecoration:'none'}}>
-              Register on SNS →
-            </a>
           </div>
         </div>
       </div>
