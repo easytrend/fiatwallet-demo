@@ -159,91 +159,77 @@ export default function App() {
       const lamports = await connection.getBalance(publicKey, 'confirmed');
       setSolBalance(lamports / 1e9);
 
+      // 1. Fetch ALL token accounts (no filtering)
       let results = [];
       try {
-        // Try fast bulk fetch first on mainnet-beta (supports programId filtering)
         const fastConn = new Connection('https://api.mainnet-beta.solana.com');
         const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
         const resp = await fastConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId });
         results = resp.value || [];
       } catch (e) {
-        console.warn('Fast bulk fetch failed, falling back to mint-by-mint:', e);
+        console.warn('Bulk fetch failed, using fallback:', e);
       }
-
 
       const mintMap = {};
+      results.forEach(account => {
+        const parsed = account.account.data.parsed.info;
+        const mint = parsed.mint;
+        const amt = parsed.tokenAmount.uiAmount || 0;
+        if (amt > 0) mintMap[mint] = (mintMap[mint] || 0) + amt;
+      });
 
-      if (results.length > 0) {
-        // Success with bulk fetch
-        results.forEach(account => {
-          const parsed = account.account.data.parsed.info;
-          const mint = parsed.mint;
-          const amt = parsed.tokenAmount.uiAmount || 0;
-          if (amt > 0) mintMap[mint] = (mintMap[mint] || 0) + amt;
-        });
-      } else {
-        // Fallback: fetch known mints individually on the primary connection (publicnode)
-        const mintKeys = Object.keys(KNOWN_MINTS);
-        const tokenPromises = mintKeys.map(mint => 
-          connection.getParsedTokenAccountsByOwner(publicKey, { mint: new PublicKey(mint) })
-            .catch(() => ({ value: [] }))
-        );
-        const fallbackResults = await Promise.all(tokenPromises);
-        fallbackResults.forEach((res, i) => {
-          if (!res.value || res.value.length === 0) return;
-          const mint = mintKeys[i];
-          let totalAmount = 0;
-          res.value.forEach(acc => { totalAmount += acc.account.data.parsed.info.tokenAmount.uiAmount || 0; });
-          if (totalAmount > 0) mintMap[mint] = totalAmount;
-        });
-      }
-
-      // 1. Fetch metadata from Jupiter for identified mints to get logos
-      const identifiedMints = Object.keys(mintMap).filter(m => KNOWN_MINTS[m]);
+      const allMints = Object.keys(mintMap);
+      
+      // 2. Batch fetch metadata and prices for ALL held tokens from Jupiter
       let jupMeta = {};
-      if (identifiedMints.length > 0) {
+      let jupPrices = {};
+      
+      if (allMints.length > 0) {
         try {
-          const metaPromises = identifiedMints.map(m => 
+          const metaPromises = allMints.map(m => 
             fetch(`https://tokens.jup.ag/token/${m}`).then(r => r.json()).catch(() => null)
           );
           const metaResults = await Promise.all(metaPromises);
           metaResults.forEach((m, idx) => {
-            if (m) jupMeta[identifiedMints[idx]] = m;
+            if (m) jupMeta[allMints[idx]] = m;
           });
+
+          const priceResp = await fetch(`https://api.jup.ag/price/v2/lookup?ids=${allMints.join(',')}`);
+          const priceData = await priceResp.json();
+          jupPrices = priceData.data || {};
         } catch (e) {
-          console.warn('Jupiter Metadata fetch failed:', e);
+          console.warn('Jupiter API fetch failed:', e);
         }
       }
 
-      // 2. Final mapping with logos
-      const toks = [];
-      Object.keys(mintMap).forEach(mint => {
-        if (KNOWN_MINTS[mint]) {
-          const meta = KNOWN_MINTS[mint];
-          const dynamic = jupMeta[mint] || {};
-          toks.push({
-            mint,
-            uiAmount: mintMap[mint],
-            symbol: meta.symbol,
-            name: meta.name,
-            price: meta.price || 0,
-            color: meta.color || '#aaa',
-            bg: meta.bg || 'rgba(255,255,255,0.08)',
-            logoURI: dynamic.logoURI
-          });
-        }
-      });
-      
+      // 3. Construct the full portfolio list
+      const toks = allMints.map(mint => {
+        const balance = mintMap[mint];
+        const dynamic = jupMeta[mint] || {};
+        const priceInfo = jupPrices[mint] || {};
+        const staticMeta = KNOWN_MINTS[mint] || {};
 
-      toks.sort((a, b) => (b.uiAmount * (b.price || 0)) - (a.uiAmount * (a.price || 0)));
+        return {
+          mint,
+          uiAmount: balance,
+          symbol: dynamic.symbol || staticMeta.symbol || mint.slice(0, 4),
+          name: dynamic.name || staticMeta.name || 'Unknown Token',
+          price: parseFloat(priceInfo.price || staticMeta.price || 0),
+          color: staticMeta.color || '#aaa',
+          bg: staticMeta.bg || 'rgba(255,255,255,0.08)',
+          logoURI: dynamic.logoURI || staticMeta.logoURI
+        };
+      });
+
+      // Sort by USD value
+      toks.sort((a, b) => (b.uiAmount * b.price) - (a.uiAmount * a.price));
 
       setSplTokens(toks);
     } catch (e) {
       setWalletError(e.message || 'Failed to fetch balances');
-      console.error('fetchBalances error:', e);
     }
     setWalletLoading(false);
-  }, [connection, publicKey, connected, TOKEN_PROGRAM_ID]);
+  }, [connection, publicKey, connected]);
 
   // Auto-fetch when wallet connects or changes
   useEffect(() => {
