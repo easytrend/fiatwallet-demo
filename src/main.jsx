@@ -22,8 +22,8 @@ import App from './App';
 import './App.css';
 
 function Root() {
-  // The Helius key was invalid, using public mainnet-beta
-  const endpoint = useMemo(() => clusterApiUrl('mainnet-beta'), []);
+  // Use a reliable free public RPC to prevent 403 Access Forbidden errors
+  const endpoint = useMemo(() => 'https://solana-rpc.publicnode.com', []);
   const wallets = useMemo(() => [
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),
