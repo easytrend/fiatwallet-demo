@@ -22,6 +22,7 @@ import App from './App';
 import './App.css';
 
 function Root() {
+  // The Helius key was invalid, using public mainnet-beta
   const endpoint = useMemo(() => clusterApiUrl('mainnet-beta'), []);
   const wallets = useMemo(() => [
     new PhantomWalletAdapter(),

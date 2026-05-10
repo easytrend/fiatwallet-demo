@@ -57,7 +57,7 @@ export default function App() {
     };
     const splEntries = splTokens.map(t => {
       const meta = TOKENS.find(x => x.symbol === t.symbol) || { color: '#aaa', bg: 'rgba(255,255,255,0.08)' };
-      return { ...meta, ...t, price: liveRates.crypto[t.symbol] || t.price || meta.price || 0 };
+      return { ...meta, ...t, price: liveRates.crypto[t.symbol] || t.price || meta.price || 0, balance: t.uiAmount };
     });
     return [solEntry, ...splEntries];
   }, [connected, solBalance, splTokens, liveRates]);
