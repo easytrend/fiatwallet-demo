@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Connection } from '@solana/web3.js';
 import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
@@ -25,12 +25,16 @@ export default function App() {
   // SPL Token Program ID
   const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
+  const [inputMode, setInputMode] = useState('fiat'); // fiat or crypto
   const [bulkMode, setBulkMode] = useState(false);
-  const [solBalance, setSolBalance] = useState(null);
-  const [splTokens, setSplTokens] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [walletPubkey, setWalletPubkey] = useState(null);
+  const [walletDomain, setWalletDomain] = useState(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState(null);
-  const [walletDomain, setWalletDomain] = useState(null);
+  const [solBalance, setSolBalance] = useState(null);
+  const [splTokens, setSplTokens] = useState([]);
+  const [accOpen, setAccOpen] = useState(0); // 0=How it works, 1=Fiat<>Crypto, 2=Bulk Send
   const [recipient, setRecipient] = useState('');
   const [resolvedAddress, setResolvedAddress] = useState(null);
   const [resolving, setResolving] = useState(false);
@@ -39,13 +43,13 @@ export default function App() {
   const [toast, setToast] = useState(null); // { type, title, message, link }
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
-  const [inputMode, setInputMode] = useState('fiat');
   const [token, setToken] = useState('');
-  const [showModal, setShowModal] = useState(false);
 
   const { liveRates, ratesLoading } = useLiveRates();
 
-  const walletPubkey = publicKey?.toString() || null;
+  useEffect(() => {
+    setWalletPubkey(publicKey?.toString() || null);
+  }, [publicKey]);
 
   // Resolve .sol domains automatically
   useEffect(() => {
@@ -391,6 +395,12 @@ export default function App() {
                       <div>
                         <span className="tok-sym">{tokLive.symbol}</span>
                         <span style={{fontSize:11,color:'var(--text3)',marginLeft:6}}>${tokLive.price < 0.01 ? tokLive.price.toFixed(6) : tokLive.price.toLocaleString()}</span>
+                        {tokLive.balance != null && tokLive.balance > 0 && (
+                          <div style={{fontSize:10, color:'var(--lime)', fontFamily:'var(--mono)', marginTop:2}}>
+                            {tokLive.balance.toLocaleString(undefined, {maximumFractionDigits: 4})} {tokLive.symbol} 
+                            {tokLive.price > 0 && ` ($${(tokLive.balance * tokLive.price).toFixed(2)})`}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -444,23 +454,38 @@ export default function App() {
           </div>
         </div>
 
-        <div className="info-panel">
-          <div className="info-card">
-            <h3>How it works</h3>
-            <ul className="info-steps">
-              <li className="info-step"><span className="step-num">1</span><span>Connect any Solana wallet — Phantom, Solflare, Backpack, Ledger & more</span></li>
-              <li className="info-step"><span className="step-num">2</span><span>Enter a .sol domain — SNS resolves it to a wallet address</span></li>
-              <li className="info-step"><span className="step-num">3</span><span>Enter fiat or crypto amount. Live CoinGecko rate auto-converts</span></li>
-              <li className="info-step"><span className="step-num">4</span><span>Confirm and send — settles on Solana instantly</span></li>
-            </ul>
+        <div className="info-cards">
+          <div className="info-card" onClick={() => setAccOpen(accOpen === 0 ? -1 : 0)} style={{cursor:'pointer', paddingBottom: accOpen===0 ? 20 : 16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <h3 style={{margin:0}}>HOW IT WORKS</h3>
+              <span style={{color:'var(--text2)', transition:'transform 0.2s', transform: accOpen===0?'rotate(180deg)':'none'}}>▼</span>
+            </div>
+            {accOpen === 0 && (
+              <ul className="info-steps" style={{marginTop: 16}}>
+                <li className="info-step"><span className="step-num">1</span><span>Connect any Solana wallet — Phantom, Solflare, Backpack, Ledger & more</span></li>
+                <li className="info-step"><span className="step-num">2</span><span>Enter a .sol domain — SNS resolves it to a wallet address</span></li>
+                <li className="info-step"><span className="step-num">3</span><span>Enter fiat or crypto amount. Live CoinGecko rate auto-converts</span></li>
+                <li className="info-step"><span className="step-num">4</span><span>Confirm and send — settles on Solana instantly</span></li>
+              </ul>
+            )}
           </div>
-          <div className="info-card">
-            <h3>Fiat ↔ Crypto Input</h3>
-            <p>Toggle between entering amounts in your local currency or directly in crypto. The other value updates live using CoinGecko rates.</p>
+          <div className="info-card" onClick={() => setAccOpen(accOpen === 1 ? -1 : 1)} style={{cursor:'pointer', paddingBottom: accOpen===1 ? 20 : 16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <h3 style={{margin:0}}>FIAT ↔ CRYPTO INPUT</h3>
+              <span style={{color:'var(--text2)', transition:'transform 0.2s', transform: accOpen===1?'rotate(180deg)':'none'}}>▼</span>
+            </div>
+            {accOpen === 1 && (
+              <p style={{marginTop: 12}}>Toggle between entering amounts in your local currency or directly in crypto. The other value updates live using CoinGecko rates.</p>
+            )}
           </div>
-          <div className="info-card">
-            <h3>Bulk Send</h3>
-            <p>Toggle Bulk Send to pay up to 1,000 wallets in one go. Upload CSV or XLSX, set amounts in fiat or crypto, and fire one transaction.</p>
+          <div className="info-card" onClick={() => setAccOpen(accOpen === 2 ? -1 : 2)} style={{cursor:'pointer', paddingBottom: accOpen===2 ? 20 : 16}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <h3 style={{margin:0}}>BULK SEND</h3>
+              <span style={{color:'var(--text2)', transition:'transform 0.2s', transform: accOpen===2?'rotate(180deg)':'none'}}>▼</span>
+            </div>
+            {accOpen === 2 && (
+              <p style={{marginTop: 12}}>Toggle Bulk Send to pay up to 1,000 wallets in one go. Upload CSV or XLSX, set amounts in fiat or crypto, and fire one transaction.</p>
+            )}
           </div>
         </div>
       </div>
