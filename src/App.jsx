@@ -220,10 +220,13 @@ export default function App() {
         );
       }
 
+      const latestBlockhash = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = latestBlockhash.blockhash;
+      transaction.feePayer = publicKey;
+
       const signature = await sendTransaction(transaction, connection);
       console.log('Transaction sent:', signature);
       
-      const latestBlockhash = await connection.getLatestBlockhash();
       await connection.confirmTransaction({
         signature,
         blockhash: latestBlockhash.blockhash,
