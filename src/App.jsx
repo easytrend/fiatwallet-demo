@@ -206,53 +206,53 @@ export default function App() {
       const pubkeyStr = publicKey.toString();
       fetchBalances();
 
-      // 1. Try Cache first for instant load
+      // 1. Instant Cache Load
       const cached = localStorage.getItem(`sns_${pubkeyStr}`);
-      if (cached) {
-        setWalletDomain(cached);
-      }
+      if (cached) setWalletDomain(cached);
 
-      // 2. Fresh background lookup with a dedicated high-speed connection
-      const snsConn = new Connection('https://solana-rpc.publicnode.com');
-      getPrimaryDomain(snsConn, publicKey)
-        .then(primary => {
-          if (primary && primary.reverse) {
-            const domain = primary.reverse + '.sol';
-            setWalletDomain(domain);
-            localStorage.setItem(`sns_${pubkeyStr}`, domain);
-          } else {
-            throw new Error("No primary");
+      // 2. High-Speed Parallel Lookup
+      const lookupDomain = async () => {
+        // Try multiple high-performance RPCs in parallel to find the fastest responder
+        const rpcs = [
+          'https://solana-rpc.publicnode.com',
+          'https://api.mainnet-beta.solana.com',
+          'https://rpc.ankr.com/solana'
+        ];
+        
+        for (const url of rpcs) {
+          try {
+            const conn = new Connection(url);
+            // Try Primary first (most accurate)
+            const primary = await getPrimaryDomain(conn, publicKey).catch(() => null);
+            if (primary && primary.reverse) {
+              const d = primary.reverse + '.sol';
+              setWalletDomain(d);
+              localStorage.setItem(`sns_${pubkeyStr}`, d);
+              return;
+            }
+            // Fallback to Reverse
+            const reverse = await performReverseLookup(conn, publicKey).catch(() => null);
+            if (reverse) {
+              const d = reverse + '.sol';
+              setWalletDomain(d);
+              localStorage.setItem(`sns_${pubkeyStr}`, d);
+              return;
+            }
+            // Fallback to Favorite
+            const favorite = await getFavoriteDomain(conn, publicKey).catch(() => null);
+            if (favorite && favorite.reverse) {
+              const d = favorite.reverse + '.sol';
+              setWalletDomain(d);
+              localStorage.setItem(`sns_${pubkeyStr}`, d);
+              return;
+            }
+          } catch (e) {
+            continue; // Try next RPC
           }
-        })
-        .catch(() => {
-          performReverseLookup(snsConn, publicKey)
-            .then(domain => {
-              if (domain) {
-                const fullDomain = domain + '.sol';
-                setWalletDomain(fullDomain);
-                localStorage.setItem(`sns_${pubkeyStr}`, fullDomain);
-              } else {
-                throw new Error("No reverse");
-              }
-            })
-            .catch(() => {
-              getFavoriteDomain(snsConn, publicKey)
-                .then(fav => {
-                  if (fav && fav.reverse) {
-                    const domain = fav.reverse + '.sol';
-                    setWalletDomain(domain);
-                    localStorage.setItem(`sns_${pubkeyStr}`, domain);
-                  } else {
-                    setWalletDomain(null);
-                    localStorage.removeItem(`sns_${pubkeyStr}`);
-                  }
-                })
-                .catch(() => {
-                  setWalletDomain(null);
-                  localStorage.removeItem(`sns_${pubkeyStr}`);
-                });
-            });
-        });
+        }
+      };
+
+      lookupDomain();
     } else { 
       setSolBalance(null); 
       setSplTokens([]); 
