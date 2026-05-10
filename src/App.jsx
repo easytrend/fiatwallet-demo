@@ -44,8 +44,28 @@ export default function App() {
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [token, setToken] = useState('');
+  const [staticLogos, setStaticLogos] = useState({});
 
   const { liveRates, ratesLoading } = useLiveRates();
+
+  // Fetch logos for static tokens on mount
+  useEffect(() => {
+    async function loadStaticLogos() {
+      const logos = {};
+      const mints = Object.keys(KNOWN_MINTS);
+      try {
+        const metaPromises = mints.map(m => 
+          fetch(`https://tokens.jup.ag/token/${m}`).then(r => r.json()).catch(() => null)
+        );
+        const results = await Promise.all(metaPromises);
+        results.forEach((m, idx) => {
+          if (m && m.logoURI) logos[KNOWN_MINTS[mints[idx]].symbol] = m.logoURI;
+        });
+        setStaticLogos(logos);
+      } catch (e) { console.warn('Static logo fetch failed:', e); }
+    }
+    loadStaticLogos();
+  }, []);
 
   useEffect(() => {
     setWalletPubkey(publicKey?.toString() || null);
@@ -98,7 +118,8 @@ export default function App() {
     if (!connected) return null;
     const solEntry = {
       symbol: 'SOL', name: 'Solana', color: '#9945FF', bg: '#2d1a4e',
-      price: liveSolPrice, balance: solBalance
+      price: liveSolPrice, balance: solBalance,
+      logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png'
     };
     const splEntries = splTokens.map(t => {
       const meta = TOKENS.find(x => x.symbol === t.symbol) || { color: '#aaa', bg: 'rgba(255,255,255,0.08)' };
@@ -111,8 +132,12 @@ export default function App() {
   // When not connected → show full static list so user can browse
   const selectableTokens = useMemo(() => {
     if (connected && walletTokenList) return walletTokenList;
-    return TOKENS.map(t => ({ ...t, price: getLiveTokPrice(t.symbol) || t.price || 0 }));
-  }, [connected, walletTokenList, liveRates]);
+    return TOKENS.map(t => ({ 
+      ...t, 
+      price: getLiveTokPrice(t.symbol) || t.price || 0,
+      logoURI: t.symbol === 'SOL' ? 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' : staticLogos[t.symbol]
+    }));
+  }, [connected, walletTokenList, liveRates, staticLogos]);
 
   const tok = token ? ((walletTokenList && walletTokenList.find(t => t.symbol === token))
     || TOKENS.find(t => t.symbol === token)) : null;

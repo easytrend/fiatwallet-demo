@@ -53,8 +53,7 @@ export const KNOWN_MINTS = {
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
 export const RPC_LIST = [
-  "https://solana-mainnet.g.alchemy.com/v2/demo",
+  "https://solana-rpc.publicnode.com",
   "https://rpc.ankr.com/solana",
-  "https://mainnet.helius-rpc.com/?api-key=15319bf8-35b6-4a2c-aa8b-09c1e7f6b5a0",
   "https://api.mainnet-beta.solana.com",
 ];
