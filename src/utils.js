@@ -31,7 +31,7 @@ export function parseCSV(text) {
 }
 
 export function dlTemplate() {
-  const csv = "wallet_or_domain,amount\nexample.sol,50\nfriend.sol,100\nABC123walletXYZ,25\n";
+  const csv = "wallet_or_domain,amount\n";
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], { type:"text/csv" }));
   a.download = "bulk-send-template.csv";

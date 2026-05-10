@@ -17,7 +17,7 @@ const SNS_LINK = 'https://www.sns.id?easytrend.sol';
 
 export default function App() {
   const { connection } = useConnection();
-  const { publicKey, connected, disconnect, sendTransaction } = useWallet();
+  const { publicKey, connected, disconnect, sendTransaction, signAllTransactions } = useWallet();
   const { setVisible } = useWalletModal();
 
   // SPL Token Program ID
@@ -320,7 +320,9 @@ export default function App() {
             </div>
 
             {bulkMode ? (
-              <BulkSendPanel tok={tokLive} connected={connected} getLiveRate={getLiveCurrRate} />
+              <BulkSendPanel tok={tokLive} connected={connected} getLiveRate={getLiveCurrRate}
+                connection={connection} publicKey={publicKey}
+                sendTransaction={sendTransaction} signAllTransactions={signAllTransactions} />
             ) : (
               <>
                 <div className="field">

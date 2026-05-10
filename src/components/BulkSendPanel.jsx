@@ -1,9 +1,12 @@
 import { useState, useRef } from 'react';
+import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
+import { getDomainKeySync, NameRegistryState } from '@bonfida/spl-name-service';
+import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { CURRENCIES } from '../data/currencies';
 import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate } from '../utils';
 import CurrDrop from './CurrDrop';
 
-export default function BulkSendPanel({ tok, connected, getLiveRate }) {
+export default function BulkSendPanel({ tok, connected, getLiveRate, connection, publicKey, sendTransaction, signAllTransactions }) {
   const [rows, setRows] = useState([]);
   const [drag, setDrag] = useState(false);
   const [globalAmt, setGlobalAmt] = useState('');
@@ -27,6 +30,144 @@ export default function BulkSendPanel({ tok, connected, getLiveRate }) {
   const addManual = () => setRows(r => [...r, {id:Date.now()+Math.random(),domain:'',amount:'',valid:false}]);
   const updateRow = (id,field,val) => setRows(r => r.map(x => x.id===id ? {...x,[field]:val,valid:field==='domain'?val.length>2:x.valid} : x));
   const applyGlobal = () => { if (globalAmt) setRows(r => r.map(x => ({...x, amount:globalAmt}))); };
+
+  const [sendingState, setSendingState] = useState(null); // null | 'resolving' | 'signing' | 'sending' | 'done' | 'error'
+  const [errorMsg, setErrorMsg] = useState('');
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+
+  const handleBulkSend = async () => {
+    if (!connected || !publicKey || validRows.length === 0) return;
+    setSendingState('resolving');
+    setErrorMsg('');
+    
+    try {
+      // 1. Resolve all domains and validate recipients
+      const resolvedRecipients = [];
+      for (let i = 0; i < validRows.length; i++) {
+        const row = validRows[i];
+        let addressStr = row.domain;
+        
+        if (addressStr.endsWith('.sol')) {
+          try {
+            const { pubkey } = getDomainKeySync(addressStr);
+            const registry = await NameRegistryState.retrieve(connection, pubkey);
+            addressStr = registry.registry.owner.toBase58();
+          } catch (err) {
+            throw new Error(`Failed to resolve domain: ${row.domain}`);
+          }
+        }
+        
+        let recipientPubkey;
+        try {
+          recipientPubkey = new PublicKey(addressStr);
+        } catch (err) {
+          throw new Error(`Invalid address for ${row.domain}`);
+        }
+        
+        const num = parseFloat(row.amount);
+        const tokAmt = bulkMode === 'fiat' ? (num / liveRate) / tok.price : num;
+        
+        resolvedRecipients.push({
+          pubkey: recipientPubkey,
+          tokAmt
+        });
+      }
+
+      setSendingState('signing');
+      
+      // 2. Fetch mint info if SPL token
+      let decimals = 9;
+      let mintPubkey = null;
+      if (tok.symbol !== 'SOL') {
+        mintPubkey = new PublicKey(tok.mint);
+        const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
+        if (!mintInfo.value) throw new Error("Invalid token mint");
+        decimals = mintInfo.value.data.parsed.info.decimals;
+      }
+
+      // 3. Chunk instructions (max 10 per tx to be safe)
+      const chunkSize = 10;
+      const transactions = [];
+      const latestBlockhash = await connection.getLatestBlockhash();
+      
+      for (let i = 0; i < resolvedRecipients.length; i += chunkSize) {
+        const chunk = resolvedRecipients.slice(i, i + chunkSize);
+        const tx = new Transaction();
+        tx.recentBlockhash = latestBlockhash.blockhash;
+        tx.feePayer = publicKey;
+
+        if (tok.symbol === 'SOL') {
+          for (const rec of chunk) {
+            const lamports = Math.round(rec.tokAmt * 1e9);
+            tx.add(SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: rec.pubkey,
+              lamports
+            }));
+          }
+        } else {
+          const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey);
+          for (const rec of chunk) {
+            const amountUnits = BigInt(Math.round(rec.tokAmt * Math.pow(10, decimals)));
+            const receiverATA = getAssociatedTokenAddressSync(mintPubkey, rec.pubkey);
+            
+            tx.add(createAssociatedTokenAccountIdempotentInstruction(
+              publicKey, receiverATA, rec.pubkey, mintPubkey
+            ));
+            
+            tx.add(createTransferCheckedInstruction(
+              senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals
+            ));
+          }
+        }
+        transactions.push(tx);
+      }
+      
+      // 4. Sign and send
+      setProgress({ current: 0, total: transactions.length });
+      
+      if (transactions.length > 1 && signAllTransactions) {
+        const signedTxs = await signAllTransactions(transactions);
+        setSendingState('sending');
+        
+        for (let i = 0; i < signedTxs.length; i++) {
+          const tx = signedTxs[i];
+          const rawTx = tx.serialize();
+          const signature = await connection.sendRawTransaction(rawTx);
+          await connection.confirmTransaction({
+            signature,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+          }, 'confirmed');
+          setProgress(p => ({ ...p, current: i + 1 }));
+        }
+      } else {
+        setSendingState('sending');
+        for (let i = 0; i < transactions.length; i++) {
+          const tx = transactions[i];
+          const signature = await sendTransaction(tx, connection);
+          await connection.confirmTransaction({
+            signature,
+            blockhash: latestBlockhash.blockhash,
+            lastValidBlockHeight: latestBlockhash.lastValidBlockHeight
+          }, 'confirmed');
+          setProgress(p => ({ ...p, current: i + 1 }));
+        }
+      }
+
+      setSendingState('done');
+      setTimeout(() => {
+        setSendingState(null);
+        setRows([]);
+        setGlobalAmt('');
+      }, 3000);
+
+    } catch (err) {
+      console.error(err);
+      setErrorMsg(err.message || "An error occurred");
+      setSendingState('error');
+    }
+  };
 
   const validRows = rows.filter(r => r.valid && r.amount);
   const totalUSD = validRows.reduce((s,r) => {
@@ -85,10 +226,6 @@ export default function BulkSendPanel({ tok, connected, getLiveRate }) {
 
       {rows.length === 0 ? (
         <>
-          <div className="tmpl-btns">
-            <button className="tmpl-btn" onClick={dlTemplate}>📄 CSV template</button>
-            <button className="tmpl-btn" onClick={dlTemplate}>📊 XLSX template</button>
-          </div>
           <div className={`upload-zone ${drag?'drag':''}`}
             onClick={() => fileRef.current.click()}
             onDragOver={e => { e.preventDefault(); setDrag(true); }}
@@ -135,10 +272,19 @@ export default function BulkSendPanel({ tok, connected, getLiveRate }) {
             <div className="sum-item"><div className="sum-val">${totalUSD.toFixed(2)}</div><div className="sum-lbl">Est. USD</div></div>
           </div>
           <button className="add-manual" onClick={addManual}>＋ Add recipient manually</button>
+          {sendingState && (
+            <div style={{marginTop:12, padding:'12px', background:'rgba(255,255,255,0.05)', borderRadius:8, fontSize:13}}>
+              {sendingState === 'resolving' && <span style={{color:'var(--text2)'}}>🔍 Resolving domains...</span>}
+              {sendingState === 'signing' && <span style={{color:'var(--text2)'}}>✍️ Please sign the transaction(s) in your wallet...</span>}
+              {sendingState === 'sending' && <span style={{color:'var(--lime)'}}>🚀 Sending batch {progress.current + 1} of {progress.total}...</span>}
+              {sendingState === 'done' && <span style={{color:'var(--lime)'}}>✅ All {validRows.length} recipients successfully paid!</span>}
+              {sendingState === 'error' && <span style={{color:'#f87171'}}>✕ Error: {errorMsg}</span>}
+            </div>
+          )}
         </>
       )}
-      <button className="send-btn" disabled={!connected || validRows.length === 0}>
-        {!connected ? 'Connect wallet to send' : validRows.length === 0 ? 'Add recipients to continue' : `Send ${tok.symbol} to ${validRows.length} recipient${validRows.length!==1?'s':''}`}
+      <button className="send-btn" disabled={!connected || validRows.length === 0 || ['resolving','signing','sending'].includes(sendingState)} onClick={handleBulkSend}>
+        {!connected ? 'Connect wallet to send' : validRows.length === 0 ? 'Add recipients to continue' : ['resolving','signing','sending'].includes(sendingState) ? 'Processing...' : `Send ${tok.symbol} to ${validRows.length} recipient${validRows.length!==1?'s':''}`}
       </button>
     </div>
   );
