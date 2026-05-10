@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey } from '@solana/web3.js';
+import { getDomainKeySync, NameRegistryState } from '@solana/spl-name-service';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
 import { useLiveRates } from './hooks/useLiveRates';
@@ -27,6 +28,9 @@ export default function App() {
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState(null);
   const [recipient, setRecipient] = useState('');
+  const [resolvedAddress, setResolvedAddress] = useState(null);
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState(null);
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [inputMode, setInputMode] = useState('fiat');
@@ -36,6 +40,34 @@ export default function App() {
   const { liveRates, ratesLoading } = useLiveRates();
 
   const walletPubkey = publicKey?.toString() || null;
+
+  // Resolve .sol domains automatically
+  useEffect(() => {
+    async function checkDomain() {
+      if (recipient.endsWith('.sol')) {
+        setResolving(true);
+        setResolveError(null);
+        setResolvedAddress(null);
+        try {
+          const { pubkey } = getDomainKeySync(recipient);
+          const registry = await NameRegistryState.retrieve(connection, pubkey);
+          setResolvedAddress(registry.registry.owner.toBase58());
+        } catch (err) {
+          setResolveError('Domain not found or invalid');
+        }
+        setResolving(false);
+      } else if (recipient.length > 30) {
+        // Assume raw pubkey
+        setResolvedAddress(recipient);
+        setResolveError(null);
+      } else {
+        setResolvedAddress(null);
+        setResolveError(null);
+      }
+    }
+    const t = setTimeout(checkDomain, 500);
+    return () => clearTimeout(t);
+  }, [recipient, connection]);
 
   function getLiveCurrRate(code) {
     const s = CURRENCIES.find(c => c.code === code) || CURRENCIES[0];
@@ -62,21 +94,11 @@ export default function App() {
     return [solEntry, ...splEntries];
   }, [connected, solBalance, splTokens, liveRates]);
 
-  // Show all static tokens (with balances if held) + any extra tokens from the wallet
+  // When connected → show ONLY real wallet tokens
+  // When not connected → show full static list so user can browse
   const selectableTokens = useMemo(() => {
-    if (!connected || !walletTokenList) {
-      return TOKENS.map(t => ({ ...t, price: getLiveTokPrice(t.symbol) || t.price || 0 }));
-    }
-    
-    const staticWithBalances = TOKENS.map(t => {
-      const wt = walletTokenList.find(w => w.symbol === t.symbol);
-      const livePrice = getLiveTokPrice(t.symbol) || t.price || 0;
-      return wt ? { ...t, price: livePrice, balance: wt.balance } : { ...t, price: livePrice };
-    });
-    
-    const extraTokens = walletTokenList.filter(wt => !TOKENS.find(t => t.symbol === wt.symbol));
-    
-    return [...staticWithBalances, ...extraTokens];
+    if (connected && walletTokenList) return walletTokenList;
+    return TOKENS.map(t => ({ ...t, price: getLiveTokPrice(t.symbol) || t.price || 0 }));
   }, [connected, walletTokenList, liveRates]);
 
   const tok = (walletTokenList && walletTokenList.find(t => t.symbol === token))
@@ -179,8 +201,15 @@ export default function App() {
                 <div className="field-label">Send To</div>
                 <div className="input-wrap">
                   <span className="sol-icon">◎</span>
-                  <input value={recipient} onChange={e => setRecipient(e.target.value)} placeholder="example.sol" />
+                  <input value={recipient} onChange={e => setRecipient(e.target.value)} placeholder="example.sol or address" />
                 </div>
+                {resolving && <div style={{fontSize:11, color:'var(--text3)', marginTop:6}}>Resolving domain…</div>}
+                {resolveError && <div style={{fontSize:11, color:'#f87171', marginTop:6}}>✕ {resolveError}</div>}
+                {resolvedAddress && recipient.endsWith('.sol') && (
+                  <div style={{fontSize:11, color:'var(--lime)', marginTop:6}}>
+                    ✓ Resolved: {resolvedAddress.slice(0,4)}…{resolvedAddress.slice(-4)}
+                  </div>
+                )}
               </div>
             )}
 
@@ -218,8 +247,8 @@ export default function App() {
                   <AmountInput amount={amount} setAmount={setAmount} inputMode={inputMode} setInputMode={setInputMode}
                     currency={currency} setCurrency={setCurrency} tok={tokLive} currRate={currRate} />
                 </div>
-                <button className="send-btn" disabled={!connected || !recipient || !num}>
-                  {!connected ? 'Connect wallet to send' : !recipient ? 'Enter a .sol recipient' : `Send ${dispTok} ${tokLive.symbol}`}
+                <button className="send-btn" disabled={!connected || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress)}>
+                  {!connected ? 'Connect wallet to send' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
                 </button>
               </>
             )}
