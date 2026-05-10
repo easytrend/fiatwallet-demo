@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import { getDomainKeySync, NameRegistryState } from '@bonfida/spl-name-service';
+import { getDomainKeySync, NameRegistryState, performReverseLookup } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
@@ -28,6 +28,7 @@ export default function App() {
   const [splTokens, setSplTokens] = useState([]);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState(null);
+  const [walletDomain, setWalletDomain] = useState(null);
   const [recipient, setRecipient] = useState('');
   const [resolvedAddress, setResolvedAddress] = useState(null);
   const [resolving, setResolving] = useState(false);
@@ -171,8 +172,20 @@ export default function App() {
 
   // Auto-fetch when wallet connects or changes
   useEffect(() => {
-    if (connected && publicKey) fetchBalances();
-    else { setSolBalance(null); setSplTokens([]); setWalletError(null); }
+    if (connected && publicKey) {
+      fetchBalances();
+      performReverseLookup(connection, publicKey)
+        .then(domain => {
+          if (domain) setWalletDomain(domain + '.sol');
+          else setWalletDomain(null);
+        })
+        .catch(() => setWalletDomain(null));
+    } else { 
+      setSolBalance(null); 
+      setSplTokens([]); 
+      setWalletError(null); 
+      setWalletDomain(null);
+    }
   }, [connected, publicKey?.toString()]);
 
   function handleDisconnect() {
@@ -269,7 +282,7 @@ export default function App() {
           </span>
         )}
         {connected && walletPubkey && (
-          <span className="nav-addr" title={walletPubkey}>{walletPubkey.slice(0,4) + '…' + walletPubkey.slice(-4)}</span>
+          <span className="nav-addr" title={walletPubkey}>{walletDomain || (walletPubkey.slice(0,4) + '…' + walletPubkey.slice(-4))}</span>
         )}
         {connected
           ? <button className="btn-connected" onClick={handleDisconnect}><span className="live-dot" />Disconnect ▾</button>
