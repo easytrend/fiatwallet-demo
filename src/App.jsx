@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 import { PublicKey, Transaction, SystemProgram, Connection } from '@solana/web3.js';
-import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
+import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve, getReverseNameAccount } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
@@ -241,45 +241,48 @@ export default function App() {
       const cached = localStorage.getItem(`sns_${pubkeyStr}`);
       if (cached) setWalletDomain(cached);
 
-      // 2. High-Speed Parallel Lookup
+      // 2. High-Speed Parallel Lookup (Race for fastest resolution)
       const lookupDomain = async () => {
-        // Try multiple high-performance RPCs in parallel to find the fastest responder
-        const rpcs = [
-          'https://solana-rpc.publicnode.com',
-          'https://api.mainnet-beta.solana.com',
-          'https://rpc.ankr.com/solana'
-        ];
-        
-        for (const url of rpcs) {
-          try {
-            const conn = new Connection(url);
-            // Try Primary first (most accurate)
+        try {
+          // Parallel fetch to get the fastest response
+          const apiPromise = fetch(`https://sns-sdk-proxy.bonfida.workers.dev/reverse-lookup/${pubkeyStr}`)
+            .then(r => r.json())
+            .then(j => j.domain ? j.domain + '.sol' : null)
+            .catch(() => null);
+
+          const rpcPromise = (async () => {
+            const conn = new Connection('https://solana-rpc.publicnode.com');
+            // Try Primary first as requested
             const primary = await getPrimaryDomain(conn, publicKey).catch(() => null);
-            if (primary && primary.reverse) {
-              const d = primary.reverse + '.sol';
-              setWalletDomain(d);
-              localStorage.setItem(`sns_${pubkeyStr}`, d);
-              return;
-            }
-            // Fallback to Reverse
+            if (primary && primary.reverse) return primary.reverse + '.sol';
+            // Fallback to standard reverse
             const reverse = await performReverseLookup(conn, publicKey).catch(() => null);
-            if (reverse) {
-              const d = reverse + '.sol';
-              setWalletDomain(d);
-              localStorage.setItem(`sns_${pubkeyStr}`, d);
-              return;
-            }
-            // Fallback to Favorite
-            const favorite = await getFavoriteDomain(conn, publicKey).catch(() => null);
-            if (favorite && favorite.reverse) {
-              const d = favorite.reverse + '.sol';
-              setWalletDomain(d);
-              localStorage.setItem(`sns_${pubkeyStr}`, d);
-              return;
-            }
-          } catch (e) {
-            continue; // Try next RPC
+            if (reverse) return reverse + '.sol';
+            return null;
+          })();
+
+          // The user specifically mentioned getReverseNameAccount
+          const userSuggestedPromise = (async () => {
+            try {
+              const conn = new Connection('https://api.mainnet-beta.solana.com');
+              const revAccount = await getReverseNameAccount(connection, publicKey);
+              if (revAccount) {
+                 const name = await performReverseLookup(conn, publicKey).catch(() => null);
+                 return name ? name + '.sol' : null;
+              }
+            } catch(e) {}
+            return null;
+          })();
+
+          // Race all methods
+          const winner = await Promise.race([apiPromise, rpcPromise, userSuggestedPromise].filter(p => p !== null));
+          
+          if (winner) {
+            setWalletDomain(winner);
+            localStorage.setItem(`sns_${pubkeyStr}`, winner);
           }
+        } catch (e) {
+          console.warn('Domain lookup failed:', e);
         }
       };
 
