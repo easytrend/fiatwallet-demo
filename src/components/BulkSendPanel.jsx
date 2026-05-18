@@ -24,9 +24,30 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
   const processFile = file => {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (['csv','txt'].includes(ext)) {
-      const r = new FileReader(); r.onload = e => setRows(v => [...v, ...parseCSV(e.target.result)]); r.readAsText(file);
-    } else { alert('Please upload .csv or .txt'); }
+    if (!['csv','txt'].includes(ext)) {
+      alert('Please upload a .csv or .txt file');
+      return;
+    }
+    // Security: Prevent browser crashes from maliciously huge files (limit to 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      alert('File is too large. Maximum size is 2MB.');
+      return;
+    }
+
+    const r = new FileReader(); 
+    r.onload = e => {
+      const newRows = parseCSV(e.target.result);
+      setRows(v => {
+        const combined = [...v, ...newRows];
+        // Enforce the 1000 recipient limit shown in the UI
+        if (combined.length > 1000) {
+          alert('Maximum 1,000 recipients allowed. Truncating excess rows.');
+          return combined.slice(0, 1000);
+        }
+        return combined;
+      });
+    }; 
+    r.readAsText(file);
   };
 
   const handleDrop = e => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); };
