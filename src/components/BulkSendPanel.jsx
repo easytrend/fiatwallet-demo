@@ -3,7 +3,7 @@ import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
 import { resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { CURRENCIES } from '../data/currencies';
-import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate } from '../utils';
+import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate, isValidEntry } from '../utils';
 import CurrDrop from './CurrDrop';
 import Toast from './Toast';
 
@@ -54,7 +54,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
   const handleFile = e => { if (e.target.files[0]) processFile(e.target.files[0]); e.target.value = ''; };
   const removeRow = id => setRows(r => r.filter(x => x.id !== id));
   const addManual = () => setRows(r => [...r, {id:Date.now()+Math.random(),domain:'',amount:'',valid:false,resolved:null}]);
-  const updateRow = (id,field,val) => setRows(r => r.map(x => x.id===id ? {...x,[field]:val,valid:field==='domain'?(val.length>30||val.includes('.')):x.valid,resolved:field==='domain'?null:x.resolved} : x));
+  const updateRow = (id,field,val) => setRows(r => r.map(x => x.id===id ? {...x,[field]:val,valid:field==='domain'?isValidEntry(val):x.valid,resolved:field==='domain'?null:x.resolved} : x));
   const applyGlobal = () => { if (globalAmt) setRows(r => r.map(x => ({...x, amount:globalAmt}))); };
 
   // Inline resolution for responsive feedback

@@ -18,6 +18,18 @@ export function fmtFiat(v, code) {
   return v.toFixed(2) + " " + code;
 }
 
+
+// Validates a Solana address or .sol domain from a CSV row
+export function isValidEntry(domain) {
+  if (!domain || domain.length < 3) return false;
+  // .sol domains: must end with .sol and have at least one character before it
+  if (domain.endsWith('.sol')) return domain.length > 4;
+  // Solana public keys: base58, always exactly 32–44 characters
+  if (domain.length < 32 || domain.length > 44) return false;
+  // Must only contain base58 characters (no 0, O, I, l)
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(domain);
+}
+
 export function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
   let start = 0;
@@ -26,7 +38,7 @@ export function parseCSV(text) {
     const p = line.split(/[,\t]/);
     const domain = (p[0] || "").trim();
     const amt = parseFloat((p[1] || "").trim());
-    return { id: Date.now() + i + Math.random(), domain, amount: isNaN(amt) ? "" : String(amt), valid: domain.length > 2 };
+    return { id: Date.now() + i + Math.random(), domain, amount: isNaN(amt) ? "" : String(amt), valid: isValidEntry(domain) };
   }).filter(r => r.domain);
 }
 
