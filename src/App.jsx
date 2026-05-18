@@ -159,21 +159,31 @@ export default function App() {
       const lamports = await connection.getBalance(publicKey, 'confirmed');
       setSolBalance(lamports / 1e9);
 
-      // 1. Fetch ALL token accounts (no filtering)
+      // 1. Fetch ALL token accounts
+      // NOTE: publicnode blocks getParsedTokenAccountsByOwner — we must use a different RPC for this call.
+      // We try multiple free endpoints in order until one succeeds.
+      const TOKEN_FETCH_RPCS = [
+        'https://api.mainnet-beta.solana.com',
+        'https://rpc.ankr.com/solana',
+        'https://mainnet.helius-rpc.com/?api-key=15319bf8-35b6-4a2c-aa8b-09c1e7f6b5a0',
+      ];
+      const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+      const token2022ProgramId = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
       let results = [];
-      try {
-        const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-        const token2022ProgramId = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
-        
-        // Fetch from both token programs using our main connection (publicnode is much more permissive than mainnet-beta)
-        const [resp1, resp2] = await Promise.all([
-          connection.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
-          connection.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId })
-        ]);
-        
-        results = [...(resp1.value || []), ...(resp2.value || [])];
-      } catch (e) {
-        console.warn('Bulk fetch failed:', e);
+      for (const rpcUrl of TOKEN_FETCH_RPCS) {
+        try {
+          const rpcConn = new Connection(rpcUrl);
+          const [resp1, resp2] = await Promise.all([
+            rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
+            rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
+          ]);
+          results = [...(resp1.value || []), ...(resp2.value || [])];
+          console.log(`✅ Token accounts fetched via ${rpcUrl}: ${results.length} accounts`);
+          break; // success — stop trying
+        } catch (e) {
+          console.warn(`❌ Token fetch failed via ${rpcUrl}:`, e.message);
+        }
       }
 
       const mintMap = {};
@@ -186,23 +196,25 @@ export default function App() {
 
       const allMints = Object.keys(mintMap);
       
-      // 2. Batch fetch metadata and prices for ALL held tokens from Jupiter
+      // 2. Batch fetch metadata and prices for ALL held tokens
       let jupMeta = {};
       let jupPrices = {};
       
       if (allMints.length > 0) {
         try {
-          const metaPromises = allMints.map(m => 
-            fetch(`https://tokens.jup.ag/token/${m}`).then(r => r.json()).catch(() => null)
-          );
-          const metaResults = await Promise.all(metaPromises);
-          metaResults.forEach((m, idx) => {
-            if (m) jupMeta[allMints[idx]] = m;
-          });
+          // Batch fetch: one request for all mints instead of N individual requests
+          const [tokenListResp, priceResp] = await Promise.all([
+            fetch(`https://tokens.jup.ag/tokens`).then(r => r.json()).catch(() => []),
+            fetch(`https://api.jup.ag/price/v2?ids=${allMints.join(',')}`).then(r => r.json()).catch(() => ({})),
+          ]);
 
-          const priceResp = await fetch(`https://api.jup.ag/price/v2/lookup?ids=${allMints.join(',')}`);
-          const priceData = await priceResp.json();
-          jupPrices = priceData.data || {};
+          // Build a mint → metadata map from the full token list
+          if (Array.isArray(tokenListResp)) {
+            tokenListResp.forEach(t => {
+              if (allMints.includes(t.address)) jupMeta[t.address] = t;
+            });
+          }
+          jupPrices = priceResp.data || {};
         } catch (e) {
           console.warn('Jupiter API fetch failed:', e);
         }
