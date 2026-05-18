@@ -1,3 +1,6 @@
+import { Connection, PublicKey } from '@solana/web3.js';
+import { resolve, getPrimaryDomain, performReverseLookup } from '@bonfida/spl-name-service';
+
 export function fmtRate(r) {
   if (r >= 10000) return r.toLocaleString(undefined, { maximumFractionDigits:0 });
   if (r >= 1)     return r.toFixed(2);
@@ -77,4 +80,47 @@ export async function rpcFetch(method, params) {
     }
   }
   throw new Error("All RPC nodes failed:\n" + errors.join("\n"));
+}
+
+export async function robustResolve(domain) {
+  const RESOLVE_RPCS = [
+    'https://api.mainnet-beta.solana.com',
+    'https://rpc.ankr.com/solana',
+    'https://solana-rpc.publicnode.com'
+  ];
+  for (const rpcUrl of RESOLVE_RPCS) {
+    try {
+      const conn = new Connection(rpcUrl);
+      const addr = await Promise.race([
+        resolve(conn, domain),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 4000))
+      ]);
+      if (addr) return addr;
+    } catch (e) {
+      console.warn(`Resolve failed on ${rpcUrl}:`, e.message);
+    }
+  }
+  throw new Error(`Failed to resolve domain: ${domain}`);
+}
+
+export async function robustReverseLookup(publicKeyObj) {
+  const RESOLVE_RPCS = [
+    'https://api.mainnet-beta.solana.com',
+    'https://rpc.ankr.com/solana',
+    'https://solana-rpc.publicnode.com'
+  ];
+  for (const rpcUrl of RESOLVE_RPCS) {
+    try {
+      const conn = new Connection(rpcUrl);
+      // Try Primary first as requested
+      const primary = await getPrimaryDomain(conn, publicKeyObj).catch(() => null);
+      if (primary && primary.reverse) return primary.reverse + '.sol';
+      // Fallback to standard reverse
+      const reverse = await performReverseLookup(conn, publicKeyObj).catch(() => null);
+      if (reverse) return reverse + '.sol';
+    } catch (e) {
+      console.warn(`Reverse lookup failed on ${rpcUrl}:`, e.message);
+    }
+  }
+  return null;
 }

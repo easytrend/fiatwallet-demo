@@ -25,8 +25,22 @@ export default function AmountInput({ amount, setAmount, inputMode, setInputMode
       <div className="amount-block" style={{marginTop: inputMode === 'fiat' ? 8 : 0}}>
         <div className="amount-top">
           <div className="amount-num-wrap">
-            <input className="amount-num" type="number" value={amount}
-              onChange={e => setAmount(e.target.value)} placeholder="0" />
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              <input className="amount-num" type="number" value={amount}
+                onChange={e => setAmount(e.target.value)} placeholder="0" />
+              {tok && tok.balance > 0 && (
+                <button className="max-btn" type="button" onClick={() => {
+                  if (inputMode === 'fiat') {
+                    const fiatMax = tok.balance * tokPrice * rate;
+                    setAmount(fiatMax.toFixed(2));
+                  } else {
+                    setAmount(tok.balance.toString());
+                  }
+                }}>
+                  MAX
+                </button>
+              )}
+            </div>
           </div>
           {inputMode === 'crypto' && tok && (
             <div style={{display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:9,padding:'7px 10px',fontSize:13,fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',flexShrink:0}}>

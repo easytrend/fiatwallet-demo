@@ -1,9 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
-import { resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { CURRENCIES } from '../data/currencies';
-import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate, isValidEntry } from '../utils';
+import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate, isValidEntry, robustResolve } from '../utils';
 import CurrDrop from './CurrDrop';
 import Toast from './Toast';
 
@@ -59,14 +58,14 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
   // Inline resolution for responsive feedback
   const [resolvingIds, setResolvingIds] = useState(new Set());
-  useState(() => {
+  useEffect(() => {
     const timer = setTimeout(async () => {
       const target = rows.find(r => r.domain.endsWith('.sol') && !r.resolved && !resolvingIds.has(r.id));
       if (!target) return;
 
       setResolvingIds(prev => new Set(prev).add(target.id));
       try {
-        const addr = await resolve(connection, target.domain);
+        const addr = await robustResolve(target.domain);
         setRows(curr => curr.map(r => r.id === target.id ? { ...r, resolved: addr.toBase58(), valid: true } : r));
       } catch (e) {
         setRows(curr => curr.map(r => r.id === target.id ? { ...r, valid: false } : r));
@@ -75,7 +74,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       }
     }, 600);
     return () => clearTimeout(timer);
-  }, [rows]);
+  }, [rows, resolvingIds]);
 
   // Poll signature status instead of relying on WS confirmTransaction
   async function pollConfirmation(connection, signature, timeoutMs = 60000) {
@@ -129,10 +128,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
         if (addressStr.endsWith('.sol')) {
           try {
-            const address = await Promise.race([
-              resolve(connection, addressStr),
-              new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 7000))
-            ]);
+            const address = await robustResolve(addressStr);
             addressStr = address.toBase58();
           } catch (err) {
             throw new Error(`Failed to resolve domain: ${row.domain}`);

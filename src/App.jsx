@@ -8,7 +8,7 @@ import logoImg from './assets/logo.png';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
 import { useLiveRates } from './hooks/useLiveRates';
-import { fmtTok, fmtFiat, fmtRate } from './utils';
+import { fmtTok, fmtFiat, fmtRate, robustResolve, robustReverseLookup } from './utils';
 import CurrDrop from './components/CurrDrop';
 import AmountInput from './components/AmountInput';
 import BulkSendPanel from './components/BulkSendPanel';
@@ -59,11 +59,7 @@ export default function App() {
         setResolveError(null);
         setResolvedAddress(null);
         try {
-          // Promise.race to prevent infinite 429 retries
-          const address = await Promise.race([
-            resolve(connection, recipient),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 7000))
-          ]);
+          const address = await robustResolve(recipient);
           setResolvedAddress(address.toBase58());
         } catch (err) {
           setResolveError('Domain not found or invalid');
@@ -80,7 +76,7 @@ export default function App() {
     }
     const t = setTimeout(checkDomain, 500);
     return () => clearTimeout(t);
-  }, [recipient, connection]);
+  }, [recipient]);
 
   function getLiveCurrRate(code) {
     const s = CURRENCIES.find(c => c.code === code) || CURRENCIES[0];
@@ -231,25 +227,18 @@ export default function App() {
       // 2. High-Speed Parallel Lookup (Race for fastest resolution)
       const lookupDomain = async () => {
         try {
-          // Parallel fetch to get the fastest response
           const apiPromise = fetch(`https://sns-sdk-proxy.bonfida.workers.dev/reverse-lookup/${pubkeyStr}`)
             .then(r => r.json())
-            .then(j => j.domain ? j.domain + '.sol' : null)
-            .catch(() => null);
+            .then(j => j.domain ? j.domain + '.sol' : Promise.reject())
+            .catch(() => Promise.reject());
 
           const rpcPromise = (async () => {
-            const conn = new Connection('https://solana-rpc.publicnode.com');
-            // Try Primary first as requested
-            const primary = await getPrimaryDomain(conn, publicKey).catch(() => null);
-            if (primary && primary.reverse) return primary.reverse + '.sol';
-            // Fallback to standard reverse
-            const reverse = await performReverseLookup(conn, publicKey).catch(() => null);
-            if (reverse) return reverse + '.sol';
-            return null;
+            const domain = await robustReverseLookup(publicKey);
+            if (domain) return domain;
+            throw new Error('Not found');
           })();
 
-          // Race all valid methods
-          const winner = await Promise.race([apiPromise, rpcPromise].filter(p => p !== null));
+          const winner = await Promise.any([apiPromise, rpcPromise]).catch(() => null);
           
           if (winner) {
             setWalletDomain(winner);
@@ -289,14 +278,57 @@ export default function App() {
       transaction.add(addPriorityFee);
 
       if (tokLive.symbol === 'SOL') {
-        const lamports = Math.round(tokAmt * 1e9);
-        transaction.add(
-          SystemProgram.transfer({
+        let lamports = Math.round(tokAmt * 1e9);
+        const solBalanceLamports = Math.round(solBalance * 1e9);
+
+        // If trying to send everything or very close to everything, estimate and subtract the exact fee
+        if (lamports >= solBalanceLamports - 50000) {
+          // Add temporary instruction to get the estimated fee
+          const tempTransfer = SystemProgram.transfer({
             fromPubkey: publicKey,
             toPubkey: finalRecipient,
-            lamports
-          })
-        );
+            lamports: 1000
+          });
+          transaction.add(tempTransfer);
+
+          const latestBlockhash = await connection.getLatestBlockhash();
+          transaction.recentBlockhash = latestBlockhash.blockhash;
+          transaction.feePayer = publicKey;
+
+          let fee = 5000;
+          try {
+            const feeResponse = await transaction.getEstimatedFee(connection);
+            if (feeResponse !== null && feeResponse !== undefined) {
+              fee = feeResponse;
+            }
+          } catch (e) {
+            console.warn("Failed to estimate transaction fee:", e);
+          }
+
+          lamports = solBalanceLamports - fee;
+          if (lamports <= 0) {
+            throw new Error(`Insufficient SOL balance to cover the network fee of ${fee / 1e9} SOL.`);
+          }
+
+          // Rebuild with the exact balance minus fee
+          transaction.instructions = [];
+          transaction.add(addPriorityFee);
+          transaction.add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: finalRecipient,
+              lamports
+            })
+          );
+        } else {
+          transaction.add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: finalRecipient,
+              lamports
+            })
+          );
+        }
       } else {
         const mintPubkey = new PublicKey(tokLive.mint);
         
@@ -331,9 +363,11 @@ export default function App() {
         );
       }
 
-      const latestBlockhash = await connection.getLatestBlockhash();
-      transaction.recentBlockhash = latestBlockhash.blockhash;
-      transaction.feePayer = publicKey;
+      if (!transaction.recentBlockhash) {
+        const latestBlockhash = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = latestBlockhash.blockhash;
+        transaction.feePayer = publicKey;
+      }
 
       const signature = await sendTransaction(transaction, connection);
       console.log('Transaction sent:', signature);
