@@ -19,7 +19,7 @@ const SNS_LINK = 'https://www.sns.id?easytrend.sol';
 
 export default function App() {
   const { connection } = useConnection();
-  const { publicKey, connected, disconnect, sendTransaction, signAllTransactions } = useWallet();
+  const { publicKey, connected, disconnect, sendTransaction, signTransaction, signAllTransactions } = useWallet();
   const { setVisible } = useWalletModal();
 
   // SPL Token Program ID
@@ -344,15 +344,32 @@ export default function App() {
         );
       }
 
-      const latestBlockhash = await connection.getLatestBlockhash();
+      const latestBlockhash = await connection.getLatestBlockhash('confirmed');
       const messageV0 = new TransactionMessage({
         payerKey: publicKey,
         recentBlockhash: latestBlockhash.blockhash,
         instructions: transaction.instructions,
       }).compileToV0Message();
-      const versionedTransaction = new VersionedTransaction(messageV0);
+      const versionedTx = new VersionedTransaction(messageV0);
 
-      const signature = await sendTransaction(versionedTransaction, connection);
+      // Use signTransaction → sendRawTransaction pattern for MWA/Seeker compatibility.
+      // sendTransaction on MWA can drop the signature before it reaches the RPC.
+      let signature;
+      if (signTransaction) {
+        const signedTx = await signTransaction(versionedTx);
+        signature = await connection.sendRawTransaction(signedTx.serialize(), {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+          maxRetries: 5,
+        });
+      } else {
+        // Fallback for wallets that only expose sendTransaction (e.g. Ledger)
+        signature = await sendTransaction(versionedTx, connection, {
+          skipPreflight: false,
+          preflightCommitment: 'confirmed',
+          maxRetries: 5,
+        });
+      }
       console.log('Transaction sent:', signature);
 
       // Poll for confirmation instead of relying on the WS subscription
@@ -515,7 +532,7 @@ export default function App() {
             {bulkMode ? (
               <BulkSendPanel tok={tokLive} connected={connected} getLiveRate={getLiveCurrRate}
                 connection={connection} publicKey={publicKey}
-                sendTransaction={sendTransaction} signAllTransactions={signAllTransactions} />
+                sendTransaction={sendTransaction} signTransaction={signTransaction} signAllTransactions={signAllTransactions} />
             ) : (
               <>
                 <div className="field">

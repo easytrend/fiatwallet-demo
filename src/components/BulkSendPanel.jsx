@@ -7,7 +7,7 @@ import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate } from '../utils';
 import CurrDrop from './CurrDrop';
 import Toast from './Toast';
 
-export default function BulkSendPanel({ tok, connected, getLiveRate, connection, publicKey, sendTransaction, signAllTransactions }) {
+export default function BulkSendPanel({ tok, connected, getLiveRate, connection, publicKey, sendTransaction, signTransaction, signAllTransactions }) {
   const [rows, setRows] = useState([]);
   const [drag, setDrag] = useState(false);
   const [globalAmt, setGlobalAmt] = useState('');
@@ -181,7 +181,11 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
         for (let i = 0; i < signedTxs.length; i++) {
           const rawTx = signedTxs[i].serialize();
-          const sig = await connection.sendRawTransaction(rawTx);
+          const sig = await connection.sendRawTransaction(rawTx, {
+            skipPreflight: false,
+            preflightCommitment: 'confirmed',
+            maxRetries: 5,
+          });
           signatures.push(sig);
           const confirmed = await pollConfirmation(connection, sig);
           if (!confirmed) throw new Error(`Batch ${i + 1} timed out — check Solscan for: ${sig.slice(0,8)}…`);
@@ -190,7 +194,22 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       } else {
         setSendingState('sending');
         for (let i = 0; i < versionedTransactions.length; i++) {
-          const sig = await sendTransaction(versionedTransactions[i], connection);
+          // Use signTransaction → sendRawTransaction for MWA/Seeker compatibility
+          let sig;
+          if (signTransaction) {
+            const signedTx = await signTransaction(versionedTransactions[i]);
+            sig = await connection.sendRawTransaction(signedTx.serialize(), {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed',
+              maxRetries: 5,
+            });
+          } else {
+            sig = await sendTransaction(versionedTransactions[i], connection, {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed',
+              maxRetries: 5,
+            });
+          }
           signatures.push(sig);
           const confirmed = await pollConfirmation(connection, sig);
           if (!confirmed) throw new Error(`Batch ${i + 1} timed out — check Solscan for: ${sig.slice(0,8)}…`);
