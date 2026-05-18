@@ -39,9 +39,9 @@ function Root() {
       },
       authorizationResultCache: createDefaultAuthorizationResultCache(),
       cluster: 'mainnet-beta',
-      onWalletNotFound: (client) => {
-        // Optionally handle when no wallet is found on the device
-      }
+      onWalletNotFound: async (mobileWalletAdapterConfig) => {
+        window.open('https://solanamobile.com/wallets', '_blank');
+      },
     }),
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),

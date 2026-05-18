@@ -19,7 +19,7 @@ const SNS_LINK = 'https://www.sns.id?easytrend.sol';
 
 export default function App() {
   const { connection } = useConnection();
-  const { publicKey, connected, disconnect, sendTransaction, signTransaction, signAllTransactions } = useWallet();
+  const { publicKey, connected, disconnect, sendTransaction, signAllTransactions } = useWallet();
   const { setVisible } = useWalletModal();
 
   // SPL Token Program ID
@@ -352,24 +352,15 @@ export default function App() {
       }).compileToV0Message();
       const versionedTx = new VersionedTransaction(messageV0);
 
-      // Use signTransaction → sendRawTransaction pattern for MWA/Seeker compatibility.
-      // sendTransaction on MWA can drop the signature before it reaches the RPC.
-      let signature;
-      if (signTransaction) {
-        const signedTx = await signTransaction(versionedTx);
-        signature = await connection.sendRawTransaction(signedTx.serialize(), {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-          maxRetries: 5,
-        });
-      } else {
-        // Fallback for wallets that only expose sendTransaction (e.g. Ledger)
-        signature = await sendTransaction(versionedTx, connection, {
-          skipPreflight: false,
-          preflightCommitment: 'confirmed',
-          maxRetries: 5,
-        });
-      }
+      // MWA (Seeker/Seed Vault) uses signAndSendTransaction atomically.
+      // skipPreflight avoids the false "Missing signature" preflight error that
+      // occurs because simulation runs before MWA signs. Real on-chain errors
+      // are caught by our polling loop below.
+      const signature = await sendTransaction(versionedTx, connection, {
+        skipPreflight: true,
+        preflightCommitment: 'confirmed',
+        maxRetries: 5,
+      });
       console.log('Transaction sent:', signature);
 
       // Poll for confirmation instead of relying on the WS subscription
@@ -532,7 +523,7 @@ export default function App() {
             {bulkMode ? (
               <BulkSendPanel tok={tokLive} connected={connected} getLiveRate={getLiveCurrRate}
                 connection={connection} publicKey={publicKey}
-                sendTransaction={sendTransaction} signTransaction={signTransaction} signAllTransactions={signAllTransactions} />
+                sendTransaction={sendTransaction} signAllTransactions={signAllTransactions} />
             ) : (
               <>
                 <div className="field">
