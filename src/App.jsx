@@ -44,28 +44,8 @@ export default function App() {
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [token, setToken] = useState('');
-  const [staticLogos, setStaticLogos] = useState({});
 
   const { liveRates, ratesLoading } = useLiveRates();
-
-  // Fetch logos for static tokens on mount
-  useEffect(() => {
-    async function loadStaticLogos() {
-      const logos = {};
-      const mints = Object.keys(KNOWN_MINTS);
-      try {
-        const metaPromises = mints.map(m => 
-          fetch(`https://tokens.jup.ag/token/${m}`).then(r => r.json()).catch(() => null)
-        );
-        const results = await Promise.all(metaPromises);
-        results.forEach((m, idx) => {
-          if (m && m.logoURI) logos[KNOWN_MINTS[mints[idx]].symbol] = m.logoURI;
-        });
-        setStaticLogos(logos);
-      } catch (e) { console.warn('Static logo fetch failed:', e); }
-    }
-    loadStaticLogos();
-  }, []);
 
   useEffect(() => {
     setWalletPubkey(publicKey?.toString() || null);
@@ -135,9 +115,11 @@ export default function App() {
     return TOKENS.map(t => ({ 
       ...t, 
       price: getLiveTokPrice(t.symbol) || t.price || 0,
-      logoURI: t.symbol === 'SOL' ? 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' : staticLogos[t.symbol]
+      logoURI: t.symbol === 'SOL'
+        ? 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png'
+        : Object.values(KNOWN_MINTS).find(k => k.symbol === t.symbol)?.logoURI
     }));
-  }, [connected, walletTokenList, liveRates, staticLogos]);
+  }, [connected, walletTokenList, liveRates]);
 
   const tok = token ? ((walletTokenList && walletTokenList.find(t => t.symbol === token))
     || TOKENS.find(t => t.symbol === token)) : null;
@@ -196,46 +178,33 @@ export default function App() {
 
       const allMints = Object.keys(mintMap);
       
-      // 2. Batch fetch metadata and prices for ALL held tokens
-      let jupMeta = {};
+      // 2. Fetch live prices from Jupiter price API (api.jup.ag, different from tokens.jup.ag)
       let jupPrices = {};
-      
       if (allMints.length > 0) {
         try {
-          // Batch fetch: one request for all mints instead of N individual requests
-          const [tokenListResp, priceResp] = await Promise.all([
-            fetch(`https://tokens.jup.ag/tokens`).then(r => r.json()).catch(() => []),
-            fetch(`https://api.jup.ag/price/v2?ids=${allMints.join(',')}`).then(r => r.json()).catch(() => ({})),
-          ]);
-
-          // Build a mint → metadata map from the full token list
-          if (Array.isArray(tokenListResp)) {
-            tokenListResp.forEach(t => {
-              if (allMints.includes(t.address)) jupMeta[t.address] = t;
-            });
-          }
-          jupPrices = priceResp.data || {};
+          const priceResp = await fetch(`https://api.jup.ag/price/v2?ids=${allMints.join(',')}`);
+          const priceData = await priceResp.json();
+          jupPrices = priceData.data || {};
         } catch (e) {
-          console.warn('Jupiter API fetch failed:', e);
+          console.warn('Jupiter price fetch failed:', e);
         }
       }
 
-      // 3. Construct the full portfolio list
+      // 3. Construct the full portfolio list using KNOWN_MINTS for metadata
       const toks = allMints.map(mint => {
         const balance = mintMap[mint];
-        const dynamic = jupMeta[mint] || {};
         const priceInfo = jupPrices[mint] || {};
         const staticMeta = KNOWN_MINTS[mint] || {};
 
         return {
           mint,
           uiAmount: balance,
-          symbol: dynamic.symbol || staticMeta.symbol || mint.slice(0, 4),
-          name: dynamic.name || staticMeta.name || 'Unknown Token',
-          price: parseFloat(priceInfo.price || staticMeta.price || 0),
-          color: staticMeta.color || '#aaa',
-          bg: staticMeta.bg || 'rgba(255,255,255,0.08)',
-          logoURI: dynamic.logoURI || staticMeta.logoURI
+          symbol:   staticMeta.symbol  || mint.slice(0, 6),
+          name:     staticMeta.name    || 'Unknown Token',
+          price:    parseFloat(priceInfo.price || staticMeta.price || 0),
+          color:    staticMeta.color   || '#aaa',
+          bg:       staticMeta.bg      || 'rgba(255,255,255,0.08)',
+          logoURI:  staticMeta.logoURI || null,
         };
       });
 
