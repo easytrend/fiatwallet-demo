@@ -84,11 +84,27 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
     setToast(null);
 
     try {
+      // 0. Pre-validate rows with amounts but invalid domains
+      const invalidRows = rows.filter(r => r.amount && !r.valid);
+      if (invalidRows.length > 0) {
+        throw new Error(`Invalid address detected: "${invalidRows[0].domain}". Please fix or remove it.`);
+      }
+
+      // Check for raw string duplicates (fast check)
+      const domainSet = new Set();
+      for (const r of validRows) {
+        const d = r.domain.toLowerCase().trim();
+        if (domainSet.has(d)) throw new Error(`Duplicate recipient detected: "${r.domain}".`);
+        domainSet.add(d);
+      }
+
       // 1. Resolve all domains and validate recipients
       const resolvedRecipients = [];
+      const seenPubkeys = new Set();
+
       for (let i = 0; i < validRows.length; i++) {
         const row = validRows[i];
-        let addressStr = row.domain;
+        let addressStr = row.domain.trim();
 
         if (addressStr.endsWith('.sol')) {
           try {
@@ -108,6 +124,12 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         } catch (err) {
           throw new Error(`Invalid address for ${row.domain}`);
         }
+
+        const pubkeyStr = recipientPubkey.toBase58();
+        if (seenPubkeys.has(pubkeyStr)) {
+          throw new Error(`Duplicate recipient detected: "${row.domain}" resolves to the same address as another recipient.`);
+        }
+        seenPubkeys.add(pubkeyStr);
 
         const num = parseFloat(row.amount);
         const tokPrice = tok ? tok.price : 1;
