@@ -238,7 +238,31 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
     }
   };
 
-  const validRows = rows.filter(r => r.valid && r.amount);
+  // Calculate duplicates dynamically for UI rendering
+  const domainCounts = {};
+  const resolvedCounts = {};
+  rows.forEach(r => {
+    const d = r.domain.toLowerCase().trim();
+    if (d) domainCounts[d] = (domainCounts[d] || 0) + 1;
+    if (r.resolved) resolvedCounts[r.resolved] = (resolvedCounts[r.resolved] || 0) + 1;
+  });
+
+  const getRowStatus = (row) => {
+    const d = row.domain.toLowerCase().trim();
+    if (d && domainCounts[d] > 1) return { ok: false, msg: 'Dup', className: 's-err' };
+    if (row.resolved && resolvedCounts[row.resolved] > 1) return { ok: false, msg: 'Dup', className: 's-err' };
+    if (!row.valid && row.domain.length > 0) return { ok: false, msg: 'Err', className: 's-err' };
+    if (!row.amount) return { ok: false, msg: 'Amt', className: 's-err' };
+    if (row.valid && row.amount) return { ok: true, msg: 'OK', className: 's-ok' };
+    return { ok: false, msg: 'Err', className: 's-err' };
+  };
+
+  const validRows = rows.filter(r => getRowStatus(r).ok);
+  const hasDuplicates = rows.some(r => {
+    const st = getRowStatus(r);
+    return st.msg === 'Dup';
+  });
+
   const tokPrice = tok ? tok.price : 1;
   const tokSymbol = tok ? tok.symbol : 'Token';
 
@@ -340,9 +364,9 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
                   <input style={{background:'transparent',border:'none',outline:'none',color:'var(--text2)',fontFamily:'var(--mono)',fontSize:11,width:'90%'}}
                     value={row.amount} placeholder="0" type="number" onChange={e => updateRow(row.id,'amount',e.target.value)} />
                 </div>
-                <div className={`rt-status ${row.valid&&row.amount?'s-ok':'s-err'}`}>
+                <div className={`rt-status ${getRowStatus(row).className}`}>
                   <span className="s-dot" />
-                  <span className="s-txt">{row.valid&&row.amount?'OK':!row.valid?'Err':'Amt'}</span>
+                  <span className="s-txt">{getRowStatus(row).msg}</span>
                 </div>
                 <button className="rt-del" onClick={() => removeRow(row.id)}>✕</button>
               </div>
@@ -369,11 +393,12 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       )}
 
       <button className="send-btn"
-        disabled={!connected || !tok || validRows.length === 0 || ['resolving','signing','sending'].includes(sendingState)}
+        disabled={!connected || !tok || validRows.length === 0 || hasDuplicates || ['resolving','signing','sending'].includes(sendingState)}
         onClick={handleBulkSend}>
         {!connected ? 'Connect wallet to send'
           : !tok ? 'Select a token to continue'
-          : validRows.length === 0 ? 'Add recipients to continue'
+          : hasDuplicates ? 'Fix duplicate recipients to continue'
+          : validRows.length === 0 ? 'Add valid recipients to continue'
           : ['resolving','signing','sending'].includes(sendingState) ? 'Processing...'
           : `Send ${tokSymbol} to ${validRows.length} recipient${validRows.length!==1?'s':''}`}
       </button>
