@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { PublicKey, Transaction, SystemProgram, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
 import { resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { CURRENCIES } from '../data/currencies';
@@ -161,29 +161,17 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         transactions.push(tx);
       }
 
-      // 4. Convert legacy Transactions to VersionedTransactions
-      const versionedTransactions = transactions.map(tx => {
-        const messageV0 = new TransactionMessage({
-          payerKey: publicKey,
-          recentBlockhash: tx.recentBlockhash,
-          instructions: tx.instructions,
-        }).compileToV0Message();
-        return new VersionedTransaction(messageV0);
-      });
-
-      // 5. Sign and send with polling confirmation
-      setProgress({ current: 0, total: versionedTransactions.length });
+      // 4. Sign and send with polling confirmation
+      setProgress({ current: 0, total: transactions.length });
       const signatures = [];
 
-      if (versionedTransactions.length > 1 && signAllTransactions) {
-        const signedTxs = await signAllTransactions(versionedTransactions);
+      if (transactions.length > 1 && signAllTransactions) {
+        const signedTxs = await signAllTransactions(transactions);
         setSendingState('sending');
+
         for (let i = 0; i < signedTxs.length; i++) {
-          const sig = await connection.sendRawTransaction(signedTxs[i].serialize(), {
-            skipPreflight: true,
-            preflightCommitment: 'confirmed',
-            maxRetries: 5,
-          });
+          const rawTx = signedTxs[i].serialize();
+          const sig = await connection.sendRawTransaction(rawTx);
           signatures.push(sig);
           const confirmed = await pollConfirmation(connection, sig);
           if (!confirmed) throw new Error(`Batch ${i + 1} timed out — check Solscan for: ${sig.slice(0,8)}…`);
@@ -191,12 +179,8 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         }
       } else {
         setSendingState('sending');
-        for (let i = 0; i < versionedTransactions.length; i++) {
-          const sig = await sendTransaction(versionedTransactions[i], connection, {
-            skipPreflight: true,
-            preflightCommitment: 'confirmed',
-            maxRetries: 5,
-          });
+        for (let i = 0; i < transactions.length; i++) {
+          const sig = await sendTransaction(transactions[i], connection);
           signatures.push(sig);
           const confirmed = await pollConfirmation(connection, sig);
           if (!confirmed) throw new Error(`Batch ${i + 1} timed out — check Solscan for: ${sig.slice(0,8)}…`);

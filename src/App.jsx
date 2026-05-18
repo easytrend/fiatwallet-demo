@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { PublicKey, Transaction, SystemProgram, Connection, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Connection } from '@solana/web3.js';
 import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
@@ -344,23 +344,11 @@ export default function App() {
         );
       }
 
-      const latestBlockhash = await connection.getLatestBlockhash('confirmed');
-      const messageV0 = new TransactionMessage({
-        payerKey: publicKey,
-        recentBlockhash: latestBlockhash.blockhash,
-        instructions: transaction.instructions,
-      }).compileToV0Message();
-      const versionedTx = new VersionedTransaction(messageV0);
+      const latestBlockhash = await connection.getLatestBlockhash();
+      transaction.recentBlockhash = latestBlockhash.blockhash;
+      transaction.feePayer = publicKey;
 
-      // MWA (Seeker/Seed Vault) uses signAndSendTransaction atomically.
-      // skipPreflight avoids the false "Missing signature" preflight error that
-      // occurs because simulation runs before MWA signs. Real on-chain errors
-      // are caught by our polling loop below.
-      const signature = await sendTransaction(versionedTx, connection, {
-        skipPreflight: true,
-        preflightCommitment: 'confirmed',
-        maxRetries: 5,
-      });
+      const signature = await sendTransaction(transaction, connection);
       console.log('Transaction sent:', signature);
 
       // Poll for confirmation instead of relying on the WS subscription

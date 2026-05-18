@@ -19,7 +19,6 @@ import {
   ExodusWalletAdapter,
   BraveWalletAdapter,
 } from '@solana/wallet-adapter-wallets';
-import { SolanaMobileWalletAdapter, createDefaultAuthorizationResultCache, createDefaultAddressSelector } from '@solana-mobile/wallet-adapter-mobile';
 
 // Wallet adapter default UI styles (for the "Select Wallet" modal)
 import '@solana/wallet-adapter-react-ui/styles.css';
@@ -30,19 +29,6 @@ function Root() {
   // Use a reliable free public RPC to prevent 403 Access Forbidden errors
   const endpoint = useMemo(() => 'https://solana-rpc.publicnode.com', []);
   const wallets = useMemo(() => [
-    new SolanaMobileWalletAdapter({
-      addressSelector: createDefaultAddressSelector(),
-      appIdentity: {
-        name: 'Fiatwallet',
-        uri: 'https://fiatwallet.easytrend.net',
-        icon: 'favicon.ico',
-      },
-      authorizationResultCache: createDefaultAuthorizationResultCache(),
-      cluster: 'mainnet-beta',
-      onWalletNotFound: async (mobileWalletAdapterConfig) => {
-        window.open('https://solanamobile.com/wallets', '_blank');
-      },
-    }),
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),
     new CoinbaseWalletAdapter(),
