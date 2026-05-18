@@ -14,10 +14,6 @@ import {
   TorusWalletAdapter,
   TrustWalletAdapter,
   TrezorWalletAdapter,
-  BackpackWalletAdapter,
-  GlowWalletAdapter,
-  ExodusWalletAdapter,
-  BraveWalletAdapter,
 } from '@solana/wallet-adapter-wallets';
 
 // Wallet adapter default UI styles (for the "Select Wallet" modal)
@@ -36,10 +32,6 @@ function Root() {
     new TorusWalletAdapter(),
     new TrustWalletAdapter(),
     new TrezorWalletAdapter(),
-    new BackpackWalletAdapter(),
-    new GlowWalletAdapter(),
-    new ExodusWalletAdapter(),
-    new BraveWalletAdapter(),
   ], []);
 
   return (
