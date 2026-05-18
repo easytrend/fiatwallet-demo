@@ -155,6 +155,49 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         resolvedRecipients.push({ pubkey: recipientPubkey, tokAmt });
       }
 
+      // Check if sending all SOL to estimate and subtract transaction fees dynamically
+      if (tok.symbol === 'SOL') {
+        const totalRequestedSOL = resolvedRecipients.reduce((sum, r) => sum + r.tokAmt, 0);
+        const solBalance = tok.balance || 0;
+
+        if (totalRequestedSOL >= solBalance - 0.005) {
+          const tempChunkSize = 10;
+          let totalEstimatedFee = 0;
+          const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+          const { ComputeBudgetProgram } = await import('@solana/web3.js');
+          const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 });
+
+          for (let i = 0; i < resolvedRecipients.length; i += tempChunkSize) {
+            const chunk = resolvedRecipients.slice(i, i + tempChunkSize);
+            const tx = new Transaction();
+            tx.add(addPriorityFee);
+            tx.recentBlockhash = latestBlockhash.blockhash;
+            tx.feePayer = publicKey;
+
+            for (const rec of chunk) {
+              const lamports = Math.round(rec.tokAmt * 1e9);
+              tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: rec.pubkey, lamports }));
+            }
+
+            let txFee = 5000;
+            try {
+              const est = await tx.getEstimatedFee(connection);
+              if (est !== null && est !== undefined) txFee = est;
+            } catch (e) {
+              console.warn("Failed to estimate bulk tx chunk fee:", e);
+            }
+            totalEstimatedFee += txFee;
+          }
+
+          const feeSol = totalEstimatedFee / 1e9;
+          const feeSharePerRecipient = feeSol / resolvedRecipients.length;
+
+          resolvedRecipients.forEach(rec => {
+            rec.tokAmt = Math.max(0, rec.tokAmt - feeSharePerRecipient);
+          });
+        }
+      }
+
       setSendingState('signing');
 
       // 2. Fetch mint info if SPL token
@@ -307,8 +350,24 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         <div className="amount-block" style={{marginTop: bulkMode==='fiat' ? 8 : 0}}>
           <div className="amount-top">
             <div className="amount-num-wrap">
-              <input className="amount-num" type="number" value={globalAmt}
-                onChange={e => setGlobalAmt(e.target.value)} placeholder="0" style={{fontSize:18}} />
+              <div style={{display:'flex', alignItems:'center', gap:8}}>
+                <input className="amount-num" type="number" value={globalAmt}
+                  onChange={e => setGlobalAmt(e.target.value)} placeholder="0" style={{fontSize:18}} />
+                {tok && tok.balance > 0 && (
+                  <button className="max-btn" type="button" onClick={() => {
+                    const numRecipients = rows.length > 0 ? rows.length : 1;
+                    const maxPerRecipient = tok.balance / numRecipients;
+                    if (bulkMode === 'fiat') {
+                      const fiatMax = maxPerRecipient * tokPrice * liveRate;
+                      setGlobalAmt(fiatMax.toFixed(2));
+                    } else {
+                      setGlobalAmt(maxPerRecipient.toString());
+                    }
+                  }}>
+                    MAX
+                  </button>
+                )}
+              </div>
             </div>
             {bulkMode==='crypto' && tok && (
               <div style={{display:'flex',alignItems:'center',gap:6,background:'rgba(255,255,255,0.07)',border:'1px solid var(--border)',borderRadius:9,padding:'7px 10px',fontSize:13,fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',flexShrink:0}}>
