@@ -162,12 +162,18 @@ export default function App() {
       // 1. Fetch ALL token accounts (no filtering)
       let results = [];
       try {
-        const fastConn = new Connection('https://api.mainnet-beta.solana.com');
         const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-        const resp = await fastConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId });
-        results = resp.value || [];
+        const token2022ProgramId = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+        
+        // Fetch from both token programs using our main connection (publicnode is much more permissive than mainnet-beta)
+        const [resp1, resp2] = await Promise.all([
+          connection.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
+          connection.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId })
+        ]);
+        
+        results = [...(resp1.value || []), ...(resp2.value || [])];
       } catch (e) {
-        console.warn('Bulk fetch failed, using fallback:', e);
+        console.warn('Bulk fetch failed:', e);
       }
 
       const mintMap = {};
