@@ -15,6 +15,8 @@ import {
   TrustWalletAdapter,
   TrezorWalletAdapter,
 } from '@solana/wallet-adapter-wallets';
+import { SolanaMobileWalletAdapter } from '@solana-mobile/wallet-adapter-mobile';
+import { WalletAdapterNetwork } from '@solana/wallet-adapter-base';
 
 // Wallet adapter default UI styles (for the "Select Wallet" modal)
 import '@solana/wallet-adapter-react-ui/styles.css';
@@ -25,6 +27,14 @@ function Root() {
   // Use a reliable free public RPC to prevent 403 Access Forbidden errors
   const endpoint = useMemo(() => 'https://solana-rpc.publicnode.com', []);
   const wallets = useMemo(() => [
+    new SolanaMobileWalletAdapter({
+      appIdentity: {
+        name: 'Fiatwallet',
+        uri: window.location.origin,
+        icon: '/favicon.ico',
+      },
+      cluster: WalletAdapterNetwork.Mainnet,
+    }),
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),
     new CoinbaseWalletAdapter(),
