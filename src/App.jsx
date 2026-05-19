@@ -184,31 +184,43 @@ export default function App() {
       
       // 2. Fetch live prices from Jupiter price API (api.jup.ag, different from tokens.jup.ag)
       let jupPrices = {};
+      let jupTokensMap = {};
       if (allMints.length > 0) {
         try {
-          const priceResp = await fetch(`https://api.jup.ag/price/v2?ids=${allMints.join(',')}`);
+          const [priceResp, tokensResp] = await Promise.all([
+            fetch(`https://api.jup.ag/price/v2?ids=${allMints.join(',')}`),
+            fetch('https://tokens.jup.ag/tokens?tags=verified').catch(() => ({ json: () => [] }))
+          ]);
           const priceData = await priceResp.json();
           jupPrices = priceData.data || {};
+          
+          if (tokensResp.ok || tokensResp.json) {
+            const tokensData = await tokensResp.json();
+            if (Array.isArray(tokensData)) {
+              tokensData.forEach(t => jupTokensMap[t.address] = t);
+            }
+          }
         } catch (e) {
-          console.warn('Jupiter price fetch failed:', e);
+          console.warn('Jupiter fetch failed:', e);
         }
       }
 
-      // 3. Construct the full portfolio list using KNOWN_MINTS for metadata
+      // 3. Construct the full portfolio list using KNOWN_MINTS and Jupiter for metadata
       const toks = allMints.map(mint => {
         const balance = mintMap[mint];
         const priceInfo = jupPrices[mint] || {};
         const staticMeta = KNOWN_MINTS[mint] || {};
+        const jupMeta = jupTokensMap[mint] || {};
 
         return {
           mint,
           uiAmount: balance,
-          symbol:   staticMeta.symbol  || mint.slice(0, 6),
-          name:     staticMeta.name    || 'Unknown Token',
+          symbol:   jupMeta.symbol || staticMeta.symbol  || mint.slice(0, 6),
+          name:     jupMeta.name   || staticMeta.name    || 'Unknown Token',
           price:    parseFloat(priceInfo.price || staticMeta.price || 0),
           color:    staticMeta.color   || '#aaa',
           bg:       staticMeta.bg      || 'rgba(255,255,255,0.08)',
-          logoURI:  staticMeta.logoURI || null,
+          logoURI:  jupMeta.logoURI || staticMeta.logoURI || `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${mint}/logo.png`,
         };
       });
 
@@ -490,11 +502,14 @@ export default function App() {
                 {tokLive ? (
                   <>
                     <div className="tok-left">
-                      {tokLive.logoURI ? (
-                        <img src={tokLive.logoURI} alt={tokLive.symbol} className="tok-icon" style={{width:32, height:32, borderRadius:'50%'}} />
-                      ) : (
-                        <div className="tok-icon" style={{background:tokLive.bg,color:tokLive.color}}>{tokLive.symbol.slice(0,4)}</div>
-                      )}
+                      <img
+                        src={tokLive.logoURI || ''}
+                        alt={tokLive.symbol}
+                        className="tok-icon"
+                        style={{width:32, height:32, borderRadius:'50%', display: tokLive.logoURI ? 'block' : 'none'}}
+                        onError={(e) => { e.target.style.display='none'; e.target.nextElementSibling.style.display='flex'; }}
+                      />
+                      <div className="tok-icon" style={{background:tokLive.bg, color:tokLive.color, display: tokLive.logoURI ? 'none' : 'flex'}}>{tokLive.symbol.slice(0,4)}</div>
                       <div>
                         <span className="tok-sym">{tokLive.symbol}</span>
                         <span style={{fontSize:11,color:'var(--text3)',marginLeft:6}}>${tokLive.price < 0.01 ? tokLive.price.toFixed(6) : tokLive.price.toLocaleString()}</span>

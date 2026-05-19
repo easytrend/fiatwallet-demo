@@ -68,16 +68,19 @@ export default function TokenModal({ filteredTokens, connected, walletLoading, s
 
             {shown.map((t, i) => (
               <div key={t.mint || t.symbol || i} className="modal-item" onClick={() => onSelect(t.symbol)}>
-                {t.logoURI ? (
-                  <img src={t.logoURI} alt={t.symbol} className="tok-icon" style={{width:36, height:36, borderRadius:'50%'}} />
-                ) : (
-                  <div
-                    className="tok-icon"
-                    style={{ background: t.bg || 'rgba(255,255,255,0.08)', color: t.color || '#ccc', width: 36, height: 36, fontSize: 10 }}
-                  >
-                    {(t.symbol || '?').slice(0, 4)}
-                  </div>
-                )}
+                <img
+                  src={t.logoURI || ''}
+                  alt={t.symbol}
+                  className="tok-icon"
+                  style={{width:36, height:36, borderRadius:'50%', display: t.logoURI ? 'block' : 'none'}}
+                  onError={(e) => { e.target.style.display='none'; e.target.nextElementSibling.style.display='flex'; }}
+                />
+                <div
+                  className="tok-icon"
+                  style={{ background: t.bg || 'rgba(255,255,255,0.08)', color: t.color || '#ccc', width: 36, height: 36, fontSize: 10, display: t.logoURI ? 'none' : 'flex' }}
+                >
+                  {(t.symbol || '?').slice(0, 4)}
+                </div>
                 <div>
                   <div className="m-name">{t.symbol}</div>
                   <div className="m-full">{t.name}</div>

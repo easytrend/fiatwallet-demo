@@ -161,7 +161,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         const solBalance = tok.balance || 0;
 
         if (totalRequestedSOL >= solBalance - 0.005) {
-          const tempChunkSize = 10;
+          const tempChunkSize = 5;
           let totalEstimatedFee = 0;
           const latestBlockhash = await connection.getLatestBlockhash('confirmed');
           const { ComputeBudgetProgram } = await import('@solana/web3.js');
@@ -210,8 +210,8 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         decimals = mintInfo.value.data.parsed.info.decimals;
       }
 
-      // 3. Chunk instructions (10 per tx for speed, compatible with most wallets)
-      const chunkSize = 10;
+      // 3. Chunk instructions (5 per tx for speed, compatible with most wallets)
+      const chunkSize = 5;
       const transactions = [];
       const latestBlockhash = await connection.getLatestBlockhash('confirmed');
       
