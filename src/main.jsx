@@ -22,8 +22,9 @@ import App from './App';
 import './App.css';
 
 function Root() {
-  // Use a reliable free public RPC to prevent 403 Access Forbidden errors
-  const endpoint = useMemo(() => 'https://solana-rpc.publicnode.com', []);
+  // Use an environment variable for your premium RPC (like Helius) to prevent CORS and 403 errors.
+  // Fallback to the placeholder if the env variable isn't set yet.
+  const endpoint = useMemo(() => import.meta.env.VITE_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=YOUR_KEY', []);
   const wallets = useMemo(() => [
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),

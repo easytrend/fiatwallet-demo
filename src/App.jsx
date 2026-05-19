@@ -142,8 +142,6 @@ export default function App() {
       // NOTE: Some public RPCs (like publicnode) block getParsedTokenAccountsByOwner. We fallback to others if needed.
       const TOKEN_FETCH_RPCS = [
         'https://api.mainnet-beta.solana.com',
-        'https://rpc.ankr.com/solana',
-        'https://mainnet.helius-rpc.com/?api-key=15319bf8-35b6-4a2c-aa8b-09c1e7f6b5a0',
       ];
       const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
       const token2022ProgramId = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
