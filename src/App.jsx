@@ -138,8 +138,8 @@ export default function App() {
       setSolBalance(lamports / 1e9);
 
       // 1. Fetch ALL token accounts
-      // NOTE: publicnode blocks getParsedTokenAccountsByOwner — we must use a different RPC for this call.
-      // We try multiple free endpoints in order until one succeeds.
+      // Try the primary connection first. If it's a premium RPC, it will succeed and return all tokens.
+      // NOTE: Some public RPCs (like publicnode) block getParsedTokenAccountsByOwner. We fallback to others if needed.
       const TOKEN_FETCH_RPCS = [
         'https://api.mainnet-beta.solana.com',
         'https://rpc.ankr.com/solana',
@@ -149,18 +149,28 @@ export default function App() {
       const token2022ProgramId = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 
       let results = [];
-      for (const rpcUrl of TOKEN_FETCH_RPCS) {
-        try {
-          const rpcConn = new Connection(rpcUrl);
-          const [resp1, resp2] = await Promise.all([
-            rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
-            rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
-          ]);
-          results = [...(resp1.value || []), ...(resp2.value || [])];
-          console.log(`✅ Token accounts fetched via ${rpcUrl}: ${results.length} accounts`);
-          break; // success — stop trying
-        } catch (e) {
-          console.warn(`❌ Token fetch failed via ${rpcUrl}:`, e.message);
+      try {
+        const [resp1, resp2] = await Promise.all([
+          connection.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
+          connection.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
+        ]);
+        results = [...(resp1.value || []), ...(resp2.value || [])];
+        console.log(`✅ Token accounts fetched via primary connection`);
+      } catch (primaryErr) {
+        console.warn(`❌ Primary token fetch failed, falling back to public RPCs:`, primaryErr.message);
+        for (const rpcUrl of TOKEN_FETCH_RPCS) {
+          try {
+            const rpcConn = new Connection(rpcUrl);
+            const [resp1, resp2] = await Promise.all([
+              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
+              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
+            ]);
+            results = [...(resp1.value || []), ...(resp2.value || [])];
+            console.log(`✅ Token accounts fetched via ${rpcUrl}`);
+            break; // success — stop trying
+          } catch (e) {
+            console.warn(`❌ Token fetch failed via ${rpcUrl}:`, e.message);
+          }
         }
       }
 
