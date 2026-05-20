@@ -41,6 +41,7 @@ export default function App() {
   const [resolveError, setResolveError] = useState(null);
   const [sending, setSending] = useState(false);
   const [toast, setToast] = useState(null); // { type, title, message, link }
+  const [rentFeeInfo, setRentFeeInfo] = useState(null); // null | 'network' | 'rent'
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [token, setToken] = useState('');
@@ -77,6 +78,30 @@ export default function App() {
     const t = setTimeout(checkDomain, 500);
     return () => clearTimeout(t);
   }, [recipient]);
+
+  // Check if receiver already has the ATA for the selected SPL token
+  // to decide whether to show rent fee or just network fee
+  useEffect(() => {
+    async function checkReceiverATA() {
+      if (!connection || !tokLive || tokLive.symbol === 'SOL' || !tokLive.mint) {
+        setRentFeeInfo(null);
+        return;
+      }
+      const addrStr = resolvedAddress || (recipient.length > 30 ? recipient : null);
+      if (!addrStr) { setRentFeeInfo(null); return; }
+      try {
+        const recipientPubkey = new PublicKey(addrStr);
+        const mintPubkey = new PublicKey(tokLive.mint);
+        const ata = getAssociatedTokenAddressSync(mintPubkey, recipientPubkey);
+        const accountInfo = await connection.getAccountInfo(ata);
+        setRentFeeInfo(accountInfo ? 'network' : 'rent');
+      } catch {
+        setRentFeeInfo(null);
+      }
+    }
+    const t = setTimeout(checkReceiverATA, 400);
+    return () => clearTimeout(t);
+  }, [resolvedAddress, recipient, tokLive, connection]);
 
   function getLiveCurrRate(code) {
     const s = CURRENCIES.find(c => c.code === code) || CURRENCIES[0];
@@ -564,6 +589,16 @@ export default function App() {
                     currency={currency} setCurrency={setCurrency} tok={tokLive} currRate={currRate} />
                 </div>
                 {walletError && <div style={{fontSize:12, color:'#f87171', marginBottom:12, padding:'8px 12px', background:'rgba(248,113,113,0.1)', borderRadius:8}}>{walletError}</div>}
+                {rentFeeInfo && tokLive && tokLive.symbol !== 'SOL' && (
+                  <div style={{display:'flex', alignItems:'center', gap:6, fontSize:11, color: rentFeeInfo === 'rent' ? '#fbbf24' : 'var(--lime)', marginBottom:10, padding:'7px 10px', background:'rgba(255,255,255,0.05)', borderRadius:8}}>
+                    <span>{rentFeeInfo === 'rent' ? '⚠️' : '✓'}</span>
+                    <span>
+                      {rentFeeInfo === 'rent'
+                        ? 'Fee: ≈0.002 SOL (rent + network fee)'
+                        : 'Fee: ≈0.000005 SOL (network fee)'}
+                    </span>
+                  </div>
+                )}
                 <button className="send-btn" disabled={!connected || !tokLive || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress) || sending} onClick={handleSend}>
                   {sending ? 'Sending…' : !connected ? 'Connect wallet to send' : !tokLive ? 'Select a token to continue' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
                 </button>
