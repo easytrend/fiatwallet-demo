@@ -589,12 +589,7 @@ export default function App() {
                     currency={currency} setCurrency={setCurrency} tok={tokLive} currRate={currRate} />
                 </div>
                 {walletError && <div style={{fontSize:12, color:'#f87171', marginBottom:12, padding:'8px 12px', background:'rgba(248,113,113,0.1)', borderRadius:8}}>{walletError}</div>}
-                {rentFeeInfo && tokLive && tokLive.symbol !== 'SOL' && (
-                  <div style={{display:'flex', alignItems:'center', gap:6, fontSize:11, color: 'var(--lime)', marginBottom:10, padding:'7px 10px', background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-                    <span>✓</span>
-                    <span>Fee: ≈0.000005 SOL (network fee)</span>
-                  </div>
-                )}
+
                 <button className="send-btn" disabled={!connected || !tokLive || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress) || sending} onClick={handleSend}>
                   {sending ? 'Sending…' : !connected ? 'Connect wallet to send' : !tokLive ? 'Select a token to continue' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
                 </button>
