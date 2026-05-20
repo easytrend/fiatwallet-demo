@@ -232,6 +232,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           for (const rec of chunk) {
             const amountUnits = BigInt(Math.round(rec.tokAmt * Math.pow(10, decimals)));
             const receiverATA = getAssociatedTokenAddressSync(mintPubkey, rec.pubkey);
+            tx.add(createAssociatedTokenAccountIdempotentInstruction(publicKey, receiverATA, rec.pubkey, mintPubkey));
             tx.add(createTransferCheckedInstruction(senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals));
           }
         }
