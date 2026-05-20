@@ -79,30 +79,6 @@ export default function App() {
     return () => clearTimeout(t);
   }, [recipient]);
 
-  // Check if receiver already has the ATA for the selected SPL token
-  // to decide whether to show rent fee or just network fee
-  useEffect(() => {
-    async function checkReceiverATA() {
-      if (!connection || !tokLive || tokLive.symbol === 'SOL' || !tokLive.mint) {
-        setRentFeeInfo(null);
-        return;
-      }
-      const addrStr = resolvedAddress || (recipient.length > 30 ? recipient : null);
-      if (!addrStr) { setRentFeeInfo(null); return; }
-      try {
-        const recipientPubkey = new PublicKey(addrStr);
-        const mintPubkey = new PublicKey(tokLive.mint);
-        const ata = getAssociatedTokenAddressSync(mintPubkey, recipientPubkey);
-        const accountInfo = await connection.getAccountInfo(ata);
-        setRentFeeInfo(accountInfo ? 'network' : 'rent');
-      } catch {
-        setRentFeeInfo(null);
-      }
-    }
-    const t = setTimeout(checkReceiverATA, 400);
-    return () => clearTimeout(t);
-  }, [resolvedAddress, recipient, tokLive, connection]);
-
   function getLiveCurrRate(code) {
     const s = CURRENCIES.find(c => c.code === code) || CURRENCIES[0];
     return liveRates.fiat[code] || s.rate;
@@ -151,6 +127,30 @@ export default function App() {
   const tokAmt = inputMode === 'fiat' ? (num / currRate) / tokPrice : num;
   const dispTok = fmtTok(tokAmt);
   const tokLive = tok ? { ...tok, price: tokPrice } : null;
+
+  // Check if receiver already has the ATA for the selected SPL token
+  // to decide whether to show rent fee or just network fee
+  useEffect(() => {
+    async function checkReceiverATA() {
+      if (!connection || !tokLive || tokLive.symbol === 'SOL' || !tokLive.mint) {
+        setRentFeeInfo(null);
+        return;
+      }
+      const addrStr = resolvedAddress || (recipient.length > 30 ? recipient : null);
+      if (!addrStr) { setRentFeeInfo(null); return; }
+      try {
+        const recipientPubkey = new PublicKey(addrStr);
+        const mintPubkey = new PublicKey(tokLive.mint);
+        const ata = getAssociatedTokenAddressSync(mintPubkey, recipientPubkey);
+        const accountInfo = await connection.getAccountInfo(ata);
+        setRentFeeInfo(accountInfo ? 'network' : 'rent');
+      } catch {
+        setRentFeeInfo(null);
+      }
+    }
+    const t = setTimeout(checkReceiverATA, 400);
+    return () => clearTimeout(t);
+  }, [resolvedAddress, recipient, tokLive, connection]);
 
   // Fetch real on-chain balances using the wallet-adapter connection object
   const fetchBalances = useCallback(async () => {
