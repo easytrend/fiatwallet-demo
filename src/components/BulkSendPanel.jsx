@@ -165,12 +165,10 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           let totalEstimatedFee = 0;
           const latestBlockhash = await connection.getLatestBlockhash('confirmed');
           const { ComputeBudgetProgram } = await import('@solana/web3.js');
-          const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 });
 
           for (let i = 0; i < resolvedRecipients.length; i += tempChunkSize) {
             const chunk = resolvedRecipients.slice(i, i + tempChunkSize);
             const tx = new Transaction();
-            tx.add(addPriorityFee);
             tx.recentBlockhash = latestBlockhash.blockhash;
             tx.feePayer = publicKey;
 
@@ -217,12 +215,10 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       
       // Compute Budget instructions for better reliability
       const { ComputeBudgetProgram } = await import('@solana/web3.js');
-      const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 }); // Low priority fee for reliability
 
       for (let i = 0; i < resolvedRecipients.length; i += chunkSize) {
         const chunk = resolvedRecipients.slice(i, i + chunkSize);
         const tx = new Transaction();
-        tx.add(addPriorityFee); // Add priority fee to every batch
         tx.recentBlockhash = latestBlockhash.blockhash;
         tx.feePayer = publicKey;
 

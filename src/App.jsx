@@ -278,7 +278,7 @@ export default function App() {
             .catch(() => Promise.reject());
 
           const rpcPromise = (async () => {
-            const domain = await robustReverseLookup(publicKey);
+            const domain = await robustReverseLookup(connection, publicKey);
             if (domain) return domain;
             throw new Error('Not found');
           })();
@@ -317,10 +317,6 @@ export default function App() {
     try {
       const finalRecipient = new PublicKey(resolvedAddress || recipient);
       const transaction = new Transaction();
-
-      const { ComputeBudgetProgram } = await import('@solana/web3.js');
-      const addPriorityFee = ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 });
-      transaction.add(addPriorityFee);
 
       if (tokLive.symbol === 'SOL') {
         let lamports = Math.round(tokAmt * 1e9);

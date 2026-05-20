@@ -103,19 +103,28 @@ export async function robustResolve(domain) {
   throw new Error(`Failed to resolve domain: ${domain}`);
 }
 
-export async function robustReverseLookup(publicKeyObj) {
+export async function robustReverseLookup(connection, publicKeyObj) {
+  // First try the primary connection
+  try {
+    const primary = await getPrimaryDomain(connection, publicKeyObj).catch(() => null);
+    if (primary && primary.reverse) return primary.reverse + '.sol';
+    const reverse = await performReverseLookup(connection, publicKeyObj).catch(() => null);
+    if (reverse) return reverse + '.sol';
+  } catch (e) {
+    console.warn("Reverse lookup failed on primary connection:", e.message);
+  }
+
+  // Fallback to other RPCs if primary fails
   const RESOLVE_RPCS = [
-    'https://api.mainnet-beta.solana.com',
+    'https://solana-rpc.publicnode.com',
     'https://rpc.ankr.com/solana',
-    'https://solana-rpc.publicnode.com'
+    'https://api.mainnet-beta.solana.com'
   ];
   for (const rpcUrl of RESOLVE_RPCS) {
     try {
       const conn = new Connection(rpcUrl);
-      // Try Primary first as requested
       const primary = await getPrimaryDomain(conn, publicKeyObj).catch(() => null);
       if (primary && primary.reverse) return primary.reverse + '.sol';
-      // Fallback to standard reverse
       const reverse = await performReverseLookup(conn, publicKeyObj).catch(() => null);
       if (reverse) return reverse + '.sol';
     } catch (e) {
