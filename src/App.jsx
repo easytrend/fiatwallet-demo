@@ -383,14 +383,6 @@ export default function App() {
         const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey);
         const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient);
 
-        transaction.add(
-          createAssociatedTokenAccountIdempotentInstruction(
-            publicKey, // payer
-            receiverATA, // ata
-            finalRecipient, // owner
-            mintPubkey // mint
-          )
-        );
 
         transaction.add(
           createTransferCheckedInstruction(
