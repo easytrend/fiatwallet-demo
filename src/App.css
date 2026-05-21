@@ -363,12 +363,11 @@ footer a { color:var(--lime); text-decoration:none; }
   flex-shrink: 0;
 }
 
-.solana-logo-svg {
+.solana-svg-logo {
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  display: inline-block;
-  background: transparent;
+  display: block;
 }
 
 .capsule-pill {
@@ -744,9 +743,9 @@ footer a { color:var(--lime); text-decoration:none; }
     height: 12px;
     margin-right: 4px;
   }
-  .solana-logo-svg {
-    width: 12px;
-    height: 12px;
+  .solana-svg-logo {
+    width: 11px;
+    height: 11px;
   }
   .capsule-pill {
     width: 11px;
