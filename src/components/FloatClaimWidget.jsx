@@ -212,6 +212,15 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     return emptyAccounts.length * 0.002039;
   }, [isDemoMode, emptyAccounts, rentClaimed]);
 
+  const activeRentSOL = useMemo(() => {
+    if (rentClaimed) return 0;
+    if (isDemoMode) return Math.min(rentSOL, 60 * 0.002039);
+    // Limit to 60 accounts (3 batches of 20) per round to avoid Blowfish timeouts
+    const activeAccounts = emptyAccounts.slice(0, 60);
+    return activeAccounts.length * 0.002039;
+  }, [isDemoMode, emptyAccounts, rentClaimed, rentSOL]);
+
+
   const cashbackSOL = useMemo(() => {
     if (cashbackClaimed) return 0;
     if (isDemoMode) return 0.09426;
@@ -244,9 +253,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     try {
       if (isDemoMode) {
         // High-Fidelity Demo mode: Let user sign a valid 0-SOL self-transfer
-        // In demo mode, let's simulate multiple transactions if the totalAccounts > 20
+        // In demo mode, let's simulate up to 3 transactions (60 accounts) to avoid Blowfish timeouts
         const totalAccounts = rentClaimed ? 0 : 162;
-        const totalChunks = Math.ceil(totalAccounts / 20);
+        const demoAccounts = Math.min(totalAccounts, 60);
+        const totalChunks = Math.ceil(demoAccounts / 20);
         
         const transactions = [];
         for (let i = 0; i < totalChunks; i++) {
@@ -290,11 +300,13 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         // Wait a few seconds for visual confirmation
         await new Promise(r => setTimeout(r, 3000));
 
-        setRentClaimed(true);
+        if (totalAccounts <= 60) {
+          setRentClaimed(true);
+        }
         setToast({
           type: 'success',
           title: '✓ Rent Claimed (Demo Mode)!',
-          message: `Successfully reclaimed ${rentSOL.toFixed(5)} SOL from empty accounts in ${totalChunks} batched transactions (Demo).`,
+          message: `Successfully reclaimed ${activeRentSOL.toFixed(5)} SOL from empty accounts in ${totalChunks} batched transactions (Demo).`,
           link: signature ? `https://solscan.io/tx/${signature}` : undefined
         });
         if (onClaimSuccess) onClaimSuccess();
@@ -310,9 +322,14 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           chunks.push(emptyAccounts.slice(i, i + 20));
         }
 
+        // Limit the active batches to a maximum of 3 transactions (60 accounts) at once
+        // to prevent wallet/Blowfish simulation server timeouts ("Security check failed") 
+        // and scary warning dialogs.
+        const activeChunks = chunks.slice(0, 3);
+
         const latestBlockhash = await connection.getLatestBlockhash();
 
-        const transactions = chunks.map(chunk => {
+        const transactions = activeChunks.map(chunk => {
           const tx = new Transaction();
           chunk.forEach(acc => {
             tx.add(
@@ -393,25 +410,27 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
         succeeded.forEach((success, idx) => {
           if (success) {
-            const chunkLength = chunks[idx].length;
+            const chunkLength = activeChunks[idx].length;
             totalAccountsClosed += chunkLength;
             totalReclaimedSOL += chunkLength * 0.002039;
           }
         });
 
-        if (confirmedCount === chunks.length) {
-          setRentClaimed(true);
+        if (confirmedCount === activeChunks.length) {
+          if (emptyAccounts.length <= 60) {
+            setRentClaimed(true);
+          }
           setToast({
             type: 'success',
-            title: '✓ All Rent Claimed!',
-            message: `Successfully reclaimed ${totalReclaimedSOL.toFixed(5)} SOL from all ${totalAccountsClosed} empty accounts.`,
+            title: '✓ Rent Claimed!',
+            message: `Successfully reclaimed ${totalReclaimedSOL.toFixed(5)} SOL from ${totalAccountsClosed} empty accounts.`,
             link: `https://solscan.io/account/${publicKey.toBase58()}`
           });
         } else if (confirmedCount > 0) {
           setToast({
             type: 'success',
             title: '✓ Rent Partially Reclaimed',
-            message: `Successfully reclaimed ${totalReclaimedSOL.toFixed(5)} SOL from ${totalAccountsClosed} empty accounts. (${confirmedCount}/${chunks.length} batches succeeded).`,
+            message: `Successfully reclaimed ${totalReclaimedSOL.toFixed(5)} SOL from ${totalAccountsClosed} empty accounts. (${confirmedCount}/${activeChunks.length} batches succeeded).`,
             link: `https://solscan.io/account/${publicKey.toBase58()}`
           });
         } else {
@@ -644,10 +663,16 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       '✓ Rent Claimed'
                     ) : (
                       <>
-                        <ClaimIcon /> Claim {rentSOL.toFixed(5)} SOL
+                        <ClaimIcon /> Claim {activeRentSOL.toFixed(5)} SOL
                       </>
                     )}
                   </button>
+                  {/* Subtle info text if there are more than 60 accounts to prevent wallet check warnings/timeouts */}
+                  {!rentClaimed && (emptyAccounts.length > 60 || (isDemoMode && emptyCount > 60)) && (
+                    <div className="claim-batch-subtext" style={{ fontSize: '11px', color: '#a0a0a0', marginTop: '8px', textAlign: 'center', opacity: '0.8', lineHeight: '1.4' }}>
+                      Claiming in batches of 60 to prevent wallet security check timeouts
+                    </div>
+                  )}
                 </div>
               )}
 
