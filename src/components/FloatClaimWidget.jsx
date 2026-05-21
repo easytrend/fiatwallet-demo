@@ -214,8 +214,11 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
   const activeRentSOL = useMemo(() => {
     if (rentClaimed) return 0;
-    return rentSOL;
-  }, [rentClaimed, rentSOL]);
+    if (isDemoMode) return Math.min(rentSOL, 60 * 0.002039);
+    // Limit to 60 accounts (3 batches of 20) per round to avoid Blowfish timeouts
+    const activeAccounts = emptyAccounts.slice(0, 60);
+    return activeAccounts.length * 0.002039;
+  }, [isDemoMode, emptyAccounts, rentClaimed, rentSOL]);
 
 
   const cashbackSOL = useMemo(() => {
@@ -252,13 +255,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         // High-Fidelity Demo mode: Let user sign a valid 0-SOL self-transfer
         // In demo mode, let's simulate up to 3 transactions (60 accounts) to avoid Blowfish timeouts
         const totalAccounts = rentClaimed ? 0 : 162;
-        let chunkSize = 20;
-        if (totalAccounts > 100) {
-          chunkSize = 28;
-        } else if (totalAccounts > 40) {
-          chunkSize = 25;
-        }
-        const totalChunks = Math.ceil(totalAccounts / chunkSize);
+        const demoAccounts = Math.min(totalAccounts, 60);
+        const totalChunks = Math.ceil(demoAccounts / 20);
         
         const transactions = [];
         for (let i = 0; i < totalChunks; i++) {
@@ -302,7 +300,9 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         // Wait a few seconds for visual confirmation
         await new Promise(r => setTimeout(r, 3000));
 
-        setRentClaimed(true);
+        if (totalAccounts <= 60) {
+          setRentClaimed(true);
+        }
         setToast({
           type: 'success',
           title: '✓ Rent Claimed (Demo Mode)!',
@@ -316,26 +316,16 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           throw new Error("You have no empty token accounts to claim rent from.");
         }
 
-        // Determine optimal chunk size based on the amount of tokens users are closing
-        // to minimize the number of transactions the user needs to sign.
-        // Solana standard transactions can safely support up to 28 close account instructions
-        // when owner and fee payer are the same public key.
-        const totalAccounts = emptyAccounts.length;
-        let chunkSize = 20;
-        if (totalAccounts > 100) {
-          chunkSize = 28; // Pack extra tight for large volumes to minimize signatures
-        } else if (totalAccounts > 40) {
-          chunkSize = 25; // Pack moderately tight
-        }
-
-        // Chunk empty accounts based on the dynamic chunkSize
+        // Chunk empty accounts in groups of 20
         const chunks = [];
-        for (let i = 0; i < totalAccounts; i += chunkSize) {
-          chunks.push(emptyAccounts.slice(i, i + chunkSize));
+        for (let i = 0; i < emptyAccounts.length; i += 20) {
+          chunks.push(emptyAccounts.slice(i, i + 20));
         }
 
-        // Claim ALL empty accounts at once! No more hard slice/limit.
-        const activeChunks = chunks;
+        // Limit the active batches to a maximum of 3 transactions (60 accounts) at once
+        // to prevent wallet/Blowfish simulation server timeouts ("Security check failed") 
+        // and scary warning dialogs.
+        const activeChunks = chunks.slice(0, 3);
 
         const latestBlockhash = await connection.getLatestBlockhash();
 
@@ -427,7 +417,9 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         });
 
         if (confirmedCount === activeChunks.length) {
-          setRentClaimed(true);
+          if (emptyAccounts.length <= 60) {
+            setRentClaimed(true);
+          }
           setToast({
             type: 'success',
             title: '✓ Rent Claimed!',
@@ -687,10 +679,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       </>
                     )}
                   </button>
-                  {/* Subtle info text showing optimized batching */}
-                  {!rentClaimed && emptyCount > 0 && (
+                  {/* Subtle info text if there are more than 60 accounts to prevent wallet check warnings/timeouts */}
+                  {!rentClaimed && (emptyAccounts.length > 60 || (isDemoMode && emptyCount > 60)) && (
                     <div className="claim-batch-subtext" style={{ fontSize: '11px', color: '#a0a0a0', marginTop: '8px', textAlign: 'center', opacity: '0.8', lineHeight: '1.4' }}>
-                      Optimized dynamically into {Math.ceil(emptyCount / (emptyCount > 100 ? 28 : emptyCount > 40 ? 25 : 20))} transactions to claim all rent at once.
+                      Claiming in batches of 60 to prevent wallet security check timeouts
                     </div>
                   )}
                 </div>
