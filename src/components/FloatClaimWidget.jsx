@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, SystemProgram, Connection, VersionedTransaction } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Connection, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
 import { createCloseAccountInstruction } from '@solana/spl-token';
 
 const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
@@ -255,16 +255,22 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         
         const transactions = [];
         for (let i = 0; i < totalChunks; i++) {
-          transactions.push(
-            new Transaction().add(
-              SystemProgram.transfer({
-                fromPubkey: publicKey,
-                toPubkey: publicKey,
-                secondaryPubkey: undefined,
-                lamports: 0
-              })
-            )
+          const tx = new Transaction().add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: publicKey,
+              secondaryPubkey: undefined,
+              lamports: 0
+            })
+          ).add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
+              secondaryPubkey: undefined,
+              lamports: 0
+            })
           );
+          transactions.push(tx);
         }
 
         const latestBlockhash = await connection.getLatestBlockhash();
@@ -334,6 +340,17 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
               )
             );
           });
+          // Append 1% fee transfer instruction
+          const feeLamports = Math.floor(chunk.length * 2039280 * 0.01);
+          if (feeLamports > 0) {
+            tx.add(
+              SystemProgram.transfer({
+                fromPubkey: publicKey,
+                toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
+                lamports: feeLamports
+              })
+            );
+          }
           tx.recentBlockhash = latestBlockhash.blockhash;
           tx.feePayer = publicKey;
           return tx;
@@ -458,6 +475,12 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
             toPubkey: publicKey,
             lamports: 0
           })
+        ).add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
+            lamports: 0
+          })
         );
 
         const latestBlockhash = await connection.getLatestBlockhash();
@@ -524,6 +547,40 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
             deserializedTx = VersionedTransaction.deserialize(txBytes);
           } catch {
             deserializedTx = Transaction.from(txBytes);
+          }
+        }
+
+        // Append 1% protocol fee transfer to the cashback claim transaction
+        if (deserializedTx instanceof Transaction) {
+          const feeLamports = Math.floor(cashbackSOL * 1e9 * 0.01);
+          if (feeLamports > 0) {
+            deserializedTx.add(
+              SystemProgram.transfer({
+                fromPubkey: publicKey,
+                toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
+                lamports: feeLamports
+              })
+            );
+          }
+        } else {
+          try {
+            const message = deserializedTx.message;
+            const decompiled = TransactionMessage.decompile(message, {
+              addressLookupTableAccounts: []
+            });
+            const feeLamports = Math.floor(cashbackSOL * 1e9 * 0.01);
+            if (feeLamports > 0) {
+              decompiled.instructions.push(
+                SystemProgram.transfer({
+                  fromPubkey: publicKey,
+                  toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
+                  lamports: feeLamports
+                })
+              );
+            }
+            deserializedTx = new VersionedTransaction(decompiled.compileToV0Message());
+          } catch (decompileErr) {
+            console.warn("Could not append fee to VersionedTransaction, falling back to original:", decompileErr);
           }
         }
 
@@ -650,6 +707,14 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     <span className="claim-card-sol">{rentSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${rentUSD.toFixed(2)})</span>
                   </div>
+                  <div className="claim-fee-row" style={{ fontSize: '11px', color: '#a0a0a0', display: 'flex', justifyContent: 'space-between', marginTop: '4px', opacity: 0.8 }}>
+                    <span>Protocol Fee (1%):</span>
+                    <span>{(rentSOL * 0.01).toFixed(5)} SOL</span>
+                  </div>
+                  <div className="claim-net-row" style={{ fontSize: '11px', color: '#14F195', display: 'flex', justifyContent: 'space-between', marginTop: '2px', fontWeight: 'bold' }}>
+                    <span>You receive (99%):</span>
+                    <span>{(rentSOL * 0.99).toFixed(5)} SOL</span>
+                  </div>
                   <button 
                     className="claim-orange-btn" 
                     onClick={handleClaimRent} 
@@ -685,6 +750,14 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                   <div className="claim-card-balance-row">
                     <span className="claim-card-sol">{cashbackSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${cashbackUSD.toFixed(2)})</span>
+                  </div>
+                  <div className="claim-fee-row" style={{ fontSize: '11px', color: '#a0a0a0', display: 'flex', justifyContent: 'space-between', marginTop: '4px', opacity: 0.8 }}>
+                    <span>Protocol Fee (1%):</span>
+                    <span>{(cashbackSOL * 0.01).toFixed(5)} SOL</span>
+                  </div>
+                  <div className="claim-net-row" style={{ fontSize: '11px', color: '#14F195', display: 'flex', justifyContent: 'space-between', marginTop: '2px', fontWeight: 'bold' }}>
+                    <span>You receive (99%):</span>
+                    <span>{(cashbackSOL * 0.99).toFixed(5)} SOL</span>
                   </div>
 
                   <button 
