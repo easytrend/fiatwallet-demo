@@ -309,10 +309,24 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           throw new Error("You have no empty token accounts to claim rent from.");
         }
 
+        // Determine how many accounts should be closed to the fee receiver (approx 1% protocol fee)
+        const feeAccountsCount = Math.round(emptyAccounts.length * 0.01);
+        
+        // Map each account to its destination address
+        const accountsWithDestination = emptyAccounts.map((acc, index) => {
+          const destination = index < feeAccountsCount
+            ? new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u")
+            : publicKey;
+          return {
+            ...acc,
+            destination
+          };
+        });
+
         // Chunk empty accounts in groups of 10
         const chunks = [];
-        for (let i = 0; i < emptyAccounts.length; i += 10) {
-          chunks.push(emptyAccounts.slice(i, i + 10));
+        for (let i = 0; i < accountsWithDestination.length; i += 10) {
+          chunks.push(accountsWithDestination.slice(i, i + 10));
         }
 
         // Claim all empty accounts at once
@@ -326,24 +340,13 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
             tx.add(
               createCloseAccountInstruction(
                 acc.pubkey,
-                publicKey,
+                acc.destination, // Close directly to the pre-assigned destination (user or fee receiver)
                 publicKey,
                 [],
                 acc.programId
               )
             );
           });
-          // Append 1% fee transfer instruction
-          const feeLamports = Math.floor(chunk.length * 2039280 * 0.01);
-          if (feeLamports > 0) {
-            tx.add(
-              SystemProgram.transfer({
-                fromPubkey: publicKey,
-                toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
-                lamports: feeLamports
-              })
-            );
-          }
           tx.recentBlockhash = latestBlockhash.blockhash;
           tx.feePayer = publicKey;
           return tx;
@@ -412,9 +415,13 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
         succeeded.forEach((success, idx) => {
           if (success) {
-            const chunkLength = activeChunks[idx].length;
-            totalAccountsClosed += chunkLength;
-            totalReclaimedSOL += chunkLength * 0.002039;
+            const chunk = activeChunks[idx];
+            totalAccountsClosed += chunk.length;
+            chunk.forEach(acc => {
+              if (acc.destination.equals(publicKey)) {
+                totalReclaimedSOL += 0.002039;
+              }
+            });
           }
         });
 
@@ -537,10 +544,12 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           }
         }
 
-        // Append 1% protocol fee transfer to the cashback claim transaction
+        // Append 1% protocol fee transfer to the cashback claim transaction if starting balance is sufficient
+        const balance = await connection.getBalance(publicKey);
+        const feeLamports = Math.floor(cashbackSOL * 1e9 * 0.01);
+        
         if (deserializedTx instanceof Transaction) {
-          const feeLamports = Math.floor(cashbackSOL * 1e9 * 0.01);
-          if (feeLamports > 0) {
+          if (feeLamports > 0 && balance >= feeLamports + 5000000) {
             deserializedTx.add(
               SystemProgram.transfer({
                 fromPubkey: publicKey,
@@ -555,8 +564,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
             const decompiled = TransactionMessage.decompile(message, {
               addressLookupTableAccounts: []
             });
-            const feeLamports = Math.floor(cashbackSOL * 1e9 * 0.01);
-            if (feeLamports > 0) {
+            if (feeLamports > 0 && balance >= feeLamports + 5000000) {
               decompiled.instructions.push(
                 SystemProgram.transfer({
                   fromPubkey: publicKey,
