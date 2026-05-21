@@ -592,12 +592,20 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       <div className="claim-float-pill" onClick={() => setIsOpen(true)}>
         <div className="claim-pill-content">
           <div className="claim-icon-wrapper">
-            {/* Solana speed-lines */}
-            <div className="solana-lines">
-              <span className="sol-line"></span>
-              <span className="sol-line"></span>
-              <span className="sol-line"></span>
-            </div>
+            {/* Solana SVG Logo with diagonal gradient and transparent background */}
+            <svg className="solana-logo-svg" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="solana-gradient-logo" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#14F195" />
+                  <stop offset="50%" stopColor="#22D3EE" />
+                  <stop offset="100%" stopColor="#9945FF" />
+                </linearGradient>
+              </defs>
+              <path 
+                d="M356 197q-2 2-6 2H124a9 9 0 0 1-6-15l37-38q3-3 7-3h226c8 0 12 9 6 15zm0 170q-2 3-6 3H124a9 9 0 0 1-6-15l37-37q3-3 7-3h226c8 0 12 9 6 15zm0-136q-2-2-6-2H124a9 9 0 0 0-6 15l37 37q3 2 7 2h226c8 0 12-9 6-15z" 
+                fill="url(#solana-gradient-logo)"
+              />
+            </svg>
             {/* Custom Green/White Medicine Capsule */}
             <div className="capsule-pill"></div>
           </div>

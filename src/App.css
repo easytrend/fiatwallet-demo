@@ -363,18 +363,12 @@ footer a { color:var(--lime); text-decoration:none; }
   flex-shrink: 0;
 }
 
-.solana-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  transform: skewX(-20deg);
-}
-
-.sol-line {
-  width: 14px;
-  height: 3px;
-  background: linear-gradient(90deg, #9945FF, #14F195);
-  border-radius: 1px;
+.solana-logo-svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  display: inline-block;
+  background: transparent;
 }
 
 .capsule-pill {
@@ -750,12 +744,9 @@ footer a { color:var(--lime); text-decoration:none; }
     height: 12px;
     margin-right: 4px;
   }
-  .solana-lines {
-    gap: 1.5px;
-  }
-  .sol-line {
-    width: 8px;
-    height: 1.5px;
+  .solana-logo-svg {
+    width: 12px;
+    height: 12px;
   }
   .capsule-pill {
     width: 11px;
