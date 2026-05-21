@@ -606,7 +606,11 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
               <span>Your wallet is fully claimed!</span>
             ) : (
               <span>
-                You have <strong>{totalSOL.toFixed(5)} SOL</strong> to claim <span className="claim-usd-value">(${totalUSD.toFixed(2)})</span>
+                <span className="claim-pill-prefix">You have </span>
+                <span className="claim-pill-action">Claim </span>
+                <strong>{totalSOL.toFixed(5)} SOL</strong>
+                <span className="claim-pill-suffix"> to claim</span>
+                <span className="claim-usd-value"> (${totalUSD.toFixed(2)})</span>
               </span>
             )}
           </div>

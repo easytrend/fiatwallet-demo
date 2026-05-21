@@ -329,6 +329,10 @@ footer a { color:var(--lime); text-decoration:none; }
   width: max-content;
 }
 
+.claim-pill-action {
+  display: none;
+}
+
 .claim-float-pill:hover {
   background: rgba(10, 22, 40, 0.85);
   border-color: rgba(163, 230, 53, 0.35);
@@ -723,22 +727,46 @@ footer a { color:var(--lime); text-decoration:none; }
 @media (max-width: 768px) {
   .claim-float-pill {
     top: 12px;
-    padding: 6px 14px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+  }
+  .claim-pill-content {
+    gap: 4px;
+  }
+  .claim-pill-prefix,
+  .claim-pill-suffix,
+  .claim-usd-value {
+    display: none !important;
+  }
+  .claim-pill-action {
+    display: inline !important;
   }
   .claim-pill-text {
-    font-size: 11.5px;
-  }
-  .claim-usd-value {
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 700;
   }
   .claim-icon-wrapper {
-    width: 28px;
-    height: 18px;
-    margin-right: 8px;
+    width: 20px;
+    height: 12px;
+    margin-right: 4px;
+  }
+  .solana-lines {
+    gap: 1.5px;
+  }
+  .sol-line {
+    width: 8px;
+    height: 1.5px;
   }
   .capsule-pill {
-    width: 16px;
-    height: 9px;
+    width: 11px;
+    height: 6px;
+    right: -1px;
+    top: 1px;
+  }
+  .claim-pill-close {
+    font-size: 9px;
+    padding: 2px;
+    margin-left: 2px;
   }
   .claim-modal-sheet {
     max-width: 92%;
