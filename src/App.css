@@ -312,7 +312,7 @@ footer a { color:var(--lime); text-decoration:none; }
 /* FloatClaimWidget Styles */
 .claim-float-pill {
   position: fixed;
-  top: 80px;
+  top: 12px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 99;
@@ -722,7 +722,7 @@ footer a { color:var(--lime); text-decoration:none; }
 /* Mobile Responsiveness for claim flows */
 @media (max-width: 768px) {
   .claim-float-pill {
-    top: 66px;
+    top: 12px;
     padding: 6px 14px;
   }
   .claim-pill-text {

@@ -212,6 +212,13 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     return emptyAccounts.length * 0.002039;
   }, [isDemoMode, emptyAccounts, rentClaimed]);
 
+  const reclaimLimitSOL = useMemo(() => {
+    if (rentClaimed) return 0;
+    if (isDemoMode) return rentSOL;
+    const accountsToClose = emptyAccounts.slice(0, 20);
+    return accountsToClose.length * 0.002039;
+  }, [isDemoMode, emptyAccounts, rentClaimed, rentSOL]);
+
   const cashbackSOL = useMemo(() => {
     if (cashbackClaimed) return 0;
     if (isDemoMode) return 0.09426;
@@ -277,8 +284,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           throw new Error("You have no empty token accounts to claim rent from.");
         }
 
+        const accountsToClose = emptyAccounts.slice(0, 20);
+        const claimAmount = accountsToClose.length * 0.002039;
         const transaction = new Transaction();
-        emptyAccounts.forEach(acc => {
+        accountsToClose.forEach(acc => {
           transaction.add(
             createCloseAccountInstruction(
               acc.pubkey,
@@ -317,14 +326,17 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           throw new Error('Transaction confirmation timed out.');
         }
 
-        setRentClaimed(true);
+        if (emptyAccounts.length <= 20) {
+          setRentClaimed(true);
+        }
         setToast({
           type: 'success',
           title: '✓ Rent Claimed!',
-          message: `Successfully reclaimed ${rentSOL.toFixed(5)} SOL from empty accounts.`,
+          message: `Successfully reclaimed ${claimAmount.toFixed(5)} SOL from ${accountsToClose.length} empty accounts.`,
           link: `https://solscan.io/tx/${signature}`
         });
         if (onClaimSuccess) onClaimSuccess();
+        await fetchClaimables();
       }
     } catch (err) {
       console.error('Rent claim failed:', err);
@@ -395,17 +407,32 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           throw new Error(`Claim API failed: ${errText || response.statusText}`);
         }
 
-        const data = await response.json();
-        if (!data || !data.transaction) {
-          throw new Error('Claim API did not return a valid transaction.');
-        }
-
-        const txBuffer = Buffer.from(data.transaction, 'base64');
+        const contentType = response.headers.get('content-type') || '';
         let deserializedTx;
-        try {
-          deserializedTx = VersionedTransaction.deserialize(txBuffer);
-        } catch {
-          deserializedTx = Transaction.from(txBuffer);
+
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          if (data && data.error) {
+            throw new Error(data.error);
+          }
+          if (!data || !data.transaction) {
+            throw new Error('Claim API did not return a valid transaction.');
+          }
+          const txBuffer = Buffer.from(data.transaction, 'base64');
+          try {
+            deserializedTx = VersionedTransaction.deserialize(txBuffer);
+          } catch {
+            deserializedTx = Transaction.from(txBuffer);
+          }
+        } else {
+          // Assume raw octet-stream bytes
+          const buffer = await response.arrayBuffer();
+          const txBytes = new Uint8Array(buffer);
+          try {
+            deserializedTx = VersionedTransaction.deserialize(txBytes);
+          } catch {
+            deserializedTx = Transaction.from(txBytes);
+          }
         }
 
         signature = await sendTransaction(deserializedTx, connection);
@@ -439,6 +466,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           link: `https://solscan.io/tx/${signature}`
         });
         if (onClaimSuccess) onClaimSuccess();
+        await fetchClaimables();
       }
     } catch (err) {
       console.error('Cashback claim failed:', err);
@@ -451,9 +479,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     setClaimingCashback(false);
   };
 
-  // Render nothing if connected and real balances are 0 and Demo Mode is disabled, or if dismissed
+  // Render nothing if not connected or if real balances are 0 or dismissed
+  if (!connected || !publicKey) return null;
   if (isDismissed) return null;
-  if (connected && !isDemoMode && totalSOL === 0) return null;
+  if (totalSOL === 0) return null;
 
   return (
     <>
@@ -532,7 +561,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       '✓ Rent Claimed'
                     ) : (
                       <>
-                        <ClaimIcon /> Claim {rentSOL.toFixed(5)} SOL
+                        <ClaimIcon /> Claim {reclaimLimitSOL.toFixed(5)} SOL {emptyAccounts.length > 20 && `(Batch of 20)`}
                       </>
                     )}
                   </button>
