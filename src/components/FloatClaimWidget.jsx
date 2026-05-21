@@ -262,13 +262,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
               secondaryPubkey: undefined,
               lamports: 0
             })
-          ).add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
-              secondaryPubkey: undefined,
-              lamports: 0
-            })
           );
           transactions.push(tx);
         }
@@ -473,12 +466,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           SystemProgram.transfer({
             fromPubkey: publicKey,
             toPubkey: publicKey,
-            lamports: 0
-          })
-        ).add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
             lamports: 0
           })
         );
@@ -707,14 +694,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     <span className="claim-card-sol">{rentSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${rentUSD.toFixed(2)})</span>
                   </div>
-                  <div className="claim-fee-row" style={{ fontSize: '11px', color: '#a0a0a0', display: 'flex', justifyContent: 'space-between', marginTop: '4px', opacity: 0.8 }}>
-                    <span>Protocol Fee (1%):</span>
-                    <span>{(rentSOL * 0.01).toFixed(5)} SOL</span>
-                  </div>
-                  <div className="claim-net-row" style={{ fontSize: '11px', color: '#14F195', display: 'flex', justifyContent: 'space-between', marginTop: '2px', fontWeight: 'bold' }}>
-                    <span>You receive (99%):</span>
-                    <span>{(rentSOL * 0.99).toFixed(5)} SOL</span>
-                  </div>
                   <button 
                     className="claim-orange-btn" 
                     onClick={handleClaimRent} 
@@ -750,14 +729,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                   <div className="claim-card-balance-row">
                     <span className="claim-card-sol">{cashbackSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${cashbackUSD.toFixed(2)})</span>
-                  </div>
-                  <div className="claim-fee-row" style={{ fontSize: '11px', color: '#a0a0a0', display: 'flex', justifyContent: 'space-between', marginTop: '4px', opacity: 0.8 }}>
-                    <span>Protocol Fee (1%):</span>
-                    <span>{(cashbackSOL * 0.01).toFixed(5)} SOL</span>
-                  </div>
-                  <div className="claim-net-row" style={{ fontSize: '11px', color: '#14F195', display: 'flex', justifyContent: 'space-between', marginTop: '2px', fontWeight: 'bold' }}>
-                    <span>You receive (99%):</span>
-                    <span>{(cashbackSOL * 0.99).toFixed(5)} SOL</span>
                   </div>
 
                   <button 
