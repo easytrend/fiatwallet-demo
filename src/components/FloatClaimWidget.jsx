@@ -251,7 +251,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       if (isDemoMode) {
         // High-Fidelity Demo mode: Let user sign a valid 0-SOL self-transfer
         const totalAccounts = rentClaimed ? 0 : 162;
-        const totalChunks = Math.ceil(totalAccounts / 5);
+        const totalChunks = Math.ceil(totalAccounts / 10);
         
         const transactions = [];
         for (let i = 0; i < totalChunks; i++) {
@@ -310,10 +310,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           throw new Error("You have no empty token accounts to claim rent from.");
         }
 
-        // Chunk empty accounts in groups of 5
+        // Chunk empty accounts in groups of 10
         const chunks = [];
-        for (let i = 0; i < emptyAccounts.length; i += 5) {
-          chunks.push(emptyAccounts.slice(i, i + 5));
+        for (let i = 0; i < emptyAccounts.length; i += 10) {
+          chunks.push(emptyAccounts.slice(i, i + 10));
         }
 
         // Claim all empty accounts at once
@@ -668,9 +668,9 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     )}
                   </button>
                   {/* Subtle info text showing the number of transactions to be signed */}
-                  {!rentClaimed && emptyCount > 5 && (
+                  {!rentClaimed && emptyCount > 10 && (
                     <div className="claim-batch-subtext" style={{ fontSize: '11px', color: '#a0a0a0', marginTop: '8px', textAlign: 'center', opacity: '0.8', lineHeight: '1.4' }}>
-                      Claiming all at once in {Math.ceil(emptyCount / 5)} batched transactions
+                      Claiming all at once in {Math.ceil(emptyCount / 10)} batched transactions
                     </div>
                   )}
                 </div>
