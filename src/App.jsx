@@ -14,6 +14,7 @@ import AmountInput from './components/AmountInput';
 import BulkSendPanel from './components/BulkSendPanel';
 import TokenModal from './components/TokenModal';
 import Toast from './components/Toast';
+import FloatClaimWidget from './components/FloatClaimWidget';
 
 const SNS_LINK = 'https://www.sns.id?easytrend.sol';
 
@@ -487,6 +488,8 @@ export default function App() {
           }
         </div>
       </nav>
+
+      <FloatClaimWidget liveSolPrice={liveSolPrice} onClaimSuccess={fetchBalances} />
 
       <div className="main">
         <div className="app-card">

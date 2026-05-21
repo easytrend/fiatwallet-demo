@@ -1,0 +1,629 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { PublicKey, Transaction, SystemProgram, Connection, VersionedTransaction } from '@solana/web3.js';
+import { createCloseAccountInstruction } from '@solana/spl-token';
+
+const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
+const PUMP_AMM_PROGRAM_ID = new PublicKey("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
+const WSOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
+
+// Premium inline SVG icon matching the Moby "hand-with-coin" / claim icon
+const ClaimIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px', display: 'inline-block', verticalAlign: 'middle' }}>
+    {/* Coin */}
+    <circle cx="12" cy="5" r="2.5" fill="currentColor" opacity="0.8" />
+    {/* Hand receiving */}
+    <path d="M3 14h7c.8 0 1.5-.4 1.8-1.1L14 9.5a1 1 0 0 1 1.7 1v4c0 .8-.5 1.5-1.2 1.8L11 18.5H5.5" />
+    <path d="M1.5 17h2v3.5h-2z" />
+  </svg>
+);
+
+export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
+  const { connection } = useConnection();
+  const { publicKey, connected, sendTransaction } = useWallet();
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [isDismissed, setIsDismissed] = useState(false);
+
+  // Reclaimer States
+  const [emptyAccounts, setEmptyAccounts] = useState([]);
+  const [realCashback, setRealCashback] = useState(0);
+  const [realBondingCurveCashback, setRealBondingCurveCashback] = useState(0);
+  const [realAmmCashback, setRealAmmCashback] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [claimingRent, setClaimingRent] = useState(false);
+  const [claimingCashback, setClaimingCashback] = useState(false);
+  const [rentClaimed, setRentClaimed] = useState(false);
+  const [cashbackClaimed, setCashbackClaimed] = useState(false);
+
+  // Interactive Demo Mode to let the user test or see the screenshot values
+  const [isDemoMode, setIsDemoMode] = useState(false);
+
+  const [toast, setToast] = useState(null);
+
+  // List of public RPCs to bypass Helius CORS/403 or rate-limiting
+  const SCAN_RPCS = [
+    'https://api.mainnet-beta.solana.com',
+    'https://solana-rpc.publicnode.com'
+  ];
+
+  // 1. Fetch Real Empty & Dust Accounts + Pump.fun Cashback on-chain
+  const fetchClaimables = async () => {
+    if (!publicKey) return;
+    setLoading(true);
+    try {
+      const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+      const token2022ProgramId = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
+      let results = [];
+      let success = false;
+
+      // Try primary wallet-adapter connection first
+      try {
+        const [resp1, resp2] = await Promise.all([
+          connection.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
+          connection.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
+        ]);
+        results = [
+          ...resp1.value.map(a => ({ ...a, programId: tokenProgramId })),
+          ...resp2.value.map(a => ({ ...a, programId: token2022ProgramId }))
+        ];
+        success = true;
+        console.log('✅ Empty accounts scanned via primary connection');
+      } catch (err) {
+        console.warn('❌ Primary scanner failed, trying fallback public RPCs:', err.message);
+        for (const rpcUrl of SCAN_RPCS) {
+          try {
+            const rpcConn = new Connection(rpcUrl);
+            const [resp1, resp2] = await Promise.all([
+              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
+              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
+            ]);
+            results = [
+              ...resp1.value.map(a => ({ ...a, programId: tokenProgramId })),
+              ...resp2.value.map(a => ({ ...a, programId: token2022ProgramId }))
+            ];
+            success = true;
+            console.log(`✅ Empty accounts scanned via fallback ${rpcUrl}`);
+            break;
+          } catch (e) {
+            console.warn(`❌ Fallback scanner failed via ${rpcUrl}:`, e.message);
+          }
+        }
+      }
+
+      if (success) {
+        const empties = [];
+
+        results.forEach(acc => {
+          const parsed = acc.account.data.parsed.info;
+          const amount = parsed.tokenAmount.amount;
+          const uiAmount = parsed.tokenAmount.uiAmount || 0;
+
+          if (amount === '0' || uiAmount === 0) {
+            empties.push({
+              pubkey: acc.pubkey,
+              mint: parsed.mint,
+              programId: acc.programId
+            });
+          }
+        });
+
+        setEmptyAccounts(empties);
+      }
+
+      // Fetch Real Pump.fun Bonding Curve Cashback on-chain from UserVolumeAccumulator PDA
+      const [userVolumeAccumulator] = PublicKey.findProgramAddressSync(
+        [Buffer.from("user_volume_accumulator"), publicKey.toBuffer()],
+        PUMP_PROGRAM_ID
+      );
+
+      let pdaInfo = null;
+      let pdaConn = connection;
+
+      try {
+        pdaInfo = await connection.getAccountInfo(userVolumeAccumulator);
+      } catch {
+        for (const rpcUrl of SCAN_RPCS) {
+          try {
+            const rpcConn = new Connection(rpcUrl);
+            pdaInfo = await rpcConn.getAccountInfo(userVolumeAccumulator);
+            pdaConn = rpcConn;
+            break;
+          } catch {}
+        }
+      }
+
+      let bondingCurveVal = 0;
+      if (pdaInfo) {
+        const rentExemptMin = await pdaConn.getMinimumBalanceForRentExemption(pdaInfo.data.length);
+        const claimableLamports = Math.max(0, pdaInfo.lamports - rentExemptMin);
+        bondingCurveVal = claimableLamports / 1e9;
+        console.log(`✅ On-chain Pump.fun bonding curve cashback: ${bondingCurveVal} SOL`);
+      }
+
+      // Fetch Real PumpSwap AMM Cashback (WSOL ATA balance of userAmmVolumeAccumulator)
+      const [userAmmVolumeAccumulator] = PublicKey.findProgramAddressSync(
+        [Buffer.from("user_volume_accumulator"), publicKey.toBuffer()],
+        PUMP_AMM_PROGRAM_ID
+      );
+
+      const [ammWsolAta] = PublicKey.findProgramAddressSync(
+        [
+          userAmmVolumeAccumulator.toBuffer(),
+          new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").toBuffer(),
+          WSOL_MINT.toBuffer()
+        ],
+        new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+      );
+
+      let ammVal = 0;
+      try {
+        const tokenBalanceResp = await connection.getTokenAccountBalance(ammWsolAta);
+        if (tokenBalanceResp && tokenBalanceResp.value) {
+          ammVal = tokenBalanceResp.value.uiAmount || 0;
+        }
+        console.log(`✅ On-chain PumpSwap AMM cashback: ${ammVal} WSOL`);
+      } catch (err) {
+        // ATA does not exist if they have never graded/traded AMM or no rewards, perfectly expected
+        console.log('No on-chain PumpSwap AMM cashback ATA found.');
+      }
+
+      setRealBondingCurveCashback(bondingCurveVal);
+      setRealAmmCashback(ammVal);
+      setRealCashback(bondingCurveVal + ammVal);
+
+    } catch (err) {
+      console.error('Error scanning claimables:', err);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (connected && publicKey) {
+      fetchClaimables();
+      setRentClaimed(false);
+      setCashbackClaimed(false);
+      setIsDemoMode(false); // Default to live wallet balances when connected
+    } else {
+      setEmptyAccounts([]);
+      setRealCashback(0);
+      setRealBondingCurveCashback(0);
+      setRealAmmCashback(0);
+      setIsDemoMode(true); // Default to demo preview when not connected
+    }
+  }, [connected, publicKey?.toString()]);
+
+  // If connected and user's real balance is 0, offer to toggle demo mode
+  const isRealWalletClean = useMemo(() => {
+    return connected && emptyAccounts.length === 0 && realCashback === 0;
+  }, [connected, emptyAccounts, realCashback]);
+
+  // 2. Compute dynamic balances
+  const emptyCount = useMemo(() => {
+    if (isDemoMode) return rentClaimed ? 0 : 162;
+    return rentClaimed ? 0 : emptyAccounts.length;
+  }, [isDemoMode, emptyAccounts, rentClaimed]);
+
+  const rentSOL = useMemo(() => {
+    if (rentClaimed) return 0;
+    if (isDemoMode) return 0.30201;
+    // ~0.002039 SOL per account
+    return emptyAccounts.length * 0.002039;
+  }, [isDemoMode, emptyAccounts, rentClaimed]);
+
+  const cashbackSOL = useMemo(() => {
+    if (cashbackClaimed) return 0;
+    if (isDemoMode) return 0.09426;
+    return realCashback;
+  }, [isDemoMode, realCashback, cashbackClaimed]);
+
+  // Total Claimable SOL (Pill includes Empty Accounts + Pump.fun Cashback)
+  const totalSOL = useMemo(() => {
+    return rentSOL + cashbackSOL;
+  }, [rentSOL, cashbackSOL]);
+
+  // USD Conversion using liveSolPrice
+  const totalUSD = useMemo(() => {
+    return totalSOL * liveSolPrice;
+  }, [totalSOL, liveSolPrice]);
+
+  const rentUSD = useMemo(() => {
+    return rentSOL * liveSolPrice;
+  }, [rentSOL, liveSolPrice]);
+
+  const cashbackUSD = useMemo(() => {
+    return cashbackSOL * liveSolPrice;
+  }, [cashbackSOL, liveSolPrice]);
+
+  // 3. Close Empty Accounts (Real Solana transaction, with highly secure mock fallback)
+  const handleClaimRent = async () => {
+    if (!publicKey || !connection) return;
+    setClaimingRent(true);
+    setToast(null);
+    try {
+      if (isDemoMode) {
+        // High-Fidelity Demo mode: Let user sign a valid 0-SOL self-transfer
+        // This generates a real, valid signature that is submitted & confirmed on-chain!
+        const transferTx = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: publicKey,
+            lamports: 0
+          })
+        );
+
+        const latestBlockhash = await connection.getLatestBlockhash();
+        transferTx.recentBlockhash = latestBlockhash.blockhash;
+        transferTx.feePayer = publicKey;
+
+        const signature = await sendTransaction(transferTx, connection);
+        console.log('Simulated rent claim transaction sent:', signature);
+
+        // Wait a few seconds for visual confirmation
+        await new Promise(r => setTimeout(r, 3000));
+
+        setRentClaimed(true);
+        setToast({
+          type: 'success',
+          title: '✓ Rent Claimed (Demo Mode)!',
+          message: `Successfully reclaimed ${rentSOL.toFixed(5)} SOL from empty accounts (Demo).`,
+          link: `https://solscan.io/tx/${signature}`
+        });
+        if (onClaimSuccess) onClaimSuccess();
+      } else {
+        // Real on-chain rent claim
+        if (emptyAccounts.length === 0) {
+          throw new Error("You have no empty token accounts to claim rent from.");
+        }
+
+        const transaction = new Transaction();
+        emptyAccounts.forEach(acc => {
+          transaction.add(
+            createCloseAccountInstruction(
+              acc.pubkey,
+              publicKey,
+              publicKey,
+              [],
+              acc.programId
+            )
+          );
+        });
+
+        const latestBlockhash = await connection.getLatestBlockhash();
+        transaction.recentBlockhash = latestBlockhash.blockhash;
+        transaction.feePayer = publicKey;
+
+        const signature = await sendTransaction(transaction, connection);
+        console.log('Real rent claim transaction sent:', signature);
+
+        // Wait for confirmation
+        let confirmed = false;
+        const deadline = Date.now() + 60_000;
+        while (Date.now() < deadline) {
+          const status = await connection.getSignatureStatus(signature);
+          const conf = status?.value?.confirmationStatus;
+          if (conf === 'confirmed' || conf === 'finalized') {
+            confirmed = true;
+            break;
+          }
+          if (status?.value?.err) {
+            throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+          }
+          await new Promise(r => setTimeout(r, 2000));
+        }
+
+        if (!confirmed) {
+          throw new Error('Transaction confirmation timed out.');
+        }
+
+        setRentClaimed(true);
+        setToast({
+          type: 'success',
+          title: '✓ Rent Claimed!',
+          message: `Successfully reclaimed ${rentSOL.toFixed(5)} SOL from empty accounts.`,
+          link: `https://solscan.io/tx/${signature}`
+        });
+        if (onClaimSuccess) onClaimSuccess();
+      }
+    } catch (err) {
+      console.error('Rent claim failed:', err);
+      setToast({
+        type: 'error',
+        title: '✕ Claim Failed',
+        message: err.message || 'Transaction rejected or failed.'
+      });
+    }
+    setClaimingRent(false);
+  };
+
+  // 4. Claim Pump.fun Cashback (Calls the actual pumpdev.io API, no fallback in live mode)
+  const handleClaimCashback = async () => {
+    if (!publicKey || !connection) return;
+    setClaimingCashback(true);
+    setToast(null);
+    try {
+      let signature = null;
+
+      if (isDemoMode) {
+        // High-Fidelity confirmation vehicle: Let user sign a real, valid 0-SOL self-transfer transaction
+        // which succeeds natively on mainnet, yielding a real signature and Solscan verification
+        const transferTx = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: publicKey,
+            lamports: 0
+          })
+        );
+
+        const latestBlockhash = await connection.getLatestBlockhash();
+        transferTx.recentBlockhash = latestBlockhash.blockhash;
+        transferTx.feePayer = publicKey;
+
+        signature = await sendTransaction(transferTx, connection);
+        console.log('Simulated cashback claim transaction sent:', signature);
+
+        // Wait a few seconds for visual confirmation
+        await new Promise(r => setTimeout(r, 3000));
+
+        setCashbackClaimed(true);
+        setToast({
+          type: 'success',
+          title: '✓ Cashback Claimed (Demo)!',
+          message: `Successfully claimed ${cashbackSOL.toFixed(5)} SOL Pump.fun cashback!`,
+          link: `https://solscan.io/tx/${signature}`
+        });
+        if (onClaimSuccess) onClaimSuccess();
+      } else {
+        // Real on-chain claim via the PumpDev.io API
+        if (realCashback <= 0) {
+          throw new Error("You have no claimable Pump.fun cashback rewards.");
+        }
+
+        const response = await fetch('https://pumpdev.io/api/claim-cashback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            publicKey: publicKey.toBase58(),
+            program: 'both',
+            priorityFee: 0.000005
+          })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Claim API failed: ${errText || response.statusText}`);
+        }
+
+        const data = await response.json();
+        if (!data || !data.transaction) {
+          throw new Error('Claim API did not return a valid transaction.');
+        }
+
+        const txBuffer = Buffer.from(data.transaction, 'base64');
+        let deserializedTx;
+        try {
+          deserializedTx = VersionedTransaction.deserialize(txBuffer);
+        } catch {
+          deserializedTx = Transaction.from(txBuffer);
+        }
+
+        signature = await sendTransaction(deserializedTx, connection);
+        console.log('Real Pump.fun cashback claim sent:', signature);
+
+        // Wait for confirmation
+        let confirmed = false;
+        const deadline = Date.now() + 60_000;
+        while (Date.now() < deadline) {
+          const status = await connection.getSignatureStatus(signature);
+          const conf = status?.value?.confirmationStatus;
+          if (conf === 'confirmed' || conf === 'finalized') {
+            confirmed = true;
+            break;
+          }
+          if (status?.value?.err) {
+            throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+          }
+          await new Promise(r => setTimeout(r, 2000));
+        }
+
+        if (!confirmed) {
+          throw new Error('Transaction confirmation timed out.');
+        }
+
+        setCashbackClaimed(true);
+        setToast({
+          type: 'success',
+          title: '✓ Cashback Claimed!',
+          message: `Successfully claimed ${cashbackSOL.toFixed(5)} SOL Pump.fun cashback!`,
+          link: `https://solscan.io/tx/${signature}`
+        });
+        if (onClaimSuccess) onClaimSuccess();
+      }
+    } catch (err) {
+      console.error('Cashback claim failed:', err);
+      setToast({
+        type: 'error',
+        title: '✕ Cashback Claim Failed',
+        message: err.message || 'Transaction rejected.'
+      });
+    }
+    setClaimingCashback(false);
+  };
+
+  // Render nothing if connected and real balances are 0 and Demo Mode is disabled, or if dismissed
+  if (isDismissed) return null;
+  if (connected && !isDemoMode && totalSOL === 0) return null;
+
+  return (
+    <>
+      {/* 1. Floating Pill */}
+      <div className="claim-float-pill" onClick={() => setIsOpen(true)}>
+        <div className="claim-pill-content">
+          <div className="claim-icon-wrapper">
+            {/* Solana speed-lines */}
+            <div className="solana-lines">
+              <span className="sol-line"></span>
+              <span className="sol-line"></span>
+              <span className="sol-line"></span>
+            </div>
+            {/* Custom Green/White Medicine Capsule */}
+            <div className="capsule-pill"></div>
+          </div>
+          <div className="claim-pill-text">
+            {isRealWalletClean && !isDemoMode ? (
+              <span>Your wallet is fully claimed!</span>
+            ) : (
+              <span>
+                You have <strong>{totalSOL.toFixed(5)} SOL</strong> to claim <span className="claim-usd-value">(${totalUSD.toFixed(2)})</span>
+              </span>
+            )}
+          </div>
+          <button 
+            className="claim-pill-close" 
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsDismissed(true);
+            }}
+            title="Dismiss Claim Center"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Modal Panel */}
+      {isOpen && (
+        <div className="claim-modal-overlay" onClick={() => setIsOpen(false)}>
+          <div className="claim-modal-sheet" onClick={(e) => e.stopPropagation()}>
+            
+            <div className="claim-modal-header">
+              <h2 className="claim-modal-title">SOL Available to Claim</h2>
+              <p className="claim-modal-subtitle">
+                Review recoverable SOL from token-account rent and Pump.fun cashback in your wallet.
+              </p>
+            </div>
+
+            <div className="claim-cards-container">
+              {/* Card 1: Empty token accounts */}
+              {(isDemoMode || rentSOL > 0) && (
+                <div className="claim-card">
+                  <div className="claim-card-top">
+                    <div className="claim-card-title-wrap">
+                      <span className="claim-card-label">Empty token accounts</span>
+                      <span className="claim-card-info-icon" title="Token accounts with 0 balance holding rent SOL">?</span>
+                    </div>
+                    <span className="claim-badge">{emptyCount}</span>
+                  </div>
+                  <div className="claim-card-balance-row">
+                    <span className="claim-card-sol">{rentSOL.toFixed(5)}</span>
+                    <span className="claim-card-usd"> SOL (${rentUSD.toFixed(2)})</span>
+                  </div>
+                  <button 
+                    className="claim-orange-btn" 
+                    onClick={handleClaimRent} 
+                    disabled={claimingRent || rentClaimed}
+                  >
+                    {claimingRent ? (
+                      <span className="claim-btn-loading">
+                        <span className="claim-spin"></span> Claiming...
+                      </span>
+                    ) : rentClaimed ? (
+                      '✓ Rent Claimed'
+                    ) : (
+                      <>
+                        <ClaimIcon /> Claim {rentSOL.toFixed(5)} SOL
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Card 2: Pump.fun cashback */}
+              {(isDemoMode || cashbackSOL > 0) && (
+                <div className="claim-card">
+                  <div className="claim-card-top">
+                    <span className="claim-card-label">Pump.fun cashback</span>
+                  </div>
+                  <div className="claim-card-balance-row">
+                    <span className="claim-card-sol">{cashbackSOL.toFixed(5)}</span>
+                    <span className="claim-card-usd"> SOL (${cashbackUSD.toFixed(2)})</span>
+                  </div>
+
+                  {/* Real Cashback Breakdown */}
+                  {!isDemoMode && connected && (realBondingCurveCashback > 0 || realAmmCashback > 0) && (
+                    <div className="claim-breakdown-box">
+                      <div className="claim-breakdown-item">
+                        <span>Pump Bonding Curve</span>
+                        <strong>{realBondingCurveCashback.toFixed(5)} SOL</strong>
+                      </div>
+                      <div className="claim-breakdown-item">
+                        <span>PumpSwap AMM</span>
+                        <strong>{realAmmCashback.toFixed(5)} WSOL</strong>
+                      </div>
+                    </div>
+                  )}
+
+                  <button 
+                    className="claim-orange-btn" 
+                    onClick={handleClaimCashback} 
+                    disabled={claimingCashback || cashbackClaimed}
+                  >
+                    {claimingCashback ? (
+                      <span className="claim-btn-loading">
+                        <span className="claim-spin"></span> Claiming...
+                      </span>
+                    ) : cashbackClaimed ? (
+                      '✓ Cashback Claimed'
+                    ) : (
+                      <>
+                        <ClaimIcon /> Claim {cashbackSOL.toFixed(5)} SOL
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+
+
+              {/* If no real balances are left, show a helpful status */}
+              {isRealWalletClean && !isDemoMode && (
+                <div className="claim-clean-status">
+                  <div className="clean-status-icon">🎉</div>
+                  <div className="clean-status-title">All Claimed!</div>
+                  <div className="clean-status-msg">Your wallet is fully optimized. There are no empty accounts or pending cashback.</div>
+                </div>
+              )}
+            </div>
+
+            {/* Local Toast Alert inside Modal */}
+            {toast && (
+              <div className={`claim-local-toast ${toast.type}`}>
+                <div className="toast-body">
+                  <div className="toast-title">{toast.title}</div>
+                  <div className="toast-msg">{toast.message}</div>
+                  {toast.link && (
+                    <a href={toast.link} target="_blank" rel="noopener noreferrer" className="toast-link-btn">
+                      View on Solscan ↗
+                    </a>
+                  )}
+                </div>
+                <button className="toast-close" onClick={() => setToast(null)}>✕</button>
+              </div>
+            )}
+
+            {/* Demo Mode Toggle completely removed in live wallet connected mode */}
+
+            {/* Back Button */}
+            <div className="claim-modal-footer">
+              <button className="claim-back-btn" onClick={() => setIsOpen(false)}>
+                ← Back
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
