@@ -592,11 +592,13 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       <div className="claim-float-pill" onClick={() => setIsOpen(true)}>
         <div className="claim-pill-content">
           <div className="claim-icon-wrapper">
-            {/* Real Transparent Solana Logo */}
-            <svg className="solana-svg-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M2.203 18.995l3.818-3.818c.377-.377.888-.588 1.423-.588h14.354c.48 0 .94.19 1.28.53.666.666.666 1.745 0 2.41l-3.818 3.819c-.377.377-.888.588-1.423.588H3.483c-.48 0-.94-.19-1.28-.53-.666-.666-.666-1.746 0-2.411zM21.797 5.005L17.98 8.823c-.377.377-.888.588-1.423.588H2.203c-.48 0-.94-.19-1.28-.53-.666-.666-.666-1.745 0-2.41L4.74 2.652c.377-.377.888-.588 1.423-.588h14.354c.48 0 .94.19 1.28.53.666.666.666 1.746 0 2.411zM17.98 10.188c.377-.377.888-.588 1.423-.588H5.05c-.48 0-.94.19-1.28.53-.666.666-.666 1.745 0 2.41l3.818 3.818c.377.377.888.588 1.423.588h14.354c.48 0 .94-.19 1.28-.53.666-.666.666-1.746 0-2.41l-3.818-3.818z" fill="url(#solana-grad)"/>
+            {/* Official Solana S Logo */}
+            <svg viewBox="0 0 21 18" fill="none" xmlns="http://www.w3.org/2000/svg" className="solana-svg">
+              <path d="M 3.8 1 H 20.2 L 17.4 5 H 1 Z" fill="url(#solana-gradient)"/>
+              <path d="M 1 7 H 17.4 L 20.2 11 H 3.8 Z" fill="url(#solana-gradient)"/>
+              <path d="M 3.8 13 H 20.2 L 17.4 17 H 1 Z" fill="url(#solana-gradient)"/>
               <defs>
-                <linearGradient id="solana-grad" x1="2.203" y1="12" x2="21.797" y2="12" gradientUnits="userSpaceOnUse">
+                <linearGradient id="solana-gradient" x1="0" y1="18" x2="21" y2="0" gradientUnits="userSpaceOnUse">
                   <stop offset="0%" stopColor="#9945FF"/>
                   <stop offset="100%" stopColor="#14F195"/>
                 </linearGradient>
