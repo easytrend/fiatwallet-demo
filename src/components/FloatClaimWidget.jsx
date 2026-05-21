@@ -20,7 +20,7 @@ const ClaimIcon = () => (
 
 export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
   const { connection } = useConnection();
-  const { publicKey, connected, sendTransaction } = useWallet();
+  const { publicKey, connected, sendTransaction, signAllTransactions } = useWallet();
 
   const [isOpen, setIsOpen] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
@@ -212,13 +212,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     return emptyAccounts.length * 0.002039;
   }, [isDemoMode, emptyAccounts, rentClaimed]);
 
-  const reclaimLimitSOL = useMemo(() => {
-    if (rentClaimed) return 0;
-    if (isDemoMode) return rentSOL;
-    const accountsToClose = emptyAccounts.slice(0, 20);
-    return accountsToClose.length * 0.002039;
-  }, [isDemoMode, emptyAccounts, rentClaimed, rentSOL]);
-
   const cashbackSOL = useMemo(() => {
     if (cashbackClaimed) return 0;
     if (isDemoMode) return 0.09426;
@@ -251,21 +244,48 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     try {
       if (isDemoMode) {
         // High-Fidelity Demo mode: Let user sign a valid 0-SOL self-transfer
-        // This generates a real, valid signature that is submitted & confirmed on-chain!
-        const transferTx = new Transaction().add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: publicKey,
-            lamports: 0
-          })
-        );
+        // In demo mode, let's simulate multiple transactions if the totalAccounts > 20
+        const totalAccounts = rentClaimed ? 0 : 162;
+        const totalChunks = Math.ceil(totalAccounts / 20);
+        
+        const transactions = [];
+        for (let i = 0; i < totalChunks; i++) {
+          transactions.push(
+            new Transaction().add(
+              SystemProgram.transfer({
+                fromPubkey: publicKey,
+                toPubkey: publicKey,
+                lamports: 0
+              })
+            )
+          );
+        }
 
         const latestBlockhash = await connection.getLatestBlockhash();
-        transferTx.recentBlockhash = latestBlockhash.blockhash;
-        transferTx.feePayer = publicKey;
+        transactions.forEach(tx => {
+          tx.recentBlockhash = latestBlockhash.blockhash;
+          tx.feePayer = publicKey;
+        });
 
-        const signature = await sendTransaction(transferTx, connection);
-        console.log('Simulated rent claim transaction sent:', signature);
+        let signature = '';
+        if (signAllTransactions && transactions.length > 1) {
+          const signedTxs = await signAllTransactions(transactions);
+          const sigs = await Promise.all(
+            signedTxs.map(signedTx => 
+              connection.sendRawTransaction(signedTx.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+              })
+            )
+          );
+          signature = sigs[0];
+          console.log('Simulated rent claim transactions sent:', sigs);
+        } else {
+          // Fallback or single transaction
+          const sig = await sendTransaction(transactions[0], connection);
+          signature = sig;
+          console.log('Simulated rent claim transaction sent:', sig);
+        }
 
         // Wait a few seconds for visual confirmation
         await new Promise(r => setTimeout(r, 3000));
@@ -274,8 +294,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         setToast({
           type: 'success',
           title: '✓ Rent Claimed (Demo Mode)!',
-          message: `Successfully reclaimed ${rentSOL.toFixed(5)} SOL from empty accounts (Demo).`,
-          link: `https://solscan.io/tx/${signature}`
+          message: `Successfully reclaimed ${rentSOL.toFixed(5)} SOL from empty accounts in ${totalChunks} batched transactions (Demo).`,
+          link: signature ? `https://solscan.io/tx/${signature}` : undefined
         });
         if (onClaimSuccess) onClaimSuccess();
       } else {
@@ -284,57 +304,120 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           throw new Error("You have no empty token accounts to claim rent from.");
         }
 
-        const accountsToClose = emptyAccounts.slice(0, 20);
-        const claimAmount = accountsToClose.length * 0.002039;
-        const transaction = new Transaction();
-        accountsToClose.forEach(acc => {
-          transaction.add(
-            createCloseAccountInstruction(
-              acc.pubkey,
-              publicKey,
-              publicKey,
-              [],
-              acc.programId
-            )
-          );
-        });
+        // Chunk empty accounts in groups of 20
+        const chunks = [];
+        for (let i = 0; i < emptyAccounts.length; i += 20) {
+          chunks.push(emptyAccounts.slice(i, i + 20));
+        }
 
         const latestBlockhash = await connection.getLatestBlockhash();
-        transaction.recentBlockhash = latestBlockhash.blockhash;
-        transaction.feePayer = publicKey;
 
-        const signature = await sendTransaction(transaction, connection);
-        console.log('Real rent claim transaction sent:', signature);
-
-        // Wait for confirmation
-        let confirmed = false;
-        const deadline = Date.now() + 60_000;
-        while (Date.now() < deadline) {
-          const status = await connection.getSignatureStatus(signature);
-          const conf = status?.value?.confirmationStatus;
-          if (conf === 'confirmed' || conf === 'finalized') {
-            confirmed = true;
-            break;
-          }
-          if (status?.value?.err) {
-            throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
-          }
-          await new Promise(r => setTimeout(r, 2000));
-        }
-
-        if (!confirmed) {
-          throw new Error('Transaction confirmation timed out.');
-        }
-
-        if (emptyAccounts.length <= 20) {
-          setRentClaimed(true);
-        }
-        setToast({
-          type: 'success',
-          title: '✓ Rent Claimed!',
-          message: `Successfully reclaimed ${claimAmount.toFixed(5)} SOL from ${accountsToClose.length} empty accounts.`,
-          link: `https://solscan.io/tx/${signature}`
+        const transactions = chunks.map(chunk => {
+          const tx = new Transaction();
+          chunk.forEach(acc => {
+            tx.add(
+              createCloseAccountInstruction(
+                acc.pubkey,
+                publicKey,
+                publicKey,
+                [],
+                acc.programId
+              )
+            );
+          });
+          tx.recentBlockhash = latestBlockhash.blockhash;
+          tx.feePayer = publicKey;
+          return tx;
         });
+
+        let signatures = [];
+
+        if (transactions.length > 1) {
+          if (!signAllTransactions) {
+            throw new Error("Your wallet does not support signing multiple transactions at once. Please claim in smaller batches.");
+          }
+          const signedTxs = await signAllTransactions(transactions);
+          signatures = await Promise.all(
+            signedTxs.map(signedTx =>
+              connection.sendRawTransaction(signedTx.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+              })
+            )
+          );
+        } else {
+          // Single transaction can use standard sendTransaction
+          const sig = await sendTransaction(transactions[0], connection);
+          signatures = [sig];
+        }
+
+        console.log('Real rent claim transaction(s) sent:', signatures);
+
+        // Wait for all signatures to confirm
+        const succeeded = new Array(signatures.length).fill(false);
+        const pendingIndices = new Set(signatures.map((_, i) => i));
+        const deadline = Date.now() + 60_000;
+
+        while (Date.now() < deadline && pendingIndices.size > 0) {
+          const currentIndices = Array.from(pendingIndices);
+          const currentSigs = currentIndices.map(i => signatures[i]);
+          
+          try {
+            const statuses = await connection.getSignatureStatuses(currentSigs);
+            if (statuses && statuses.value) {
+              statuses.value.forEach((status, idx) => {
+                const globalIdx = currentIndices[idx];
+                if (status) {
+                  if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') {
+                    pendingIndices.delete(globalIdx);
+                    succeeded[globalIdx] = true;
+                  } else if (status.err) {
+                    pendingIndices.delete(globalIdx);
+                    console.error(`Transaction index ${globalIdx} failed:`, status.err);
+                  }
+                }
+              });
+            }
+          } catch (e) {
+            console.warn('Error fetching signature statuses:', e);
+          }
+
+          if (pendingIndices.size > 0) {
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        }
+
+        const confirmedCount = succeeded.filter(Boolean).length;
+        let totalAccountsClosed = 0;
+        let totalReclaimedSOL = 0;
+
+        succeeded.forEach((success, idx) => {
+          if (success) {
+            const chunkLength = chunks[idx].length;
+            totalAccountsClosed += chunkLength;
+            totalReclaimedSOL += chunkLength * 0.002039;
+          }
+        });
+
+        if (confirmedCount === chunks.length) {
+          setRentClaimed(true);
+          setToast({
+            type: 'success',
+            title: '✓ All Rent Claimed!',
+            message: `Successfully reclaimed ${totalReclaimedSOL.toFixed(5)} SOL from all ${totalAccountsClosed} empty accounts.`,
+            link: `https://solscan.io/account/${publicKey.toBase58()}`
+          });
+        } else if (confirmedCount > 0) {
+          setToast({
+            type: 'success',
+            title: '✓ Rent Partially Reclaimed',
+            message: `Successfully reclaimed ${totalReclaimedSOL.toFixed(5)} SOL from ${totalAccountsClosed} empty accounts. (${confirmedCount}/${chunks.length} batches succeeded).`,
+            link: `https://solscan.io/account/${publicKey.toBase58()}`
+          });
+        } else {
+          throw new Error("All batched transactions failed to confirm.");
+        }
+
         if (onClaimSuccess) onClaimSuccess();
         await fetchClaimables();
       }
@@ -561,7 +644,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       '✓ Rent Claimed'
                     ) : (
                       <>
-                        <ClaimIcon /> Claim {reclaimLimitSOL.toFixed(5)} SOL {emptyAccounts.length > 20 && `(Batch of 20)`}
+                        <ClaimIcon /> Claim {rentSOL.toFixed(5)} SOL
                       </>
                     )}
                   </button>
@@ -578,20 +661,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     <span className="claim-card-sol">{cashbackSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${cashbackUSD.toFixed(2)})</span>
                   </div>
-
-                  {/* Real Cashback Breakdown */}
-                  {!isDemoMode && connected && (realBondingCurveCashback > 0 || realAmmCashback > 0) && (
-                    <div className="claim-breakdown-box">
-                      <div className="claim-breakdown-item">
-                        <span>Pump Bonding Curve</span>
-                        <strong>{realBondingCurveCashback.toFixed(5)} SOL</strong>
-                      </div>
-                      <div className="claim-breakdown-item">
-                        <span>PumpSwap AMM</span>
-                        <strong>{realAmmCashback.toFixed(5)} WSOL</strong>
-                      </div>
-                    </div>
-                  )}
 
                   <button 
                     className="claim-orange-btn" 
