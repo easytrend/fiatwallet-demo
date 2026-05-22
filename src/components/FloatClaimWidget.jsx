@@ -703,7 +703,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     <span className="claim-card-usd"> SOL (${rentUSD.toFixed(2)})</span>
                   </div>
                   <button 
-                    className="claim-orange-btn" 
+                    className="claim-lime-btn" 
                     onClick={handleClaimRent} 
                     disabled={claimingRent || rentClaimed}
                   >
@@ -719,12 +719,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       </>
                     )}
                   </button>
-                  {/* Subtle info text showing the number of transactions to be signed */}
-                  {!rentClaimed && emptyCount > 10 && (
-                    <div className="claim-batch-subtext" style={{ fontSize: '11px', color: '#a0a0a0', marginTop: '8px', textAlign: 'center', opacity: '0.8', lineHeight: '1.4' }}>
-                      Claiming all at once in {Math.ceil(emptyCount / 10)} batched transactions
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -740,7 +734,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                   </div>
 
                   <button 
-                    className="claim-orange-btn" 
+                    className="claim-lime-btn" 
                     onClick={handleClaimCashback} 
                     disabled={claimingCashback || cashbackClaimed}
                   >
