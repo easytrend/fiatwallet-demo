@@ -707,10 +707,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     <span className="claim-card-sol">{rentSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${rentUSD.toFixed(2)})</span>
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text2)', marginTop: '4px', marginBottom: '2px' }}>
-                    You receive: <strong style={{ color: '#a3e635' }}>{(rentSOL * 0.99).toFixed(5)} SOL</strong>
-                    <span style={{ opacity: 0.6 }}> after 1% protocol fee</span>
-                  </div>
                   <button 
                     className="claim-lime-btn" 
                     onClick={handleClaimRent} 
@@ -724,8 +720,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       '✓ Rent Claimed'
                     ) : (
                       <>
-                        <ClaimIcon /> Receive {(activeRentSOL * 0.99).toFixed(5)} SOL
-                        <span style={{ fontSize: '10px', opacity: 0.65, marginLeft: '4px' }}>(after 1% fee)</span>
+                        <ClaimIcon /> Claim {activeRentSOL.toFixed(5)} SOL
                       </>
                     )}
                   </button>
