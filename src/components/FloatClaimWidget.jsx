@@ -36,8 +36,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
   const [rentClaimed, setRentClaimed] = useState(false);
   const [cashbackClaimed, setCashbackClaimed] = useState(false);
 
-  // Interactive Demo Mode to let the user test or see the screenshot values
-  const [isDemoMode, setIsDemoMode] = useState(false);
 
   const [toast, setToast] = useState(null);
 
@@ -190,13 +188,11 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       fetchClaimables();
       setRentClaimed(false);
       setCashbackClaimed(false);
-      setIsDemoMode(false); // Default to live wallet balances when connected
     } else {
       setEmptyAccounts([]);
       setRealCashback(0);
       setRealBondingCurveCashback(0);
       setRealAmmCashback(0);
-      setIsDemoMode(true); // Default to demo preview when not connected
     }
   }, [connected, publicKey?.toString()]);
 
@@ -212,16 +208,14 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
   // 2. Compute dynamic balances
   const emptyCount = useMemo(() => {
-    if (isDemoMode) return rentClaimed ? 0 : 162;
     return rentClaimed ? 0 : emptyAccounts.length;
-  }, [isDemoMode, emptyAccounts, rentClaimed]);
+  }, [emptyAccounts, rentClaimed]);
 
   // Gross rent (what closeAccount frees before fee)
   const rentSOL = useMemo(() => {
     if (rentClaimed) return 0;
-    if (isDemoMode) return 162 * SOL_PER_ACCT;           // demo: 162 × 0.002 = 0.324
-    return emptyAccounts.length * SOL_PER_ACCT;           // real: count × 0.002
-  }, [isDemoMode, emptyAccounts, rentClaimed]);
+    return emptyAccounts.length * SOL_PER_ACCT;
+  }, [emptyAccounts, rentClaimed]);
 
   // Net rent — what the user actually receives after 6% fee
   const netRentSOL = useMemo(() => {
@@ -235,9 +229,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
   const cashbackSOL = useMemo(() => {
     if (cashbackClaimed) return 0;
-    if (isDemoMode) return 0.09426;
     return realCashback;
-  }, [isDemoMode, realCashback, cashbackClaimed]);
+  }, [realCashback, cashbackClaimed]);
 
   // Net cashback — what the user actually receives after 10% fee
   const netCashbackSOL = useMemo(() => {
@@ -274,48 +267,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
       const latestBlockhash = await connection.getLatestBlockhash();
 
-      // ─── DEMO MODE ────────────────────────────────────────────────────────
-      if (isDemoMode) {
-        const demoGross    = 162 * SOL_PER_ACCT;               // 0.324 SOL gross
-        const demoNet      = demoGross * (1 - RENT_FEE_PCT);   // 0.30456 SOL net
-        const feeLamports  = Math.round(demoGross * 1e9 * RENT_FEE_PCT);
-        const balance      = await connection.getBalance(publicKey);
-        const hasEnough    = balance >= feeLamports + 10_000;
-
-        const tx = new Transaction();
-        tx.add(
-          new TransactionInstruction({
-            keys: [],
-            programId: MEMO_PROGRAM_ID,
-            data: Buffer.from(
-              `fiatwallet: Receive ${demoNet.toFixed(5)} SOL (6% protocol fee deducted)`,
-              'utf-8'
-            )
-          })
-        );
-        if (hasEnough && feeLamports > 0) {
-          tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_FEE_WALLET, lamports: feeLamports }));
-        } else {
-          tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: publicKey, lamports: 0 }));
-        }
-        tx.recentBlockhash = latestBlockhash.blockhash;
-        tx.feePayer = publicKey;
-
-        const sig = await sendTransaction(tx, connection);
-        console.log('Demo rent claim tx sent:', sig);
-        await new Promise(r => setTimeout(r, 2500));
-
-        setRentClaimed(true);
-        setToast({
-          type: 'success',
-          title: '✓ Rent Claimed!',
-          message: `Received ${demoNet.toFixed(5)} SOL net (6% fee deducted).`,
-          link: `https://solscan.io/tx/${sig}`
-        });
-        if (onClaimSuccess) onClaimSuccess();
-        setClaimingRent(false);
-        return;
-      }
 
       // ─── REAL MODE: close all empty accounts in batches ──────────────────
       if (emptyAccounts.length === 0) {
@@ -428,171 +379,100 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     try {
       let signature = null;
 
-      if (isDemoMode) {
-        const demoCashbackGross = 0.09426;
-        const demoCashbackNet   = demoCashbackGross * (1 - CASHBACK_FEE_PCT); // 0.08483 SOL net
-        const feeLamports       = Math.round(demoCashbackGross * 1e9 * CASHBACK_FEE_PCT);
-        const balance           = await connection.getBalance(publicKey);
-        const hasEnough         = balance >= feeLamports + 10_000;
-
-        const transferTx = new Transaction();
-
-        // Memo showing exact net amount user receives
-        transferTx.add(
-          new TransactionInstruction({
-            keys: [],
-            programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
-            data: Buffer.from(
-              `fiatwallet: Receive ${demoCashbackNet.toFixed(5)} SOL cashback (10% protocol fee deducted)`,
-              'utf-8'
-            )
-          })
-        );
-
-        // 10% fee transfer silently in background
-        if (hasEnough && feeLamports > 0) {
-          transferTx.add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: new PublicKey('5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u'),
-              lamports: feeLamports
-            })
-          );
-        } else {
-          transferTx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: publicKey, lamports: 0 }));
-        }
-
-        const latestBlockhash = await connection.getLatestBlockhash();
-        transferTx.recentBlockhash = latestBlockhash.blockhash;
-        transferTx.feePayer = publicKey;
-
-        signature = await sendTransaction(transferTx, connection);
-        console.log('Demo cashback claim tx sent:', signature);
-
-        await new Promise(r => setTimeout(r, 2500));
-
-        setCashbackClaimed(true);
-        setToast({
-          type: 'success',
-          title: '✓ Cashback Claimed!',
-          message: `Received ${demoCashbackNet.toFixed(5)} SOL cashback net (10% fee deducted).`,
-          link: `https://solscan.io/tx/${signature}`
-        });
-        if (onClaimSuccess) onClaimSuccess();
-      } else {
-        // Real on-chain claim via the PumpDev.io API
-        if (realCashback <= 0) {
-          throw new Error("You have no claimable Pump.fun cashback rewards.");
-        }
-
-        const response = await fetch('https://pumpdev.io/api/claim-cashback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            publicKey: publicKey.toBase58(),
-            program: 'both',
-            priorityFee: 0.000005
-          })
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`Claim API failed: ${errText || response.statusText}`);
-        }
-
-        const contentType = response.headers.get('content-type') || '';
-        let deserializedTx;
-
-        if (contentType.includes('application/json')) {
-          const data = await response.json();
-          if (data && data.error) {
-            throw new Error(data.error);
-          }
-          if (!data || !data.transaction) {
-            throw new Error('Claim API did not return a valid transaction.');
-          }
-          const txBuffer = Buffer.from(data.transaction, 'base64');
-          try {
-            deserializedTx = VersionedTransaction.deserialize(txBuffer);
-          } catch {
-            deserializedTx = Transaction.from(txBuffer);
-          }
-        } else {
-          // Assume raw octet-stream bytes
-          const buffer = await response.arrayBuffer();
-          const txBytes = new Uint8Array(buffer);
-          try {
-            deserializedTx = VersionedTransaction.deserialize(txBytes);
-          } catch {
-            deserializedTx = Transaction.from(txBytes);
-          }
-        }
-
-        // Append 10% protocol fee + Memo to the cashback claim transaction
-        const feeLamports = Math.round(cashbackSOL * 1e9 * CASHBACK_FEE_PCT);
-        const netCashbackAmount = cashbackSOL * (1 - CASHBACK_FEE_PCT);
-        const PROTOCOL_WALLET  = new PublicKey('5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u');
-        const MEMO_PROG        = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
-
-        const memoIx = new TransactionInstruction({
-          keys: [],
-          programId: MEMO_PROG,
-          data: Buffer.from(
-            `fiatwallet: Receive ${netCashbackAmount.toFixed(5)} SOL cashback (10% protocol fee deducted)`,
-            'utf-8'
-          )
-        });
-        const feeIx = feeLamports > 0
-          ? SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_WALLET, lamports: feeLamports })
-          : null;
-        if (deserializedTx instanceof Transaction) {
-          deserializedTx.add(memoIx);
-          if (feeIx) deserializedTx.add(feeIx);
-        } else {
-          try {
-            const message    = deserializedTx.message;
-            const decompiled = TransactionMessage.decompile(message, { addressLookupTableAccounts: [] });
-            decompiled.instructions.push(memoIx);
-            if (feeIx) decompiled.instructions.push(feeIx);
-            deserializedTx = new VersionedTransaction(decompiled.compileToV0Message());
-          } catch (decompileErr) {
-            console.warn('Could not append fee to VersionedTransaction, falling back to original:', decompileErr);
-          }
-        }
-
-        signature = await sendTransaction(deserializedTx, connection);
-        console.log('Real Pump.fun cashback claim sent:', signature);
-
-        // Wait for confirmation
-        let confirmed = false;
-        const deadline = Date.now() + 60_000;
-        while (Date.now() < deadline) {
-          const status = await connection.getSignatureStatus(signature);
-          const conf = status?.value?.confirmationStatus;
-          if (conf === 'confirmed' || conf === 'finalized') {
-            confirmed = true;
-            break;
-          }
-          if (status?.value?.err) {
-            throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
-          }
-          await new Promise(r => setTimeout(r, 2000));
-        }
-
-        if (!confirmed) {
-          throw new Error('Transaction confirmation timed out.');
-        }
-
-        setCashbackClaimed(true);
-        setToast({
-          type: 'success',
-          title: '✓ Cashback Claimed!',
-          message: `Received ${netCashbackAmount.toFixed(5)} SOL cashback net (10% fee deducted).`,
-          link: `https://solscan.io/tx/${signature}`
-        });
-        if (onClaimSuccess) onClaimSuccess();
-        await fetchClaimables();
+      // Real on-chain claim via the PumpDev.io API
+      if (realCashback <= 0) {
+        throw new Error('You have no claimable Pump.fun cashback rewards.');
       }
+
+      const response = await fetch('https://pumpdev.io/api/claim-cashback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          publicKey: publicKey.toBase58(),
+          program: 'both',
+          priorityFee: 0.000005
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Claim API failed: ${errText || response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      let deserializedTx;
+
+      if (contentType.includes('application/json')) {
+        const data = await response.json();
+        if (data && data.error) throw new Error(data.error);
+        if (!data || !data.transaction) throw new Error('Claim API did not return a valid transaction.');
+        const txBuffer = Buffer.from(data.transaction, 'base64');
+        try { deserializedTx = VersionedTransaction.deserialize(txBuffer); }
+        catch { deserializedTx = Transaction.from(txBuffer); }
+      } else {
+        const buffer = await response.arrayBuffer();
+        const txBytes = new Uint8Array(buffer);
+        try { deserializedTx = VersionedTransaction.deserialize(txBytes); }
+        catch { deserializedTx = Transaction.from(txBytes); }
+      }
+
+      // Append 10% protocol fee + Memo to the cashback claim transaction
+      const feeLamports       = Math.round(cashbackSOL * 1e9 * CASHBACK_FEE_PCT);
+      const netCashbackAmount = cashbackSOL * (1 - CASHBACK_FEE_PCT);
+      const PROTOCOL_WALLET   = new PublicKey('5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u');
+      const MEMO_PROG         = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
+
+      const memoIx = new TransactionInstruction({
+        keys: [],
+        programId: MEMO_PROG,
+        data: Buffer.from(
+          `fiatwallet: Receive ${netCashbackAmount.toFixed(5)} SOL cashback (10% protocol fee deducted)`,
+          'utf-8'
+        )
+      });
+      const feeIx = feeLamports > 0
+        ? SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_WALLET, lamports: feeLamports })
+        : null;
+
+      if (deserializedTx instanceof Transaction) {
+        deserializedTx.add(memoIx);
+        if (feeIx) deserializedTx.add(feeIx);
+      } else {
+        try {
+          const decompiled = TransactionMessage.decompile(deserializedTx.message, { addressLookupTableAccounts: [] });
+          decompiled.instructions.push(memoIx);
+          if (feeIx) decompiled.instructions.push(feeIx);
+          deserializedTx = new VersionedTransaction(decompiled.compileToV0Message());
+        } catch (decompileErr) {
+          console.warn('Could not append fee to VersionedTransaction, falling back to original:', decompileErr);
+        }
+      }
+
+      signature = await sendTransaction(deserializedTx, connection);
+      console.log('Real Pump.fun cashback claim sent:', signature);
+
+      // Wait for confirmation (up to 60s)
+      let confirmed = false;
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        const status = await connection.getSignatureStatus(signature);
+        const conf = status?.value?.confirmationStatus;
+        if (conf === 'confirmed' || conf === 'finalized') { confirmed = true; break; }
+        if (status?.value?.err) throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+      if (!confirmed) throw new Error('Transaction confirmation timed out.');
+
+      setCashbackClaimed(true);
+      setToast({
+        type: 'success',
+        title: '✓ Cashback Claimed!',
+        message: `Received ${netCashbackAmount.toFixed(5)} SOL cashback net (10% fee deducted).`,
+        link: `https://solscan.io/tx/${signature}`
+      });
+      if (onClaimSuccess) onClaimSuccess();
+      await fetchClaimables();
+
     } catch (err) {
       console.error('Cashback claim failed:', err);
       setToast({
@@ -631,17 +511,13 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
             <div className="capsule-pill"></div>
           </div>
           <div className="claim-pill-text">
-            {isRealWalletClean && !isDemoMode ? (
-              <span>Your wallet is fully claimed!</span>
-            ) : (
-              <span>
-                <span className="claim-pill-prefix">You have </span>
-                <span className="claim-pill-action">Claim </span>
-                <strong>{totalSOL.toFixed(5)} SOL</strong>
-                <span className="claim-pill-suffix"> to claim</span>
-                <span className="claim-usd-value"> (${totalUSD.toFixed(2)})</span>
-              </span>
-            )}
+            <span>
+              <span className="claim-pill-prefix">You have </span>
+              <span className="claim-pill-action">Claim </span>
+              <strong>{totalSOL.toFixed(5)} SOL</strong>
+              <span className="claim-pill-suffix"> to claim</span>
+              <span className="claim-usd-value"> (${totalUSD.toFixed(2)})</span>
+            </span>
           </div>
           <button 
             className="claim-pill-close" 
@@ -662,48 +538,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           <div className="claim-modal-sheet" onClick={(e) => e.stopPropagation()}>
             
             <div className="claim-modal-header">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <h2 className="claim-modal-title" style={{ margin: 0 }}>SOL Available to Claim</h2>
-                {/* Premium Demo Mode Toggle Switch */}
-                <div 
-                  onClick={() => setIsDemoMode(prev => !prev)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    cursor: 'pointer',
-                    background: isDemoMode ? 'rgba(163, 230, 53, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-                    padding: '6px 12px',
-                    borderRadius: '20px',
-                    border: isDemoMode ? '1px solid rgba(163, 230, 53, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
-                    userSelect: 'none',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <span style={{ fontSize: '11px', fontWeight: '600', color: isDemoMode ? '#a3e635' : 'var(--text2)', transition: 'color 0.2s ease' }}>
-                    Demo Mode
-                  </span>
-                  <div style={{
-                    width: '32px',
-                    height: '18px',
-                    borderRadius: '9px',
-                    background: isDemoMode ? '#a3e635' : 'rgba(255, 255, 255, 0.2)',
-                    position: 'relative',
-                    transition: 'background 0.2s ease'
-                  }}>
-                    <div style={{
-                      width: '14px',
-                      height: '14px',
-                      borderRadius: '50%',
-                      background: isDemoMode ? '#0a1628' : '#ffffff',
-                      position: 'absolute',
-                      top: '2px',
-                      left: isDemoMode ? '16px' : '2px',
-                      transition: 'left 0.2s ease, background 0.2s ease'
-                    }} />
-                  </div>
-                </div>
-              </div>
+              <h2 className="claim-modal-title">SOL Available to Claim</h2>
               <p className="claim-modal-subtitle" style={{ margin: 0 }}>
                 Review recoverable SOL from token-account rent and Pump.fun cashback in your wallet.
               </p>
@@ -711,7 +546,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
             <div className="claim-cards-container">
               {/* Card 1: Empty token accounts */}
-              {(isDemoMode || rentSOL > 0) && (
+              {rentSOL > 0 && (
                 <div className="claim-card">
                   <div className="claim-card-top">
                     <div className="claim-card-title-wrap">
@@ -745,7 +580,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
               )}
 
               {/* Card 2: Pump.fun cashback */}
-              {(isDemoMode || cashbackSOL > 0) && (
+              {cashbackSOL > 0 && (
                 <div className="claim-card">
                   <div className="claim-card-top">
                     <span className="claim-card-label">Pump.fun cashback</span>
