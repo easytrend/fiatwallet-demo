@@ -267,7 +267,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       tx.add(
         new TransactionInstruction({
           keys: [],
-          programId: new PublicKey("MemobtCq7gqaa6s5ny7YHXagP5caqq5sV8qrch5NZD"),
+          programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
           data: Buffer.from(`fiatwallet: Claim ${(currentRentSOL * 0.99).toFixed(5)} SOL Net Rent (Deducted 1% Fee)`, "utf-8")
         })
       );
@@ -364,7 +364,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         transferTx.add(
           new TransactionInstruction({
             keys: [],
-            programId: new PublicKey("MemobtCq7gqaa6s5ny7YHXagP5caqq5sV8qrch5NZD"),
+            programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
             data: Buffer.from(`fiatwallet: Claim ${(demoCashbackSOL * 0.98).toFixed(5)} SOL Net Cashback (Deducted 2% Fee)`, "utf-8")
           })
         );
