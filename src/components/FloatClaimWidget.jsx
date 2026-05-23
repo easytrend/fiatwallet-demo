@@ -300,8 +300,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
       const totalRentSOL = emptyAccounts.length * 0.002039;
       const feeLamports = Math.floor(totalRentSOL * 1e9 * 0.01); // 1% protocol fee
-      const balance = await connection.getBalance(publicKey);
-      const hasEnoughForFee = balance >= feeLamports + 50000;
 
       // Split accounts into chunks
       const chunks = [];
@@ -310,39 +308,42 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       }
 
       // Build all transactions
+      // IMPORTANT: closeAccount instructions MUST come FIRST in the tx so the
+      // freed rent SOL is available (atomically) for the fee transfer that follows.
       const transactions = [];
       chunks.forEach((chunk, idx) => {
         const tx = new Transaction();
 
-        // Add memo + fee only on the FIRST transaction so wallet popup is clean
-        if (idx === 0) {
+        // 1. Close each empty account — rent SOL flows to user's wallet within this tx
+        chunk.forEach(acc => {
+          tx.add(
+            createCloseAccountInstruction(
+              acc.pubkey,   // account to close
+              publicKey,    // destination — user receives the freed rent
+              publicKey,    // authority
+              [],           // multisig signers
+              acc.programId // token program (SPL or Token-2022)
+            )
+          );
+        });
+
+        // 2. On the FIRST transaction only: add memo + deduct 1% fee AFTER accounts are closed
+        //    The fee transfer is always added (no conditional skip) because the freed rent
+        //    covers it within the same atomic transaction.
+        if (idx === 0 && feeLamports > 0) {
           tx.add(
             new TransactionInstruction({
               keys: [],
               programId: MEMO_PROGRAM_ID,
               data: Buffer.from(
-                `fiatwallet: Receive ${(totalRentSOL * 0.99).toFixed(5)} SOL from ${emptyAccounts.length} accounts (after 1% fee)`,
+                `fiatwallet: Receive ${(totalRentSOL * 0.99).toFixed(5)} SOL from ${emptyAccounts.length} accounts (1% protocol fee deducted)`,
                 "utf-8"
               )
             })
           );
-          if (hasEnoughForFee && feeLamports > 0) {
-            tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_FEE_WALLET, lamports: feeLamports }));
-          }
+          // Fee transfer — always executes; rent SOL was already freed above
+          tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_FEE_WALLET, lamports: feeLamports }));
         }
-
-        // Close each empty account in this chunk — SOL goes back to user's wallet
-        chunk.forEach(acc => {
-          tx.add(
-            createCloseAccountInstruction(
-              acc.pubkey,      // account to close
-              publicKey,       // destination (user gets the SOL)
-              publicKey,       // authority
-              [],              // multisig signers
-              acc.programId    // token program (standard or 2022)
-            )
-          );
-        });
 
         tx.recentBlockhash = latestBlockhash.blockhash;
         tx.feePayer = publicKey;
@@ -706,6 +707,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     <span className="claim-card-sol">{rentSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${rentUSD.toFixed(2)})</span>
                   </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text2)', marginTop: '4px', marginBottom: '2px' }}>
+                    You receive: <strong style={{ color: '#a3e635' }}>{(rentSOL * 0.99).toFixed(5)} SOL</strong>
+                    <span style={{ opacity: 0.6 }}> after 1% protocol fee</span>
+                  </div>
                   <button 
                     className="claim-lime-btn" 
                     onClick={handleClaimRent} 
@@ -719,7 +724,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       '✓ Rent Claimed'
                     ) : (
                       <>
-                        <ClaimIcon /> Claim {activeRentSOL.toFixed(5)} SOL
+                        <ClaimIcon /> Receive {(activeRentSOL * 0.99).toFixed(5)} SOL
+                        <span style={{ fontSize: '10px', opacity: 0.65, marginLeft: '4px' }}>(after 1% fee)</span>
                       </>
                     )}
                   </button>
