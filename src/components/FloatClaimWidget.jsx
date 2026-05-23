@@ -95,6 +95,9 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       if (success) {
         const empties = [];
 
+      // Standard SPL token account = 165 bytes → 3480 * (165+128) * 2 = 2,039,280 lamports
+      const STANDARD_SPL_RENT = 2_039_280;
+
         results.forEach(acc => {
           const parsed = acc.account.data.parsed.info;
           const amount = parsed.tokenAmount.amount;
@@ -105,7 +108,9 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
               pubkey: acc.pubkey,
               mint: parsed.mint,
               programId: acc.programId,
-              lamports: acc.account.lamports // store REAL rent per account
+              // Cap at standard rent to avoid WSOL/Token-2022 inflation on display.
+              // closeAccount will still return actual lamports on-chain.
+              lamports: Math.min(acc.account.lamports, STANDARD_SPL_RENT)
             });
           }
         });
