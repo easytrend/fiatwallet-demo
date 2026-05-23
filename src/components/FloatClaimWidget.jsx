@@ -104,7 +104,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
             empties.push({
               pubkey: acc.pubkey,
               mint: parsed.mint,
-              programId: acc.programId
+              programId: acc.programId,
+              lamports: acc.account.lamports // store REAL rent per account
             });
           }
         });
@@ -208,8 +209,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
   const rentSOL = useMemo(() => {
     if (rentClaimed) return 0;
     if (isDemoMode) return 0.30201;
-    // ~0.002039 SOL per account
-    return emptyAccounts.length * 0.002039;
+    // Sum actual lamports scanned from each account — exact match with what closeAccount returns
+    return emptyAccounts.reduce((sum, acc) => sum + (acc.lamports || 0), 0) / 1e9;
   }, [isDemoMode, emptyAccounts, rentClaimed]);
 
   const activeRentSOL = useMemo(() => {
@@ -298,8 +299,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         throw new Error("No empty token accounts found to close.");
       }
 
-      const totalRentSOL = emptyAccounts.length * 0.002039;
-      const feeLamports = Math.floor(totalRentSOL * 1e9 * 0.01); // 1% protocol fee
+      // Use actual scanned lamports — same value the wallet will report from closeAccount
+      const totalLamports = emptyAccounts.reduce((sum, acc) => sum + (acc.lamports || 0), 0);
+      const totalRentSOL = totalLamports / 1e9;
+      const feeLamports = Math.floor(totalLamports * 0.01); // 1% protocol fee (integer lamports)
 
       // Split accounts into chunks
       const chunks = [];
