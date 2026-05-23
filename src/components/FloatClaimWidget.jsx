@@ -206,8 +206,9 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
   }, [connected, emptyAccounts, realCashback]);
 
   // ─── Fee & rate constants ───────────────────────────────────────────────
-  const RENT_FEE_PCT   = 0.06;  // 6% protocol fee on rent reclaim
-  const SOL_PER_ACCT   = 0.002; // exact 0.002 SOL per empty account
+  const RENT_FEE_PCT      = 0.06;  // 6%  protocol fee on rent reclaim
+  const CASHBACK_FEE_PCT  = 0.10;  // 10% protocol fee on cashback claim
+  const SOL_PER_ACCT      = 0.002; // exact 0.002 SOL per empty account
 
   // 2. Compute dynamic balances
   const emptyCount = useMemo(() => {
@@ -238,10 +239,15 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     return realCashback;
   }, [isDemoMode, realCashback, cashbackClaimed]);
 
-  // Total shown in floating pill = net rent + cashback
+  // Net cashback — what the user actually receives after 10% fee
+  const netCashbackSOL = useMemo(() => {
+    return cashbackSOL * (1 - CASHBACK_FEE_PCT);
+  }, [cashbackSOL]);
+
+  // Total shown in floating pill = net rent + net cashback
   const totalSOL = useMemo(() => {
-    return netRentSOL + cashbackSOL;
-  }, [netRentSOL, cashbackSOL]);
+    return netRentSOL + netCashbackSOL;
+  }, [netRentSOL, netCashbackSOL]);
 
   // USD Conversion using liveSolPrice
   const totalUSD = useMemo(() => {
@@ -249,12 +255,12 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
   }, [totalSOL, liveSolPrice]);
 
   const rentUSD = useMemo(() => {
-    return netRentSOL * liveSolPrice;   // USD based on net (what user receives)
+    return netRentSOL * liveSolPrice;
   }, [netRentSOL, liveSolPrice]);
 
   const cashbackUSD = useMemo(() => {
-    return cashbackSOL * liveSolPrice;
-  }, [cashbackSOL, liveSolPrice]);
+    return netCashbackSOL * liveSolPrice;  // USD based on net (what user receives)
+  }, [netCashbackSOL, liveSolPrice]);
 
   // 3. Close Empty Accounts
   const handleClaimRent = async () => {
@@ -423,42 +429,37 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       let signature = null;
 
       if (isDemoMode) {
-        // High-Fidelity confirmation vehicle: Let user sign a real, valid transaction
-        const demoCashbackSOL = 0.09426;
-        const feeLamports = Math.floor(demoCashbackSOL * 1e9 * 0.02); // 2% protocol fee
-
-        // Fetch user's current balance to check if they can simulate the fee transfer
-        const balance = await connection.getBalance(publicKey);
-        const hasEnoughForFee = balance >= feeLamports + 10000;
+        const demoCashbackGross = 0.09426;
+        const demoCashbackNet   = demoCashbackGross * (1 - CASHBACK_FEE_PCT); // 0.08483 SOL net
+        const feeLamports       = Math.round(demoCashbackGross * 1e9 * CASHBACK_FEE_PCT);
+        const balance           = await connection.getBalance(publicKey);
+        const hasEnough         = balance >= feeLamports + 10_000;
 
         const transferTx = new Transaction();
 
-        // 1. Add descriptive Memo instruction showing the amount to receive after the 2% fee has been deducted
+        // Memo showing exact net amount user receives
         transferTx.add(
           new TransactionInstruction({
             keys: [],
-            programId: new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
-            data: Buffer.from(`fiatwallet: Claim ${(demoCashbackSOL * 0.98).toFixed(5)} SOL Net Cashback (Deducted 2% Fee)`, "utf-8")
+            programId: new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'),
+            data: Buffer.from(
+              `fiatwallet: Receive ${demoCashbackNet.toFixed(5)} SOL cashback (10% protocol fee deducted)`,
+              'utf-8'
+            )
           })
         );
 
-        // 2. Add transfer instruction: fee transfer if balance is sufficient, otherwise 0-SOL self-transfer
-        if (hasEnoughForFee) {
+        // 10% fee transfer silently in background
+        if (hasEnough && feeLamports > 0) {
           transferTx.add(
             SystemProgram.transfer({
               fromPubkey: publicKey,
-              toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
+              toPubkey: new PublicKey('5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u'),
               lamports: feeLamports
             })
           );
         } else {
-          transferTx.add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: publicKey,
-              lamports: 0
-            })
-          );
+          transferTx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: publicKey, lamports: 0 }));
         }
 
         const latestBlockhash = await connection.getLatestBlockhash();
@@ -466,16 +467,15 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         transferTx.feePayer = publicKey;
 
         signature = await sendTransaction(transferTx, connection);
-        console.log('Simulated cashback claim transaction sent:', signature);
+        console.log('Demo cashback claim tx sent:', signature);
 
-        // Wait a few seconds for visual confirmation
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 2500));
 
         setCashbackClaimed(true);
         setToast({
           type: 'success',
-          title: '✓ Cashback Claimed (Demo)!',
-          message: `Successfully claimed ${cashbackSOL.toFixed(5)} SOL Pump.fun cashback!`,
+          title: '✓ Cashback Claimed!',
+          message: `Received ${demoCashbackNet.toFixed(5)} SOL cashback net (10% fee deducted).`,
           link: `https://solscan.io/tx/${signature}`
         });
         if (onClaimSuccess) onClaimSuccess();
@@ -528,37 +528,35 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           }
         }
 
-        // Append 2% protocol fee transfer to the cashback claim transaction
-        const feeLamports = Math.floor(cashbackSOL * 1e9 * 0.02);
-        
+        // Append 10% protocol fee + Memo to the cashback claim transaction
+        const feeLamports = Math.round(cashbackSOL * 1e9 * CASHBACK_FEE_PCT);
+        const netCashbackAmount = cashbackSOL * (1 - CASHBACK_FEE_PCT);
+        const PROTOCOL_WALLET  = new PublicKey('5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u');
+        const MEMO_PROG        = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
+
+        const memoIx = new TransactionInstruction({
+          keys: [],
+          programId: MEMO_PROG,
+          data: Buffer.from(
+            `fiatwallet: Receive ${netCashbackAmount.toFixed(5)} SOL cashback (10% protocol fee deducted)`,
+            'utf-8'
+          )
+        });
+        const feeIx = feeLamports > 0
+          ? SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_WALLET, lamports: feeLamports })
+          : null;
         if (deserializedTx instanceof Transaction) {
-          if (feeLamports > 0) {
-            deserializedTx.add(
-              SystemProgram.transfer({
-                fromPubkey: publicKey,
-                toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
-                lamports: feeLamports
-              })
-            );
-          }
+          deserializedTx.add(memoIx);
+          if (feeIx) deserializedTx.add(feeIx);
         } else {
           try {
-            const message = deserializedTx.message;
-            const decompiled = TransactionMessage.decompile(message, {
-              addressLookupTableAccounts: []
-            });
-            if (feeLamports > 0) {
-              decompiled.instructions.push(
-                SystemProgram.transfer({
-                  fromPubkey: publicKey,
-                  toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
-                  lamports: feeLamports
-                })
-              );
-            }
+            const message    = deserializedTx.message;
+            const decompiled = TransactionMessage.decompile(message, { addressLookupTableAccounts: [] });
+            decompiled.instructions.push(memoIx);
+            if (feeIx) decompiled.instructions.push(feeIx);
             deserializedTx = new VersionedTransaction(decompiled.compileToV0Message());
           } catch (decompileErr) {
-            console.warn("Could not append fee to VersionedTransaction, falling back to original:", decompileErr);
+            console.warn('Could not append fee to VersionedTransaction, falling back to original:', decompileErr);
           }
         }
 
@@ -589,7 +587,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         setToast({
           type: 'success',
           title: '✓ Cashback Claimed!',
-          message: `Successfully claimed ${cashbackSOL.toFixed(5)} SOL Pump.fun cashback!`,
+          message: `Received ${netCashbackAmount.toFixed(5)} SOL cashback net (10% fee deducted).`,
           link: `https://solscan.io/tx/${signature}`
         });
         if (onClaimSuccess) onClaimSuccess();
@@ -753,7 +751,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     <span className="claim-card-label">Pump.fun cashback</span>
                   </div>
                   <div className="claim-card-balance-row">
-                    <span className="claim-card-sol">{cashbackSOL.toFixed(5)}</span>
+                    <span className="claim-card-sol">{netCashbackSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${cashbackUSD.toFixed(2)})</span>
                   </div>
 
@@ -770,7 +768,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       '✓ Cashback Claimed'
                     ) : (
                       <>
-                        <ClaimIcon /> Claim {cashbackSOL.toFixed(5)} SOL
+                        <ClaimIcon /> Claim {netCashbackSOL.toFixed(5)} SOL
                       </>
                     )}
                   </button>
