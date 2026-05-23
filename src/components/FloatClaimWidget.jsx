@@ -613,7 +613,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
 
               {/* If no real balances are left, show a helpful status */}
-              {isRealWalletClean && !isDemoMode && (
+              {isRealWalletClean && (
                 <div className="claim-clean-status">
                   <div className="clean-status-icon">🎉</div>
                   <div className="clean-status-title">All Claimed!</div>
