@@ -735,8 +735,49 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           <div className="claim-modal-sheet" onClick={(e) => e.stopPropagation()}>
             
             <div className="claim-modal-header">
-              <h2 className="claim-modal-title">SOL Available to Claim</h2>
-              <p className="claim-modal-subtitle">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h2 className="claim-modal-title" style={{ margin: 0 }}>SOL Available to Claim</h2>
+                {/* Premium Demo Mode Toggle Switch */}
+                <div 
+                  onClick={() => setIsDemoMode(prev => !prev)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    background: isDemoMode ? 'rgba(163, 230, 53, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                    padding: '6px 12px',
+                    borderRadius: '20px',
+                    border: isDemoMode ? '1px solid rgba(163, 230, 53, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                    userSelect: 'none',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <span style={{ fontSize: '11px', fontWeight: '600', color: isDemoMode ? '#a3e635' : 'var(--text2)', transition: 'color 0.2s ease' }}>
+                    Demo Mode
+                  </span>
+                  <div style={{
+                    width: '32px',
+                    height: '18px',
+                    borderRadius: '9px',
+                    background: isDemoMode ? '#a3e635' : 'rgba(255, 255, 255, 0.2)',
+                    position: 'relative',
+                    transition: 'background 0.2s ease'
+                  }}>
+                    <div style={{
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '50%',
+                      background: isDemoMode ? '#0a1628' : '#ffffff',
+                      position: 'absolute',
+                      top: '2px',
+                      left: isDemoMode ? '16px' : '2px',
+                      transition: 'left 0.2s ease, background 0.2s ease'
+                    }} />
+                  </div>
+                </div>
+              </div>
+              <p className="claim-modal-subtitle" style={{ margin: 0 }}>
                 Review recoverable SOL from token-account rent and Pump.fun cashback in your wallet.
               </p>
             </div>
