@@ -205,24 +205,32 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     return connected && emptyAccounts.length === 0 && realCashback === 0;
   }, [connected, emptyAccounts, realCashback]);
 
+  // ─── Fee & rate constants ───────────────────────────────────────────────
+  const RENT_FEE_PCT   = 0.06;  // 6% protocol fee on rent reclaim
+  const SOL_PER_ACCT   = 0.002; // exact 0.002 SOL per empty account
+
   // 2. Compute dynamic balances
   const emptyCount = useMemo(() => {
     if (isDemoMode) return rentClaimed ? 0 : 162;
     return rentClaimed ? 0 : emptyAccounts.length;
   }, [isDemoMode, emptyAccounts, rentClaimed]);
 
+  // Gross rent (what closeAccount frees before fee)
   const rentSOL = useMemo(() => {
     if (rentClaimed) return 0;
-    if (isDemoMode) return 0.30201;
-    // Sum actual lamports scanned from each account — exact match with what closeAccount returns
-    return emptyAccounts.reduce((sum, acc) => sum + (acc.lamports || 0), 0) / 1e9;
+    if (isDemoMode) return 162 * SOL_PER_ACCT;           // demo: 162 × 0.002 = 0.324
+    return emptyAccounts.length * SOL_PER_ACCT;           // real: count × 0.002
   }, [isDemoMode, emptyAccounts, rentClaimed]);
+
+  // Net rent — what the user actually receives after 6% fee
+  const netRentSOL = useMemo(() => {
+    return rentSOL * (1 - RENT_FEE_PCT);
+  }, [rentSOL]);
 
   const activeRentSOL = useMemo(() => {
     if (rentClaimed) return 0;
     return rentSOL;
   }, [rentClaimed, rentSOL]);
-
 
   const cashbackSOL = useMemo(() => {
     if (cashbackClaimed) return 0;
@@ -230,10 +238,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     return realCashback;
   }, [isDemoMode, realCashback, cashbackClaimed]);
 
-  // Total Claimable SOL (Pill includes Empty Accounts + Pump.fun Cashback)
+  // Total shown in floating pill = net rent + cashback
   const totalSOL = useMemo(() => {
-    return rentSOL + cashbackSOL;
-  }, [rentSOL, cashbackSOL]);
+    return netRentSOL + cashbackSOL;
+  }, [netRentSOL, cashbackSOL]);
 
   // USD Conversion using liveSolPrice
   const totalUSD = useMemo(() => {
@@ -241,8 +249,8 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
   }, [totalSOL, liveSolPrice]);
 
   const rentUSD = useMemo(() => {
-    return rentSOL * liveSolPrice;
-  }, [rentSOL, liveSolPrice]);
+    return netRentSOL * liveSolPrice;   // USD based on net (what user receives)
+  }, [netRentSOL, liveSolPrice]);
 
   const cashbackUSD = useMemo(() => {
     return cashbackSOL * liveSolPrice;
@@ -262,20 +270,24 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
       // ─── DEMO MODE ────────────────────────────────────────────────────────
       if (isDemoMode) {
-        const currentRentSOL = 0.30201;
-        const feeLamports = Math.floor(currentRentSOL * 1e9 * 0.01);
-        const balance = await connection.getBalance(publicKey);
-        const hasEnoughForFee = balance >= feeLamports + 10000;
+        const demoGross    = 162 * SOL_PER_ACCT;               // 0.324 SOL gross
+        const demoNet      = demoGross * (1 - RENT_FEE_PCT);   // 0.30456 SOL net
+        const feeLamports  = Math.round(demoGross * 1e9 * RENT_FEE_PCT);
+        const balance      = await connection.getBalance(publicKey);
+        const hasEnough    = balance >= feeLamports + 10_000;
 
         const tx = new Transaction();
         tx.add(
           new TransactionInstruction({
             keys: [],
             programId: MEMO_PROGRAM_ID,
-            data: Buffer.from(`fiatwallet: Receive ${(currentRentSOL * 0.99).toFixed(5)} SOL (after 1% fee)`, "utf-8")
+            data: Buffer.from(
+              `fiatwallet: Receive ${demoNet.toFixed(5)} SOL (6% protocol fee deducted)`,
+              'utf-8'
+            )
           })
         );
-        if (hasEnoughForFee) {
+        if (hasEnough && feeLamports > 0) {
           tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_FEE_WALLET, lamports: feeLamports }));
         } else {
           tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: publicKey, lamports: 0 }));
@@ -291,7 +303,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         setToast({
           type: 'success',
           title: '✓ Rent Claimed!',
-          message: `Received ${(currentRentSOL * 0.99).toFixed(5)} SOL net (1% fee deducted).`,
+          message: `Received ${demoNet.toFixed(5)} SOL net (6% fee deducted).`,
           link: `https://solscan.io/tx/${sig}`
         });
         if (onClaimSuccess) onClaimSuccess();
@@ -301,13 +313,14 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
       // ─── REAL MODE: close all empty accounts in batches ──────────────────
       if (emptyAccounts.length === 0) {
-        throw new Error("No empty token accounts found to close.");
+        throw new Error('No empty token accounts found to close.');
       }
 
-      // Use actual scanned lamports — same value the wallet will report from closeAccount
-      const totalLamports = emptyAccounts.reduce((sum, acc) => sum + (acc.lamports || 0), 0);
-      const totalRentSOL = totalLamports / 1e9;
-      const feeLamports = Math.floor(totalLamports * 0.01); // 1% protocol fee (integer lamports)
+      // Gross = exact 0.002 SOL × count; fee = 6%
+      const grossLamports = emptyAccounts.length * Math.round(SOL_PER_ACCT * 1e9);
+      const feeLamports   = Math.round(grossLamports * RENT_FEE_PCT);
+      const netLamports   = grossLamports - feeLamports;
+      const netSOL        = netLamports / 1e9;
 
       // Split accounts into chunks
       const chunks = [];
@@ -326,30 +339,28 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         chunk.forEach(acc => {
           tx.add(
             createCloseAccountInstruction(
-              acc.pubkey,   // account to close
-              publicKey,    // destination — user receives the freed rent
+              acc.pubkey,
+              publicKey,    // destination — user receives freed rent
               publicKey,    // authority
-              [],           // multisig signers
-              acc.programId // token program (SPL or Token-2022)
+              [],
+              acc.programId
             )
           );
         });
 
-        // 2. On the FIRST transaction only: add memo + deduct 1% fee AFTER accounts are closed
-        //    The fee transfer is always added (no conditional skip) because the freed rent
-        //    covers it within the same atomic transaction.
+        // 2. First tx only: Memo showing net SOL + 6% fee transfer (silently in background)
         if (idx === 0 && feeLamports > 0) {
           tx.add(
             new TransactionInstruction({
               keys: [],
               programId: MEMO_PROGRAM_ID,
               data: Buffer.from(
-                `fiatwallet: Receive ${(totalRentSOL * 0.99).toFixed(5)} SOL from ${emptyAccounts.length} accounts (1% protocol fee deducted)`,
-                "utf-8"
+                `fiatwallet: Receive ${netSOL.toFixed(5)} SOL from ${emptyAccounts.length} accounts (6% protocol fee deducted)`,
+                'utf-8'
               )
             })
           );
-          // Fee transfer — always executes; rent SOL was already freed above
+          // Fee transfer — executes after accounts are closed, using freed rent
           tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_FEE_WALLET, lamports: feeLamports }));
         }
 
@@ -384,11 +395,11 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       );
 
       setRentClaimed(true);
-      setEmptyAccounts([]); // clear locally so UI updates immediately
+      setEmptyAccounts([]);
       setToast({
         type: 'success',
         title: '✓ Rent Claimed!',
-        message: `Closed ${emptyAccounts.length} accounts, received ${(totalRentSOL * 0.99).toFixed(5)} SOL net.`,
+        message: `Closed ${emptyAccounts.length} accounts, received ${netSOL.toFixed(5)} SOL net.`,
         link: `https://solscan.io/tx/${signatures[0]}`
       });
       if (onClaimSuccess) onClaimSuccess();
@@ -712,7 +723,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                     <span className="claim-badge">{emptyCount}</span>
                   </div>
                   <div className="claim-card-balance-row">
-                    <span className="claim-card-sol">{rentSOL.toFixed(5)}</span>
+                    <span className="claim-card-sol">{netRentSOL.toFixed(5)}</span>
                     <span className="claim-card-usd"> SOL (${rentUSD.toFixed(2)})</span>
                   </div>
                   <button 
@@ -728,7 +739,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                       '✓ Rent Claimed'
                     ) : (
                       <>
-                        <ClaimIcon /> Claim {activeRentSOL.toFixed(5)} SOL
+                        <ClaimIcon /> Claim {netRentSOL.toFixed(5)} SOL
                       </>
                     )}
                   </button>
