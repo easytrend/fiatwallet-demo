@@ -609,7 +609,14 @@ export default function App() {
         </div>
       </nav>
 
-      <FloatClaimWidget liveSolPrice={liveSolPrice} onClaimSuccess={fetchBalances} />
+      <FloatClaimWidget 
+        liveSolPrice={liveSolPrice} 
+        onClaimSuccess={fetchBalances} 
+        connected={connected}
+        publicKey={publicKey}
+        sendTransaction={sendTransaction}
+        signAllTransactions={signAllTransactions}
+      />
 
       <div className="main">
         <div className="app-card">

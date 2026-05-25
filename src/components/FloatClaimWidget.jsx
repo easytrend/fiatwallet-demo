@@ -18,9 +18,26 @@ const ClaimIcon = () => (
   </svg>
 );
 
-export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
+export default function FloatClaimWidget({ 
+  liveSolPrice, 
+  onClaimSuccess, 
+  connected: propConnected, 
+  publicKey: propPublicKey, 
+  sendTransaction: propSendTransaction, 
+  signAllTransactions: propSignAllTransactions 
+}) {
   const { connection } = useConnection();
-  const { publicKey, connected, sendTransaction, signAllTransactions } = useWallet();
+  const { 
+    publicKey: adapterPublicKey, 
+    connected: adapterConnected, 
+    sendTransaction: adapterSendTransaction, 
+    signAllTransactions: adapterSignAllTransactions 
+  } = useWallet();
+
+  const connected = propConnected !== undefined ? propConnected : adapterConnected;
+  const publicKey = propPublicKey !== undefined ? propPublicKey : adapterPublicKey;
+  const sendTransaction = propSendTransaction !== undefined ? propSendTransaction : adapterSendTransaction;
+  const signAllTransactions = propSignAllTransactions !== undefined ? propSignAllTransactions : adapterSignAllTransactions;
 
   const [isOpen, setIsOpen] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
