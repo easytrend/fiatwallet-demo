@@ -133,3 +133,31 @@ export async function robustReverseLookup(connection, publicKeyObj) {
   }
   return null;
 }
+
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+export function decodeBase58(string) {
+  if (!string || typeof string !== 'string') return new Uint8Array(0);
+  const bytes = [0];
+  for (let i = 0; i < string.length; i++) {
+    const char = string[i];
+    const value = BASE58_ALPHABET.indexOf(char);
+    if (value === -1) {
+      throw new Error('Invalid base58 character: ' + char);
+    }
+    let carry = value;
+    for (let j = 0; j < bytes.length; j++) {
+      carry += bytes[j] * 58;
+      bytes[j] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 0xff);
+      carry >>= 8;
+    }
+  }
+  for (let i = 0; string[i] === '1' && i < string.length - 1; i++) {
+    bytes.push(0);
+  }
+  return new Uint8Array(bytes.reverse());
+}
+

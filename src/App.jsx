@@ -1,27 +1,122 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { PublicKey, Transaction, SystemProgram, Connection } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Connection, Keypair } from '@solana/web3.js';
 import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
 import { useLiveRates } from './hooks/useLiveRates';
-import { fmtTok, fmtFiat, fmtRate, robustResolve, robustReverseLookup } from './utils';
+import { fmtTok, fmtFiat, fmtRate, robustResolve, robustReverseLookup, decodeBase58 } from './utils';
 import CurrDrop from './components/CurrDrop';
 import AmountInput from './components/AmountInput';
 import BulkSendPanel from './components/BulkSendPanel';
 import TokenModal from './components/TokenModal';
 import Toast from './components/Toast';
 import FloatClaimWidget from './components/FloatClaimWidget';
+import ImportWalletModal from './components/ImportWalletModal';
 
 const SNS_LINK = 'https://www.sns.id?easytrend.sol';
 
 export default function App() {
   const { connection } = useConnection();
-  const { publicKey, connected, disconnect, sendTransaction, signAllTransactions } = useWallet();
+  const { 
+    publicKey: adapterPublicKey, 
+    connected: adapterConnected, 
+    disconnect: adapterDisconnect, 
+    sendTransaction: adapterSendTransaction, 
+    signAllTransactions: adapterSignAllTransactions 
+  } = useWallet();
   const { setVisible } = useWalletModal();
+
+  // Telegram User State
+  const [tgUser, setTgUser] = useState(null);
+
+  // Local keypair (Bot Wallet) State
+  const [importedKeypair, setImportedKeypair] = useState(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [showConnectOptions, setShowConnectOptions] = useState(false);
+
+  // Initialize Telegram WebApp SDK
+  useEffect(() => {
+    if (window.Telegram?.WebApp) {
+      const webApp = window.Telegram.WebApp;
+      webApp.ready();
+      webApp.expand(); // Full view
+      
+      // Parse User Details
+      if (webApp.initDataUnsafe?.user) {
+        setTgUser(webApp.initDataUnsafe.user);
+      }
+    }
+  }, []);
+
+  // Load imported key from local storage on mount
+  useEffect(() => {
+    try {
+      const cachedKey = localStorage.getItem('fiatwallet_tg_secret');
+      if (cachedKey) {
+        const decoded = decodeBase58(cachedKey);
+        if (decoded.length === 64) {
+          const kp = Keypair.fromSecretKey(decoded);
+          setImportedKeypair(kp);
+          console.log("Auto-loaded cached bot wallet:", kp.publicKey.toBase58());
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to load cached bot wallet:", e);
+    }
+  }, []);
+
+  // Determine active wallet state
+  const isImportedActive = !!importedKeypair;
+  const connected = isImportedActive || adapterConnected;
+  const publicKey = isImportedActive ? importedKeypair.publicKey : adapterPublicKey;
+
+  // Custom sendTransaction to support local signing for imported bot wallets
+  const sendTransaction = useCallback(async (transaction, conn) => {
+    if (isImportedActive && importedKeypair) {
+      if (!transaction.recentBlockhash) {
+        const latest = await conn.getLatestBlockhash('confirmed');
+        transaction.recentBlockhash = latest.blockhash;
+        transaction.feePayer = importedKeypair.publicKey;
+      }
+      transaction.sign(importedKeypair);
+      const raw = transaction.serialize();
+      return await conn.sendRawTransaction(raw, { skipPreflight: false });
+    } else {
+      return await adapterSendTransaction(transaction, conn);
+    }
+  }, [isImportedActive, importedKeypair, adapterSendTransaction]);
+
+  // Custom signAllTransactions to support local signing for bulk transfers
+  const signAllTransactions = useCallback(async (transactions) => {
+    if (isImportedActive && importedKeypair) {
+      const latest = await connection.getLatestBlockhash('confirmed');
+      transactions.forEach(tx => {
+        if (!tx.recentBlockhash) tx.recentBlockhash = latest.blockhash;
+        tx.feePayer = importedKeypair.publicKey;
+        tx.sign(importedKeypair);
+      });
+      return transactions;
+    } else {
+      return await adapterSignAllTransactions(transactions);
+    }
+  }, [isImportedActive, importedKeypair, adapterSignAllTransactions, connection]);
+
+  // Handle Disconnect (both custom and adapter wallets)
+  const disconnect = useCallback(() => {
+    if (isImportedActive) {
+      setImportedKeypair(null);
+      localStorage.removeItem('fiatwallet_tg_secret');
+      if (window.Telegram?.WebApp?.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+      }
+    } else {
+      adapterDisconnect();
+    }
+  }, [isImportedActive, adapterDisconnect]);
 
   // SPL Token Program ID
   const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
@@ -476,16 +571,41 @@ export default function App() {
       <nav>
         <div className="nav-logo-wrap">
           <img src={logoImg} alt="Fiatwallet Logo" className="nav-logo" />
+          {tgUser && (
+            <span className="tg-user-pill">
+              @{tgUser.username || tgUser.first_name}
+            </span>
+          )}
         </div>
 
         <div className="nav-actions">
           {connected && walletPubkey && (
-            <span className="nav-addr" title={walletPubkey}>{walletDomain || (walletPubkey.slice(0,4) + '…' + walletPubkey.slice(-4))}</span>
+            <span className="nav-addr" title={walletPubkey}>
+              {isImportedActive ? '🤖 ' : '◎ '}
+              {walletDomain || (walletPubkey.slice(0,4) + '…' + walletPubkey.slice(-4))}
+            </span>
           )}
-          {connected
-            ? <button className="btn-connected" onClick={handleDisconnect}><span className="live-dot" />Disconnect ▾</button>
-            : <button className="btn-connect" onClick={() => setVisible(true)}>Connect Wallet</button>
-          }
+          {connected ? (
+            <button className="btn-connected" onClick={disconnect}>
+              <span className="live-dot" />Disconnect
+            </button>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              <button className="btn-connect" onClick={() => setShowConnectOptions(!showConnectOptions)}>
+                Connect Wallet ▾
+              </button>
+              {showConnectOptions && (
+                <div className="connect-dropdown">
+                  <button className="dropdown-item" onClick={() => { setVisible(true); setShowConnectOptions(false); }}>
+                    🌐 Web3 Wallet (Phantom)
+                  </button>
+                  <button className="dropdown-item" onClick={() => { setShowImportModal(true); setShowConnectOptions(false); }}>
+                    🤖 Telegram Bot Wallet
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </nav>
 
@@ -648,6 +768,24 @@ export default function App() {
           onSelect={sym => { setToken(sym); setShowModal(false); }}
           onClose={() => setShowModal(false)}
           onRefresh={fetchBalances}
+        />
+      )}
+      {showImportModal && (
+        <ImportWalletModal
+          onClose={() => setShowImportModal(false)}
+          onImport={(keypair, secretStr) => {
+            setImportedKeypair(keypair);
+            localStorage.setItem('fiatwallet_tg_secret', secretStr);
+            if (window.Telegram?.WebApp?.HapticFeedback) {
+              window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+            }
+            setToast({
+              type: 'success',
+              title: '✓ Wallet Imported',
+              message: `Successfully connected to bot wallet: ${keypair.publicKey.toBase58().slice(0, 8)}…`
+            });
+            setTimeout(fetchBalances, 200);
+          }}
         />
       )}
       {toast && (

@@ -268,6 +268,11 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
       setSendingState('done');
 
+      // Trigger Telegram native haptics
+      if (window.Telegram?.WebApp?.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+      }
+
       // Build Solscan link: single tx or first batch tx
       const firstSig = signatures[0];
       setToast({
