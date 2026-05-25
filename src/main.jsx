@@ -24,7 +24,7 @@ import './App.css';
 function Root() {
   // Use an environment variable for your premium RPC (like Helius) to prevent CORS and 403 errors.
   // Fallback to the placeholder if the env variable isn't set yet.
-  const endpoint = useMemo(() => import.meta.env.VITE_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=YOUR_KEY', []);
+  const endpoint = useMemo(() => import.meta.env.VITE_RPC_URL || 'https://api.mainnet-beta.solana.com', []);
   const wallets = useMemo(() => [
     new PhantomWalletAdapter(),
     new SolflareWalletAdapter(),
