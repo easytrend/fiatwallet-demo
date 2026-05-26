@@ -41,7 +41,6 @@ export default function FloatClaimWidget({
 
   const [isOpen, setIsOpen] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
-  const [demoMode, setDemoMode] = useState(false);
 
   // Reclaimer States
   const [emptyAccounts, setEmptyAccounts] = useState([]);
@@ -193,23 +192,7 @@ export default function FloatClaimWidget({
 
       setRealBondingCurveCashback(bondingCurveVal);
       setRealAmmCashback(ammVal);
-      const totalReal = bondingCurveVal + ammVal;
-      setRealCashback(totalReal);
-
-      // Check if user has zero empty accounts and zero cashback rewards
-      const emptyCount = results.filter(acc => {
-        const parsed = acc.account.data.parsed.info;
-        const amount = parsed.tokenAmount.amount;
-        const uiAmount = parsed.tokenAmount.uiAmount || 0;
-        return amount === '0' || uiAmount === 0;
-      }).length;
-
-      if (emptyCount === 0 && totalReal === 0) {
-        console.log("Empty wallet detected. Auto-activating Demo Mode for testing...");
-        setDemoMode(true);
-      } else {
-        setDemoMode(false);
-      }
+      setRealCashback(bondingCurveVal + ammVal);
 
     } catch (err) {
       console.error('Error scanning claimables:', err);
@@ -227,7 +210,6 @@ export default function FloatClaimWidget({
       setRealCashback(0);
       setRealBondingCurveCashback(0);
       setRealAmmCashback(0);
-      setDemoMode(false);
     }
   }, [connected, publicKey?.toString()]);
 
@@ -243,17 +225,14 @@ export default function FloatClaimWidget({
 
   // 2. Compute dynamic balances
   const emptyCount = useMemo(() => {
-    if (rentClaimed) return 0;
-    if (demoMode) return 3; // 3 mock accounts
-    return emptyAccounts.length;
-  }, [emptyAccounts, rentClaimed, demoMode]);
+    return rentClaimed ? 0 : emptyAccounts.length;
+  }, [emptyAccounts, rentClaimed]);
 
   // Gross rent (what closeAccount frees before fee)
   const rentSOL = useMemo(() => {
     if (rentClaimed) return 0;
-    if (demoMode) return 3 * SOL_PER_ACCT;
     return emptyAccounts.length * SOL_PER_ACCT;
-  }, [emptyAccounts, rentClaimed, demoMode]);
+  }, [emptyAccounts, rentClaimed]);
 
   // Net rent — what the user actually receives after 6% fee
   const netRentSOL = useMemo(() => {
@@ -267,9 +246,8 @@ export default function FloatClaimWidget({
 
   const cashbackSOL = useMemo(() => {
     if (cashbackClaimed) return 0;
-    if (demoMode) return 0.045; // mock 0.045 SOL cashback
     return realCashback;
-  }, [realCashback, cashbackClaimed, demoMode]);
+  }, [realCashback, cashbackClaimed]);
 
   // Net cashback — what the user actually receives after 10% fee
   const netCashbackSOL = useMemo(() => {
@@ -296,23 +274,10 @@ export default function FloatClaimWidget({
 
   // 3. Close Empty Accounts
   const handleClaimRent = async () => {
-    if (!publicKey) return;
+    if (!publicKey || !connection) return;
     setClaimingRent(true);
     setToast(null);
     try {
-      if (demoMode) {
-        await new Promise(r => setTimeout(r, 1500));
-        setRentClaimed(true);
-        setToast({
-          type: 'success',
-          title: '✓ Rent Claimed (Demo)',
-          message: `Closed 3 empty accounts (simulated), received ${(3 * SOL_PER_ACCT * (1 - RENT_FEE_PCT)).toFixed(5)} SOL net.`,
-          link: `https://solscan.io`
-        });
-        if (onClaimSuccess) onClaimSuccess();
-        setClaimingRent(false);
-        return;
-      }
       const CHUNK_SIZE = 15; // max close instructions per transaction to stay under tx size limit
       const PROTOCOL_FEE_WALLET = new PublicKey("5xh9BFXqCgpUxGbf3QzADNze945aNSiVG9EFNa8vvb3u");
       const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
@@ -425,23 +390,10 @@ export default function FloatClaimWidget({
 
   // 4. Claim Pump.fun Cashback (Calls the actual pumpdev.io API, no fallback in live mode)
   const handleClaimCashback = async () => {
-    if (!publicKey) return;
+    if (!publicKey || !connection) return;
     setClaimingCashback(true);
     setToast(null);
     try {
-      if (demoMode) {
-        await new Promise(r => setTimeout(r, 1500));
-        setCashbackClaimed(true);
-        setToast({
-          type: 'success',
-          title: '✓ Cashback Claimed (Demo)',
-          message: `Received ${(0.045 * (1 - CASHBACK_FEE_PCT)).toFixed(5)} SOL demo cashback net.`,
-          link: `https://solscan.io`
-        });
-        if (onClaimSuccess) onClaimSuccess();
-        setClaimingCashback(false);
-        return;
-      }
       let signature = null;
 
       // Real on-chain claim via the PumpDev.io API
@@ -677,8 +629,8 @@ export default function FloatClaimWidget({
 
 
 
-              {/* If no real balances are left and demo is off, show a helpful status */}
-              {isRealWalletClean && !demoMode && (
+              {/* If no real balances are left, show a helpful status */}
+              {isRealWalletClean && (
                 <div className="claim-clean-status">
                   <div className="clean-status-icon">🎉</div>
                   <div className="clean-status-title">All Claimed!</div>
@@ -700,32 +652,6 @@ export default function FloatClaimWidget({
                   )}
                 </div>
                 <button className="toast-close" onClick={() => setToast(null)}>✕</button>
-              </div>
-            )}
-
-            {/* Interactive Demo Mode Toggle */}
-            {isRealWalletClean && (
-              <div className="claim-demo-bar">
-                <div className="demo-bar-left">
-                  <span className="demo-bar-icon">🧪</span>
-                  <div style={{ textAlign: 'left' }}>
-                    <div className="demo-bar-title">Interactive Demo Mode</div>
-                    <div className="demo-bar-sub">Simulate empty accounts and cashback for testing</div>
-                  </div>
-                </div>
-                <button 
-                  className={`demo-toggle-switch ${demoMode ? 'active' : ''}`}
-                  onClick={() => {
-                    setDemoMode(!demoMode);
-                    setRentClaimed(false);
-                    setCashbackClaimed(false);
-                    if (window.Telegram?.WebApp?.HapticFeedback) {
-                      window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
-                    }
-                  }}
-                >
-                  <div className="switch-knob" />
-                </button>
               </div>
             )}
 
