@@ -590,21 +590,9 @@ export default function App() {
               <span className="live-dot" />Disconnect
             </button>
           ) : (
-            <div style={{ position: 'relative' }}>
-              <button className="btn-connect" onClick={() => setShowConnectOptions(!showConnectOptions)}>
-                Connect Wallet ▾
-              </button>
-              {showConnectOptions && (
-                <div className="connect-dropdown">
-                  <button className="dropdown-item" onClick={() => { setVisible(true); setShowConnectOptions(false); }}>
-                    🌐 Web3 Wallet (Phantom)
-                  </button>
-                  <button className="dropdown-item" onClick={() => { setShowImportModal(true); setShowConnectOptions(false); }}>
-                    🤖 Telegram Bot Wallet
-                  </button>
-                </div>
-              )}
-            </div>
+            <button className="btn-connect" onClick={() => setShowImportModal(true)}>
+              Connect Wallet
+            </button>
           )}
         </div>
       </nav>
