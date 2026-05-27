@@ -36,7 +36,6 @@ export default function App() {
   // Local keypair (Bot Wallet) State
   const [importedKeypair, setImportedKeypair] = useState(null);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [showConnectOptions, setShowConnectOptions] = useState(false);
 
   // Initialize Telegram WebApp SDK
   useEffect(() => {
