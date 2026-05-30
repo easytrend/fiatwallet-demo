@@ -316,7 +316,31 @@ export default function App() {
     setSending(true);
     setWalletError(null);
     try {
-      const finalRecipient = new PublicKey(resolvedAddress || recipient);
+      // SECURITY FIX: Re-validate SNS domain resolution immediately before transaction
+      // to prevent TOCTOU (Time-of-Check-Time-of-Use) race condition where a domain
+      // could be transferred to another address between resolution and transaction submission
+      let finalRecipient;
+      if (recipient.endsWith('.sol')) {
+        // Re-resolve the domain atomically at transaction build time
+        try {
+          const freshAddress = await robustResolve(recipient);
+          const freshAddrStr = freshAddress.toBase58();
+          // Validate the re-resolved address matches the cached one
+          if (freshAddrStr !== resolvedAddress) {
+            throw new Error('Recipient changed! Domain was transferred during transaction preparation. Please verify the recipient and try again.');
+          }
+          finalRecipient = freshAddress;
+        } catch (err) {
+          throw new Error(`Domain re-validation failed: ${err.message}`);
+        }
+      } else {
+        // For raw public keys, validate the format
+        try {
+          finalRecipient = new PublicKey(resolvedAddress || recipient);
+        } catch (err) {
+          throw new Error('Invalid recipient address');
+        }
+      }
       const transaction = new Transaction();
 
       if (tokLive.symbol === 'SOL') {

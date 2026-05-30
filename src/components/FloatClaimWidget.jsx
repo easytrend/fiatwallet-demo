@@ -39,12 +39,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
   const [toast, setToast] = useState(null);
 
-  // List of public RPCs to bypass Helius CORS/403 or rate-limiting
-  const SCAN_RPCS = [
-    'https://api.mainnet-beta.solana.com',
-    'https://solana-rpc.publicnode.com'
-  ];
-
   // 1. Fetch Real Empty & Dust Accounts + Pump.fun Cashback on-chain
   const fetchClaimables = async () => {
     if (!publicKey) return;
@@ -56,7 +50,9 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       let results = [];
       let success = false;
 
-      // Try primary wallet-adapter connection first
+      // SECURITY FIX: Use only the wallet-adapter's connection object
+      // Do NOT fall back to hardcoded public RPC endpoints. This prevents split-brain scenarios
+      // where balance checks occur against different RPC nodes with potentially inconsistent state.
       try {
         const [resp1, resp2] = await Promise.all([
           connection.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
@@ -67,27 +63,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           ...resp2.value.map(a => ({ ...a, programId: token2022ProgramId }))
         ];
         success = true;
-        console.log('✅ Empty accounts scanned via primary connection');
+        console.log('✅ Empty accounts scanned via wallet-adapter connection');
       } catch (err) {
-        console.warn('❌ Primary scanner failed, trying fallback public RPCs:', err.message);
-        for (const rpcUrl of SCAN_RPCS) {
-          try {
-            const rpcConn = new Connection(rpcUrl);
-            const [resp1, resp2] = await Promise.all([
-              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
-              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
-            ]);
-            results = [
-              ...resp1.value.map(a => ({ ...a, programId: tokenProgramId })),
-              ...resp2.value.map(a => ({ ...a, programId: token2022ProgramId }))
-            ];
-            success = true;
-            console.log(`✅ Empty accounts scanned via fallback ${rpcUrl}`);
-            break;
-          } catch (e) {
-            console.warn(`❌ Fallback scanner failed via ${rpcUrl}:`, e.message);
-          }
-        }
+        console.error('❌ Failed to scan accounts:', err.message);
+        throw err;
       }
 
       if (success) {
@@ -123,24 +102,18 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       );
 
       let pdaInfo = null;
-      let pdaConn = connection;
-
+      // SECURITY FIX: Use only wallet-adapter connection for PDA queries
+      // Do NOT fall back to hardcoded RPC endpoints
       try {
         pdaInfo = await connection.getAccountInfo(userVolumeAccumulator);
-      } catch {
-        for (const rpcUrl of SCAN_RPCS) {
-          try {
-            const rpcConn = new Connection(rpcUrl);
-            pdaInfo = await rpcConn.getAccountInfo(userVolumeAccumulator);
-            pdaConn = rpcConn;
-            break;
-          } catch {}
-        }
+      } catch (err) {
+        console.warn('Failed to fetch PDA info:', err.message);
       }
 
       let bondingCurveVal = 0;
       if (pdaInfo) {
-        const rentExemptMin = await pdaConn.getMinimumBalanceForRentExemption(pdaInfo.data.length);
+        // SECURITY FIX: Use wallet-adapter connection instead of fallback RPCs
+        const rentExemptMin = await connection.getMinimumBalanceForRentExemption(pdaInfo.data.length);
         const claimableLamports = Math.max(0, pdaInfo.lamports - rentExemptMin);
         bondingCurveVal = claimableLamports / 1e9;
         console.log(`✅ On-chain Pump.fun bonding curve cashback: ${bondingCurveVal} SOL`);
