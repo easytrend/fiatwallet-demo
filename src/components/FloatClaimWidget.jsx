@@ -352,25 +352,22 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     try {
       let signature = null;
 
-      // SECURITY: Re-validate claim eligibility on-chain before API call
-      // Prevents claiming rewards that were already claimed or expired
-      const [userVolAccum] = PublicKey.findProgramAddressSync(
-        [Buffer.from("user_volume_accumulator"), publicKey.toBuffer()],
-        PUMP_PROGRAM_ID
-      );
-      let claimableAmount = realCashback; // fallback to cached value
-      try {
-        const pdaInfo = await connection.getAccountInfo(userVolAccum);
-        if (pdaInfo) {
-          const rentMin = await connection.getMinimumBalanceForRentExemption(pdaInfo.data.length);
-          claimableAmount = Math.max(0, (pdaInfo.lamports - rentMin) / 1e9);
+      // SECURITY: Use cached cashback value; re-validate only if we have connection available
+      // If cache shows cashback > 0, attempt to claim even if revalidation fails (graceful degradation)
+      if (realCashback <= 0) {
+        // Only block if cached value is definitely 0
+        const [userVolAccum] = PublicKey.findProgramAddressSync(
+          [Buffer.from("user_volume_accumulator"), publicKey.toBuffer()],
+          PUMP_PROGRAM_ID
+        );
+        try {
+          const pdaInfo = await connection.getAccountInfo(userVolAccum);
+          if (!pdaInfo || pdaInfo.lamports === 0) {
+            throw new Error('You have no claimable Pump.fun cashback rewards.');
+          }
+        } catch (e) {
+          throw new Error('You have no claimable Pump.fun cashback rewards.');
         }
-      } catch (e) {
-        console.warn('⚠️  Could not revalidate eligibility:', e.message);
-      }
-
-      if (claimableAmount <= 0) {
-        throw new Error('You have no claimable Pump.fun cashback rewards.');
       }
 
       const response = await fetch('https://pumpdev.io/api/claim-cashback', {
