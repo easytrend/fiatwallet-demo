@@ -239,11 +239,28 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         transactions.push(tx);
       }
 
-      // 4. Sign and send with polling confirmation
+      // 4. SECURITY: Validate all transactions and cap batch size at 20
+      if (transactions.length > 20) {
+        throw new Error(`Batch too large: ${transactions.length} transactions. Max 20 per batch.`);
+      }
+      for (let i = 0; i < transactions.length; i++) {
+        if (!transactions[i].instructions || transactions[i].instructions.length === 0) {
+          throw new Error(`Transaction ${i + 1} has no instructions`);
+        }
+        for (const instr of transactions[i].instructions) {
+          const pid = instr.programId.toString();
+          const allowed = ['11111111111111111111111111111111', 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'];
+          if (!allowed.includes(pid)) throw new Error(`Transaction ${i + 1} contains unexpected program: ${pid}`);
+        }
+      }
+
       setProgress({ current: 0, total: transactions.length });
       const signatures = [];
 
       if (transactions.length > 1 && signAllTransactions) {
+        if (!confirm(`Sign and send ${transactions.length} transactions? Review them carefully.`)) {
+          throw new Error('User cancelled batch signing');
+        }
         const signedTxs = await signAllTransactions(transactions);
         setSendingState('sending');
 

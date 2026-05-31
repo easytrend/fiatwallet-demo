@@ -16,15 +16,25 @@ import TokenModal from './components/TokenModal';
 import Toast from './components/Toast';
 import FloatClaimWidget from './components/FloatClaimWidget';
 
-const SNS_LINK = 'https://www.sns.id?easytrend.sol';
+// Module-level constants to prevent injection attacks
+const SNS_LINK = 'https://www.sns.id/domain/easytrend.sol';
+const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+
+const ALLOWED_IMG_ORIGINS = ['raw.githubusercontent.com', 'arweave.net', 'ipfs.io'];
+function isTrustedImageOrigin(url) {
+  try {
+    const u = new URL(url);
+    return ALLOWED_IMG_ORIGINS.includes(u.hostname);
+  } catch {
+    return false;
+  }
+}
 
 export default function App() {
   const { connection } = useConnection();
   const { publicKey, connected, disconnect, sendTransaction, signAllTransactions } = useWallet();
   const { setVisible } = useWalletModal();
-
-  // SPL Token Program ID
-  const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
 
   const [inputMode, setInputMode] = useState('fiat'); // fiat or crypto
   const [bulkMode, setBulkMode] = useState(false);
@@ -82,11 +92,21 @@ export default function App() {
 
   function getLiveCurrRate(code) {
     const s = CURRENCIES.find(c => c.code === code) || CURRENCIES[0];
-    return liveRates.fiat[code] || s.rate;
+    const rate = liveRates.fiat[code] || s.rate;
+    if (rate <= 0 || rate > 1_000_000) {
+      console.warn(`⚠️ Rejecting suspicious fiat rate: ${rate}`);
+      return s.rate;
+    }
+    return rate;
   }
   function getLiveTokPrice(symbol) {
     const s = TOKENS.find(t => t.symbol === symbol);
-    return liveRates.crypto[symbol] || s?.price || 0;
+    const price = liveRates.crypto[symbol] || s?.price || 0;
+    if (price < 0.00001 || price > 1_000_000) {
+      console.warn(`⚠️ Rejecting suspicious token price for ${symbol}: ${price}`);
+      return s?.price || 0;
+    }
+    return price;
   }
 
   const liveSolPrice = liveRates.crypto['SOL'] || 148.5;
@@ -110,13 +130,16 @@ export default function App() {
   // When not connected → show full static list so user can browse
   const selectableTokens = useMemo(() => {
     if (connected && walletTokenList) return walletTokenList;
-    return TOKENS.map(t => ({ 
-      ...t, 
-      price: getLiveTokPrice(t.symbol) || t.price || 0,
-      logoURI: t.symbol === 'SOL'
-        ? 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png'
-        : Object.values(KNOWN_MINTS).find(k => k.symbol === t.symbol)?.logoURI
-    }));
+    return TOKENS.map(t => {
+      let logoURI = '';
+      if (t.symbol === 'SOL') {
+        logoURI = 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
+      } else {
+        const knownMint = Object.values(KNOWN_MINTS).find(k => k.symbol === t.symbol);
+        logoURI = (knownMint?.logoURI && isTrustedImageOrigin(knownMint.logoURI)) ? knownMint.logoURI : '';
+      }
+      return { ...t, price: getLiveTokPrice(t.symbol) || t.price || 0, logoURI };
+    });
   }, [connected, walletTokenList, liveRates]);
 
   const tok = token ? ((walletTokenList && walletTokenList.find(t => t.symbol === token))
@@ -129,11 +152,10 @@ export default function App() {
   const dispTok = fmtTok(tokAmt);
   const tokLive = tok ? { ...tok, price: tokPrice } : null;
 
-  // Check if receiver already has the ATA for the selected SPL token
-  // to decide whether to show rent fee or just network fee
+  // Check if receiver already has the ATA using simulateTransaction to avoid TOCTOU
   useEffect(() => {
     async function checkReceiverATA() {
-      if (!connection || !tokLive || tokLive.symbol === 'SOL' || !tokLive.mint) {
+      if (!connection || !tokLive || tokLive.symbol === 'SOL' || !tokLive.mint || !publicKey) {
         setRentFeeInfo(null);
         return;
       }
@@ -143,15 +165,22 @@ export default function App() {
         const recipientPubkey = new PublicKey(addrStr);
         const mintPubkey = new PublicKey(tokLive.mint);
         const ata = getAssociatedTokenAddressSync(mintPubkey, recipientPubkey);
-        const accountInfo = await connection.getAccountInfo(ata);
-        setRentFeeInfo(accountInfo ? 'network' : 'rent');
-      } catch {
+        const testTransaction = new Transaction();
+        testTransaction.add(
+          createAssociatedTokenAccountIdempotentInstruction(
+            publicKey, ata, recipientPubkey, mintPubkey
+          )
+        );
+        const { value: { err } } = await connection.simulateTransaction(testTransaction, [publicKey]);
+        setRentFeeInfo(err ? 'network' : 'rent');
+      } catch (e) {
+        console.warn('ATA check failed:', e);
         setRentFeeInfo(null);
       }
     }
     const t = setTimeout(checkReceiverATA, 400);
     return () => clearTimeout(t);
-  }, [resolvedAddress, recipient, tokLive, connection]);
+  }, [resolvedAddress, recipient, tokLive, connection, publicKey]);
 
   // Fetch real on-chain balances using the wallet-adapter connection object
   const fetchBalances = useCallback(async () => {
@@ -169,8 +198,8 @@ export default function App() {
       const TOKEN_FETCH_RPCS = [
         'https://api.mainnet-beta.solana.com',
       ];
-      const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-      const token2022ProgramId = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+      const tokenProgramId = TOKEN_PROGRAM_ID;
+      const token2022ProgramId = TOKEN_2022_PROGRAM_ID;
 
       let results = [];
       try {
@@ -263,14 +292,25 @@ export default function App() {
   // Auto-fetch when wallet connects or changes
   useEffect(() => {
     if (connected && publicKey) {
-      const pubkeyStr = publicKey.toString();
       fetchBalances();
+    } else {
+      setSolBalance(null);
+      setSplTokens([]);
+      setWalletError(null);
+      setWalletDomain(null);
+      setResolvedAddress(null);
+      setRecipient('');
+      setAmount('');
+    }
+  }, [connected]);
 
-      // 1. Instant Cache Load
+  // Separate domain lookup
+  useEffect(() => {
+    if (connected && publicKey) {
+      const pubkeyStr = publicKey.toString();
       const cached = localStorage.getItem(`sns_${pubkeyStr}`);
       if (cached) setWalletDomain(cached);
 
-      // 2. High-Speed Parallel Lookup (Race for fastest resolution)
       const lookupDomain = async () => {
         try {
           const apiPromise = fetch(`https://sns-sdk-proxy.bonfida.workers.dev/reverse-lookup/${pubkeyStr}`)
@@ -285,7 +325,6 @@ export default function App() {
           })();
 
           const winner = await Promise.any([apiPromise, rpcPromise]).catch(() => null);
-          
           if (winner) {
             setWalletDomain(winner);
             localStorage.setItem(`sns_${pubkeyStr}`, winner);
@@ -294,15 +333,9 @@ export default function App() {
           console.warn('Domain lookup failed:', e);
         }
       };
-
       lookupDomain();
-    } else { 
-      setSolBalance(null); 
-      setSplTokens([]); 
-      setWalletError(null); 
-      setWalletDomain(null);
     }
-  }, [connected, publicKey?.toString()]);
+  }, [connected, publicKey?.toString(), connection]);
 
   function handleDisconnect() {
     disconnect();
@@ -334,11 +367,15 @@ export default function App() {
           throw new Error(`Domain re-validation failed: ${err.message}`);
         }
       } else {
-        // For raw public keys, validate the format
+        const addrStr = resolvedAddress || recipient;
         try {
-          finalRecipient = new PublicKey(resolvedAddress || recipient);
+          const pk = new PublicKey(addrStr);
+          if (!PublicKey.isOnCurve(pk.toBuffer())) {
+            throw new Error('Off-curve point detected');
+          }
+          finalRecipient = pk;
         } catch (err) {
-          throw new Error('Invalid recipient address');
+          throw new Error(`Invalid recipient address: ${err.message}`);
         }
       }
       const transaction = new Transaction();

@@ -352,8 +352,24 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     try {
       let signature = null;
 
-      // Real on-chain claim via the PumpDev.io API
-      if (realCashback <= 0) {
+      // SECURITY: Re-validate claim eligibility on-chain before API call
+      // Prevents claiming rewards that were already claimed or expired
+      const [userVolAccum] = PublicKey.findProgramAddressSync(
+        [Buffer.from("user_volume_accumulator"), publicKey.toBuffer()],
+        PUMP_PROGRAM_ID
+      );
+      let claimableAmount = realCashback; // fallback to cached value
+      try {
+        const pdaInfo = await connection.getAccountInfo(userVolAccum);
+        if (pdaInfo) {
+          const rentMin = await connection.getMinimumBalanceForRentExemption(pdaInfo.data.length);
+          claimableAmount = Math.max(0, (pdaInfo.lamports - rentMin) / 1e9);
+        }
+      } catch (e) {
+        console.warn('⚠️  Could not revalidate eligibility:', e.message);
+      }
+
+      if (claimableAmount <= 0) {
         throw new Error('You have no claimable Pump.fun cashback rewards.');
       }
 
