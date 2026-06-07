@@ -156,7 +156,7 @@ export default function App() {
         setResolveError(null);
         setResolvedAddress(null);
         try {
-          const address = await robustResolve(recipient);
+          const address = await robustResolve(recipient, connection);
           setResolvedAddress(address.toBase58());
         } catch (err) {
           setResolveError('Domain not found or invalid');

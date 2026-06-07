@@ -54,10 +54,9 @@ export function dlTemplate() {
 }
 
 export const RPC_LIST = [
-  "https://solana-mainnet.g.alchemy.com/v2/demo",
-  "https://rpc.ankr.com/solana",
-  "https://mainnet.helius-rpc.com/?api-key=15319bf8-35b6-4a2c-aa8b-09c1e7f6b5a0",
   "https://api.mainnet-beta.solana.com",
+  "https://rpc.ankr.com/solana",
+  "https://solana-rpc.publicnode.com",
 ];
 
 export async function rpcFetch(method, params) {
@@ -82,12 +81,29 @@ export async function rpcFetch(method, params) {
   throw new Error("All RPC nodes failed:\n" + errors.join("\n"));
 }
 
-export async function robustResolve(domain) {
+// [AUDIT FIX CRITICAL] robustResolve accepts an optional wallet-adapter `connection` and tries it
+// first before falling back to the internal RPC list.
+export async function robustResolve(domain, walletConnection) {
   const RESOLVE_RPCS = [
     'https://api.mainnet-beta.solana.com',
     'https://rpc.ankr.com/solana',
     'https://solana-rpc.publicnode.com'
   ];
+
+  // Try the wallet-adapter connection first
+  if (walletConnection) {
+    try {
+      const addr = await Promise.race([
+        resolve(walletConnection, domain),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 4000))
+      ]);
+      if (addr) return addr;
+    } catch (e) {
+      console.warn(`Resolve failed on wallet-adapter connection:`, e.message);
+    }
+  }
+
+  // Fall back to public RPCs
   for (const rpcUrl of RESOLVE_RPCS) {
     try {
       const conn = new Connection(rpcUrl);

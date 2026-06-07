@@ -65,7 +65,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
       setResolvingIds(prev => new Set(prev).add(target.id));
       try {
-        const addr = await robustResolve(target.domain);
+        const addr = await robustResolve(target.domain, connection);
         setRows(curr => curr.map(r => r.id === target.id ? { ...r, resolved: addr.toBase58(), valid: true } : r));
       } catch (e) {
         setRows(curr => curr.map(r => r.id === target.id ? { ...r, valid: false } : r));
@@ -128,7 +128,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
         if (addressStr.endsWith('.sol')) {
           try {
-            const address = await robustResolve(addressStr);
+            const address = await robustResolve(addressStr, connection);
             addressStr = address.toBase58();
           } catch (err) {
             throw new Error(`Failed to resolve domain: ${row.domain}`);
