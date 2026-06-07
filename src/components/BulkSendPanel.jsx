@@ -143,6 +143,12 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         }
 
         const pubkeyStr = recipientPubkey.toBase58();
+        
+        // [AUDIT FIX] Self-send guard for bulk send
+        if (recipientPubkey.equals(publicKey)) {
+          throw new Error(`Cannot send to your own wallet address: "${row.domain}" resolves to your connected wallet.`);
+        }
+
         if (seenPubkeys.has(pubkeyStr)) {
           throw new Error(`Duplicate recipient detected: "${row.domain}" resolves to the same address as another recipient.`);
         }
