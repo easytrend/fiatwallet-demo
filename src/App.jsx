@@ -119,6 +119,7 @@ export default function App() {
 
   // SPL Token Program ID
   const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+  const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 
   const [inputMode, setInputMode] = useState('fiat'); // fiat or crypto
   const [bulkMode, setBulkMode] = useState(false);
@@ -411,29 +412,48 @@ export default function App() {
     setWalletError(null);
     try {
       const finalRecipient = new PublicKey(resolvedAddress || recipient);
+      
+      // [AUDIT FIX] Self-send guard
+      if (finalRecipient.equals(publicKey)) {
+        throw new Error('Cannot send to your own wallet address.');
+      }
+
+      // [AUDIT FIX] Amount validity guard
+      if (!Number.isFinite(tokAmt) || tokAmt <= 0) {
+        throw new Error('Invalid transfer amount.');
+      }
+
       const transaction = new Transaction();
+
+      // [AUDIT FIX] Fetch blockhash up front and set it immediately
+      const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+      transaction.recentBlockhash = latestBlockhash.blockhash;
+      transaction.feePayer = publicKey;
 
       if (tokLive.symbol === 'SOL') {
         let lamports = Math.round(tokAmt * 1e9);
         const solBalanceLamports = Math.round(solBalance * 1e9);
 
+        // [AUDIT FIX] SOL balance pre-check
+        if (lamports > solBalanceLamports) {
+          throw new Error(`Insufficient SOL balance. You have ${solBalance} but tried to send ${tokAmt}.`);
+        }
+
         // If trying to send everything or very close to everything, estimate and subtract the exact fee
         if (lamports >= solBalanceLamports - 50000) {
-          // Add temporary instruction to get the estimated fee
-          const tempTransfer = SystemProgram.transfer({
+          // [AUDIT FIX] Probe tx for fee estimation
+          const probeTx = new Transaction();
+          probeTx.feePayer = publicKey;
+          probeTx.recentBlockhash = latestBlockhash.blockhash;
+          probeTx.add(SystemProgram.transfer({
             fromPubkey: publicKey,
             toPubkey: finalRecipient,
             lamports: 1000
-          });
-          transaction.add(tempTransfer);
-
-          const latestBlockhash = await connection.getLatestBlockhash();
-          transaction.recentBlockhash = latestBlockhash.blockhash;
-          transaction.feePayer = publicKey;
+          }));
 
           let fee = 5000;
           try {
-            const feeResponse = await transaction.getEstimatedFee(connection);
+            const feeResponse = await probeTx.getEstimatedFee(connection);
             if (feeResponse !== null && feeResponse !== undefined) {
               fee = feeResponse;
             }
@@ -445,26 +465,15 @@ export default function App() {
           if (lamports <= 0) {
             throw new Error(`Insufficient SOL balance to cover the network fee of ${fee / 1e9} SOL.`);
           }
-
-          // Rebuild with the exact balance minus fee
-          transaction.instructions = [];
-          transaction.add(addPriorityFee);
-          transaction.add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: finalRecipient,
-              lamports
-            })
-          );
-        } else {
-          transaction.add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: finalRecipient,
-              lamports
-            })
-          );
         }
+        
+        transaction.add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: finalRecipient,
+            lamports
+          })
+        );
       } else {
         const mintPubkey = new PublicKey(tokLive.mint);
         
@@ -473,20 +482,40 @@ export default function App() {
         if (!mintInfo.value) throw new Error("Invalid token mint");
         const decimals = mintInfo.value.data.parsed.info.decimals;
         
-        const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
+        // [AUDIT FIX] SPL balance pre-check
+        const tokenBalance = tokLive.uiAmount ?? tokLive.balance ?? 0;
+        if (tokAmt > tokenBalance) {
+          throw new Error(`Insufficient ${tokLive.symbol} balance. You have ${tokenBalance} but tried to send ${tokAmt}.`);
+        }
 
-        const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey);
-        const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient);
+        // [AUDIT FIX] safe BigInt cast
+        const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
+        if (amountUnits <= 0n) {
+          throw new Error('Transfer amount must be greater than zero token units.');
+        }
+
+        let tokenProgramId = TOKEN_PROGRAM_ID;
+        try {
+          const mintAcct = await connection.getAccountInfo(mintPubkey);
+          if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+            tokenProgramId = TOKEN_2022_PROGRAM_ID;
+          }
+        } catch (e) { /* default to legacy Token program */ }
+
+        const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
+        const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient, false, tokenProgramId);
 
         transaction.add(
           createAssociatedTokenAccountIdempotentInstruction(
             publicKey, // payer
             receiverATA, // ata
             finalRecipient, // owner
-            mintPubkey // mint
+            mintPubkey, // mint
+            tokenProgramId // tokenProgramId
           )
         );
 
+        // [AUDIT FIX] TransferChecked passes tokenProgramId and explicit [] multisigners
         transaction.add(
           createTransferCheckedInstruction(
             senderATA, // source
@@ -494,15 +523,35 @@ export default function App() {
             receiverATA, // destination
             publicKey, // owner of source
             amountUnits, // amount
-            decimals // decimals
+            decimals, // decimals
+            [], // multisigners
+            tokenProgramId // Token program ID
           )
         );
       }
 
-      if (!transaction.recentBlockhash) {
-        const latestBlockhash = await connection.getLatestBlockhash();
-        transaction.recentBlockhash = latestBlockhash.blockhash;
-        transaction.feePayer = publicKey;
+      // [AUDIT FIX] Instruction injection guard
+      const expectedMaxInstructions = tokLive.symbol === 'SOL' ? 1 : 2;
+      if (transaction.instructions.length > expectedMaxInstructions) {
+        throw new Error(`Transaction has unexpected instructions (${transaction.instructions.length}). Refusing to sign.`);
+      }
+
+      // [AUDIT FIX] Final feePayer/recentBlockhash assertion
+      if (!transaction.feePayer || !transaction.recentBlockhash) {
+        throw new Error('INTERNAL: Transaction is missing feePayer or recentBlockhash. Refusing to sign.');
+      }
+
+      // Pre-flight simulation
+      try {
+        const sim = await connection.simulateTransaction(transaction);
+        if (sim.value.err) {
+          const simErr = JSON.stringify(sim.value.err);
+          const logs = sim.value.logs ? sim.value.logs.join('\n') : '';
+          throw new Error(`Transaction simulation failed: ${simErr}${logs ? ' — ' + logs : ''}`);
+        }
+      } catch (simErr) {
+        if (simErr.message.startsWith('Transaction simulation failed:')) throw simErr;
+        console.warn('Simulation call failed (non-critical):', simErr.message);
       }
 
       const signature = await sendTransaction(transaction, connection);
