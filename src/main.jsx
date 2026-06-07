@@ -1,5 +1,5 @@
-import { Buffer } from 'buffer';
-globalThis.Buffer = Buffer;
+import buffer from 'buffer';
+globalThis.Buffer = buffer.Buffer || buffer;
 
 import React, { useMemo } from 'react';
 import ReactDOM from 'react-dom/client';
