@@ -183,12 +183,37 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         resolvedRecipients.push({ pubkey: recipientPubkey, tokAmt });
       }
 
-      // Check if sending all SOL to estimate and subtract transaction fees dynamically
-      if (tok.symbol === 'SOL') {
-        const totalRequestedSOL = resolvedRecipients.reduce((sum, r) => sum + r.tokAmt, 0);
-        const solBalance = tok.balance || 0;
+      // 2. Fetch mint info if SPL token
+      let decimals = 9;
+      let mintPubkey = null;
+      let tokenProgramId = TOKEN_PROGRAM_ID;
+      if (tok.symbol !== 'SOL') {
+        mintPubkey = new PublicKey(tok.mint);
+        const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
+        if (!mintInfo.value) throw new Error('Invalid token mint');
+        decimals = mintInfo.value.data.parsed.info.decimals;
+        // [AUDIT FIX MEDIUM] Detect Token-2022 mints to compute correct ATAs
+        try {
+          const mintAcct = await connection.getAccountInfo(mintPubkey);
+          if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+            tokenProgramId = TOKEN_2022_PROGRAM_ID;
+          }
+        } catch (e) { /* default to legacy */ }
+      }
 
-        if (totalRequestedSOL >= solBalance - 0.005) {
+      // Check balance dynamically immediately before building the transaction to prevent race conditions
+      const totalRequested = resolvedRecipients.reduce((sum, r) => sum + r.tokAmt, 0);
+
+      if (tok.symbol === 'SOL') {
+        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
+        const freshSolBalance = freshLamports / 1e9;
+
+        if (totalRequested > freshSolBalance) {
+          throw new Error(`Insufficient SOL balance. You need ${totalRequested.toFixed(6)} SOL but have ${freshSolBalance.toFixed(6)} SOL.`);
+        }
+
+        // Check if sending all SOL to estimate and subtract transaction fees dynamically
+        if (totalRequested >= freshSolBalance - 0.005) {
           const tempChunkSize = 5;
           let totalEstimatedFee = 0;
           const latestBlockhash = await connection.getLatestBlockhash('confirmed');
@@ -220,27 +245,22 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
             rec.tokAmt = Math.max(0, rec.tokAmt - feeSharePerRecipient);
           });
         }
+      } else {
+        const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
+        let freshTokenBalance = 0;
+        try {
+          const balanceResp = await connection.getTokenAccountBalance(senderATA, 'confirmed');
+          freshTokenBalance = balanceResp.value.uiAmount || 0;
+        } catch (e) {
+          freshTokenBalance = 0;
+        }
+
+        if (totalRequested > freshTokenBalance) {
+          throw new Error(`Insufficient ${tok.symbol} balance. You need ${totalRequested} ${tok.symbol} but have ${freshTokenBalance}.`);
+        }
       }
 
       setSendingState('signing');
-
-      // 2. Fetch mint info if SPL token
-      let decimals = 9;
-      let mintPubkey = null;
-      let tokenProgramId = TOKEN_PROGRAM_ID;
-      if (tok.symbol !== 'SOL') {
-        mintPubkey = new PublicKey(tok.mint);
-        const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
-        if (!mintInfo.value) throw new Error('Invalid token mint');
-        decimals = mintInfo.value.data.parsed.info.decimals;
-        // [AUDIT FIX MEDIUM] Detect Token-2022 mints to compute correct ATAs
-        try {
-          const mintAcct = await connection.getAccountInfo(mintPubkey);
-          if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
-            tokenProgramId = TOKEN_2022_PROGRAM_ID;
-          }
-        } catch (e) { /* default to legacy */ }
-      }
 
       // 3. Chunk instructions (5 per tx for speed, compatible with most wallets)
       const chunkSize = 5;

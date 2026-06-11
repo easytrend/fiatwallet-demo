@@ -466,8 +466,9 @@ export default function App() {
       transaction.recentBlockhash = latestBlockhash.blockhash;
 
       if (tokLive.symbol === 'SOL') {
-        // [AUDIT FIX MEDIUM] Use safe integer arithmetic — avoid float rounding on lamport amounts.
-        const solBalanceLamports = BigInt(Math.round(solBalance * 1e9));
+        // Fetch fresh SOL balance immediately before constructing the transaction to prevent race conditions
+        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
+        const solBalanceLamports = BigInt(freshLamports);
         let lamports = BigInt(Math.round(tokAmt * 1e9));
 
         // [AUDIT FIX] Balance pre-check: reject if amount exceeds available balance before
@@ -476,7 +477,7 @@ export default function App() {
           throw new Error('Transfer amount must be greater than zero.');
         }
         if (lamports > solBalanceLamports) {
-          throw new Error(`Insufficient SOL balance. You have ${solBalance.toFixed(6)} SOL but tried to send ${(Number(lamports) / 1e9).toFixed(6)} SOL.`);
+          throw new Error(`Insufficient SOL balance. You have ${(Number(solBalanceLamports) / 1e9).toFixed(6)} SOL but tried to send ${(Number(lamports) / 1e9).toFixed(6)} SOL.`);
         }
 
         // If trying to send everything or very close to everything, estimate and subtract the exact fee
@@ -516,25 +517,6 @@ export default function App() {
         // ── SPL Token transfer ──
         const mintPubkey = new PublicKey(tokLive.mint);
 
-        // Fetch decimals from on-chain mint info
-        const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
-        if (!mintInfo.value) throw new Error('Invalid token mint');
-        const decimals = mintInfo.value.data.parsed.info.decimals;
-
-        // [AUDIT FIX] Balance pre-check: verify the sender holds enough tokens before
-        // building the transaction so that the error is surfaced before signing.
-        const tokenBalance = tokLive.uiAmount ?? tokLive.balance ?? 0;
-        if (tokAmt > tokenBalance) {
-          throw new Error(`Insufficient ${tokLive.symbol} balance. You have ${tokenBalance} but tried to send ${tokAmt}.`);
-        }
-
-        // [AUDIT FIX MEDIUM] Use safe BigInt integer math to avoid floating-point rounding errors
-        // that could cause incorrect token-unit amounts for high-decimal tokens.
-        const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
-        if (amountUnits <= 0n) {
-          throw new Error('Transfer amount must be greater than zero token units.');
-        }
-
         // [AUDIT FIX MEDIUM] Detect Token-2022 mints to pass correct programId to ATA functions
         let tokenProgramId = TOKEN_PROGRAM_ID;
         try {
@@ -545,6 +527,32 @@ export default function App() {
         } catch (e) { /* default to legacy Token program */ }
 
         const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
+
+        // Fetch fresh SPL token balance immediately before constructing the transaction to prevent race conditions
+        let freshTokenBalance = 0;
+        try {
+          const balanceResp = await connection.getTokenAccountBalance(senderATA, 'confirmed');
+          freshTokenBalance = balanceResp.value.uiAmount || 0;
+        } catch (e) {
+          freshTokenBalance = 0;
+        }
+
+        if (tokAmt > freshTokenBalance) {
+          throw new Error(`Insufficient ${tokLive.symbol} balance. You have ${freshTokenBalance} but tried to send ${tokAmt}.`);
+        }
+
+        // Fetch decimals from on-chain mint info
+        const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
+        if (!mintInfo.value) throw new Error('Invalid token mint');
+        const decimals = mintInfo.value.data.parsed.info.decimals;
+
+        // [AUDIT FIX MEDIUM] Use safe BigInt integer math to avoid floating-point rounding errors
+        // that could cause incorrect token-unit amounts for high-decimal tokens.
+        const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
+        if (amountUnits <= 0n) {
+          throw new Error('Transfer amount must be greater than zero token units.');
+        }
+
         const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient, false, tokenProgramId);
 
         // Instruction 1: Idempotently create the receiver's ATA if it doesn't exist yet.
