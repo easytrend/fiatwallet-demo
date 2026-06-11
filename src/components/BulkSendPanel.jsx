@@ -206,7 +206,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       const totalRequested = resolvedRecipients.reduce((sum, r) => sum + r.tokAmt, 0);
 
       if (tok.symbol === 'SOL') {
-        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
+        const freshLamports = await connection.getBalance(publicKey, { commitment: 'confirmed' });
         const freshSolBalance = freshLamports / 1e9;
 
         if (totalRequested > freshSolBalance) {
@@ -281,7 +281,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         });
 
         // Query fresh SOL balance
-        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
+        const freshLamports = await connection.getBalance(publicKey, { commitment: 'confirmed' });
         const freshSolBalance = freshLamports / 1e9;
         
         const requiredRentSOL = newAtasCount * 0.00203928;
@@ -346,26 +346,22 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         }
       }
 
-      // 4. Pre-flight simulation for each transaction chunk before signing
-      // [AUDIT FIX LOW] Catches malformed instructions and insufficient balance client-side.
+      setProgress({ current: 0, total: transactions.length });
+      const signatures = [];
+
       setSendingState('signing');
-      for (let i = 0; i < transactions.length; i++) {
-        try {
+
+      if (transactions.length > 1 && signAllTransactions) {
+        // Pre-flight simulation immediately before signAllTransactions
+        for (let i = 0; i < transactions.length; i++) {
           const simResult = await connection.simulateTransaction(transactions[i]);
           if (simResult.value.err) {
             const simErr = JSON.stringify(simResult.value.err);
             const logs = simResult.value.logs?.slice(0, 3).join(' | ') || '';
             throw new Error(`Batch ${i + 1} simulation failed: ${simErr}${logs ? ' — ' + logs : ''}`);
           }
-        } catch (simErr) {
-          if (simErr.message.startsWith('Batch')) throw simErr;
-          console.warn(`Simulation call failed for batch ${i + 1} (non-critical):`, simErr.message);
         }
-      }
-      setProgress({ current: 0, total: transactions.length });
-      const signatures = [];
 
-      if (transactions.length > 1 && signAllTransactions) {
         const signedTxs = await signAllTransactions(transactions);
         setSendingState('sending');
 
@@ -380,6 +376,14 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       } else {
         setSendingState('sending');
         for (let i = 0; i < transactions.length; i++) {
+          // Pre-flight simulation immediately before sendTransaction
+          const simResult = await connection.simulateTransaction(transactions[i]);
+          if (simResult.value.err) {
+            const simErr = JSON.stringify(simResult.value.err);
+            const logs = simResult.value.logs?.slice(0, 3).join(' | ') || '';
+            throw new Error(`Batch ${i + 1} simulation failed: ${simErr}${logs ? ' — ' + logs : ''}`);
+          }
+
           const sig = await sendTransaction(transactions[i], connection);
           signatures.push(sig);
           const confirmed = await pollConfirmation(connection, sig);

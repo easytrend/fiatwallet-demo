@@ -458,11 +458,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         // Append our memo + fee now that the base tx is verified
         deserializedTx.add(memoIx);
         if (feeIx) deserializedTx.add(feeIx);
-        // [SECURITY FIX #2] Simulate the fully-assembled transaction before signing.
-        const sim = await connection.simulateTransaction(deserializedTx);
-        if (sim.value.err) {
-          throw new Error(`Cashback claim simulation failed: ${JSON.stringify(sim.value.err)}`);
-        }
       } else {
         // VersionedTransaction: decompile, whitelist-check, append fee, recompile
         try {
@@ -480,6 +475,12 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           if (decompileErr.message.startsWith('[SECURITY]')) throw decompileErr;
           console.warn('Could not decompile VersionedTransaction for fee append:', decompileErr);
         }
+      }
+
+      // Pre-flight simulation immediately before sendTransaction
+      const sim = await connection.simulateTransaction(deserializedTx);
+      if (sim.value.err) {
+        throw new Error(`Cashback claim simulation failed: ${JSON.stringify(sim.value.err)}`);
       }
 
       signature = await sendTransaction(deserializedTx, connection);

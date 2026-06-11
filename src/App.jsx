@@ -468,7 +468,7 @@ export default function App() {
 
       if (tokLive.symbol === 'SOL') {
         // Fetch fresh SOL balance immediately before constructing the transaction to prevent race conditions
-        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
+        const freshLamports = await connection.getBalance(publicKey, { commitment: 'confirmed' });
         const solBalanceLamports = BigInt(freshLamports);
         let lamports = BigInt(Math.round(tokAmt * 1e9));
 
@@ -545,7 +545,7 @@ export default function App() {
         const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient, false, tokenProgramId);
 
         // Fetch fresh SOL balance to ensure the user can cover ATA rent and transaction fee
-        const freshSolLamports = await connection.getBalance(publicKey, 'confirmed');
+        const freshSolLamports = await connection.getBalance(publicKey, { commitment: 'confirmed' });
         const freshSolBalance = freshSolLamports / 1e9;
 
         // Check if recipient's ATA needs to be created
@@ -619,19 +619,12 @@ export default function App() {
         throw new Error('INTERNAL: Transaction is missing feePayer or recentBlockhash. Refusing to sign.');
       }
 
-      // [AUDIT FIX LOW] Pre-flight simulation before signing — catches malformed/manipulated
-      // instructions client-side so the user doesn't waste SOL on failed transactions.
-      try {
-        const simResult = await connection.simulateTransaction(transaction);
-        if (simResult.value.err) {
-          const simErr = JSON.stringify(simResult.value.err);
-          const logs = simResult.value.logs?.slice(0, 3).join(' | ') || '';
-          throw new Error(`Transaction simulation failed: ${simErr}${logs ? ' — ' + logs : ''}`);
-        }
-      } catch (simErr) {
-        // Surface simulation errors but continue if it's a fee-estimation artefact
-        if (simErr.message.startsWith('Transaction simulation failed:')) throw simErr;
-        console.warn('Simulation call failed (non-critical):', simErr.message);
+      // Pre-flight simulation immediately before sendTransaction
+      const simResult = await connection.simulateTransaction(transaction);
+      if (simResult.value.err) {
+        const simErr = JSON.stringify(simResult.value.err);
+        const logs = simResult.value.logs?.slice(0, 3).join(' | ') || '';
+        throw new Error(`Transaction simulation failed: ${simErr}${logs ? ' — ' + logs : ''}`);
       }
 
       // All checks passed — submit to wallet for signing and broadcast.
