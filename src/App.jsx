@@ -45,28 +45,17 @@ export default function App() {
       webApp.expand(); // Full view
       
       // Parse User Details
+      // [SECURITY NOTE] initDataUnsafe is client-side only — not verified server-side.
+      // Safe for display purposes only. Never use for authentication or authorization.
       if (webApp.initDataUnsafe?.user) {
         setTgUser(webApp.initDataUnsafe.user);
       }
     }
   }, []);
 
-  // Load imported key from local storage on mount
-  useEffect(() => {
-    try {
-      const cachedKey = localStorage.getItem('fiatwallet_tg_secret');
-      if (cachedKey) {
-        const decoded = decodeBase58(cachedKey);
-        if (decoded.length === 64) {
-          const kp = Keypair.fromSecretKey(decoded);
-          setImportedKeypair(kp);
-          console.log("Auto-loaded cached bot wallet:", kp.publicKey.toBase58());
-        }
-      }
-    } catch (e) {
-      console.warn("Failed to load cached bot wallet:", e);
-    }
-  }, []);
+  // [SECURITY FIX #1] Private keys are intentionally NOT persisted to localStorage.
+  // localStorage is readable by any JS on the page (extensions, ads, XSS).
+  // The imported keypair lives in React state only and is cleared on page reload.
 
   // Determine active wallet state
   const isImportedActive = !!importedKeypair;
@@ -108,7 +97,7 @@ export default function App() {
   const disconnect = useCallback(() => {
     if (isImportedActive) {
       setImportedKeypair(null);
-      localStorage.removeItem('fiatwallet_tg_secret');
+      // [SECURITY FIX #1] No localStorage key to remove — keys are session-only.
       if (window.Telegram?.WebApp?.HapticFeedback) {
         window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
       }
@@ -163,9 +152,16 @@ export default function App() {
         }
         setResolving(false);
       } else if (recipient.length > 30) {
-        // Assume raw pubkey
-        setResolvedAddress(recipient);
-        setResolveError(null);
+        // [SECURITY FIX #5] Validate the raw address with PublicKey() before accepting it.
+        // A length > 30 check alone accepts malformed strings that fail later at send time.
+        try {
+          new PublicKey(recipient);
+          setResolvedAddress(recipient);
+          setResolveError(null);
+        } catch {
+          setResolvedAddress(null);
+          setResolveError('Invalid Solana address format');
+        }
       } else {
         setResolvedAddress(null);
         setResolveError(null);
@@ -816,9 +812,10 @@ export default function App() {
       {showImportModal && (
         <ImportWalletModal
           onClose={() => setShowImportModal(false)}
-          onImport={(keypair, secretStr) => {
+          onImport={(keypair) => {
+            // [SECURITY FIX #1] Only store keypair in React state — never in localStorage.
+            // The key lives for this session only and is cleared on page reload or disconnect.
             setImportedKeypair(keypair);
-            localStorage.setItem('fiatwallet_tg_secret', secretStr);
             if (window.Telegram?.WebApp?.HapticFeedback) {
               window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
             }

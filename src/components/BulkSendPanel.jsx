@@ -246,6 +246,19 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       }
 
       // 4. Sign and send with polling confirmation
+      // [SECURITY FIX #4] Simulate all transactions before asking the user to sign anything.
+      for (let i = 0; i < transactions.length; i++) {
+        try {
+          const sim = await connection.simulateTransaction(transactions[i]);
+          if (sim.value.err) {
+            throw new Error(`Bulk send simulation failed on batch ${i + 1}: ${JSON.stringify(sim.value.err)}`);
+          }
+        } catch (simErr) {
+          if (simErr.message.startsWith('Bulk send simulation failed')) throw simErr;
+          console.warn(`Simulation call failed on batch ${i + 1} (non-critical):`, simErr.message);
+        }
+      }
+
       setProgress({ current: 0, total: transactions.length });
       const signatures = [];
 

@@ -24,9 +24,9 @@ export default function ImportWalletModal({ onClose, onImport }) {
         return;
       }
       
-      // Attempt to load keypair to verify validity
+      // [SECURITY FIX #1] Only pass the keypair object — the raw secret string is no longer stored.
       const keypair = Keypair.fromSecretKey(decoded);
-      onImport(keypair, key);
+      onImport(keypair);
       onClose();
     } catch (err) {
       setError('Failed to import: ' + err.message);

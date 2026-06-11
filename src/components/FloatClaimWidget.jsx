@@ -348,6 +348,13 @@ export default function FloatClaimWidget({
       // Sign + send all transactions
       let signatures = [];
       if (signAllTransactions && transactions.length > 1) {
+        // [SECURITY FIX #3] Simulate every batch transaction before sending.
+        for (const tx of transactions) {
+          const sim = await connection.simulateTransaction(tx);
+          if (sim.value.err) {
+            throw new Error(`Rent claim simulation failed on a batch: ${JSON.stringify(sim.value.err)}`);
+          }
+        }
         const signed = await signAllTransactions(transactions);
         signatures = await Promise.all(
           signed.map(s =>
@@ -356,6 +363,11 @@ export default function FloatClaimWidget({
         );
         console.log('Rent claim transactions sent:', signatures);
       } else {
+        // [SECURITY FIX #3] Simulate single transaction before sending.
+        const sim = await connection.simulateTransaction(transactions[0]);
+        if (sim.value.err) {
+          throw new Error(`Rent claim simulation failed: ${JSON.stringify(sim.value.err)}`);
+        }
         const sig = await sendTransaction(transactions[0], connection);
         signatures = [sig];
         console.log('Rent claim transaction sent:', sig);
@@ -451,17 +463,52 @@ export default function FloatClaimWidget({
         ? SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_WALLET, lamports: feeLamports })
         : null;
 
+      // [SECURITY FIX #2] Whitelist allowed program IDs before signing external transaction.
+      // This prevents a compromised pumpdev.io API from injecting malicious instructions.
+      const ALLOWED_CASHBACK_PROGRAMS = new Set([
+        '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', // Pump.fun bonding curve
+        'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA', // Pump.fun AMM
+        'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', // Memo program
+        '11111111111111111111111111111111',               // System Program (for fee transfer)
+        'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',  // SPL Token
+        'ComputeBudget111111111111111111111111111111',    // Compute budget
+        'So11111111111111111111111111111111111111112',    // WSOL mint (not a program, safety)
+      ]);
+
       if (deserializedTx instanceof Transaction) {
+        // Whitelist check on the API-supplied instructions BEFORE we append our own
+        for (const ix of deserializedTx.instructions) {
+          const pid = ix.programId.toBase58();
+          if (!ALLOWED_CASHBACK_PROGRAMS.has(pid)) {
+            throw new Error(`[SECURITY] Unexpected program in cashback claim transaction: ${pid}. Refusing to sign.`);
+          }
+        }
+        // Append our memo + fee instructions now that the base tx is verified
         deserializedTx.add(memoIx);
         if (feeIx) deserializedTx.add(feeIx);
+
+        // [SECURITY FIX #2] Simulate the fully-assembled transaction before signing.
+        const sim = await connection.simulateTransaction(deserializedTx);
+        if (sim.value.err) {
+          throw new Error(`Cashback claim simulation failed: ${JSON.stringify(sim.value.err)}`);
+        }
       } else {
+        // VersionedTransaction: decompile, whitelist-check, append fee, recompile
         try {
           const decompiled = TransactionMessage.decompile(deserializedTx.message, { addressLookupTableAccounts: [] });
+          for (const ix of decompiled.instructions) {
+            const pid = ix.programId.toBase58();
+            if (!ALLOWED_CASHBACK_PROGRAMS.has(pid)) {
+              throw new Error(`[SECURITY] Unexpected program in cashback claim transaction: ${pid}. Refusing to sign.`);
+            }
+          }
           decompiled.instructions.push(memoIx);
           if (feeIx) decompiled.instructions.push(feeIx);
           deserializedTx = new VersionedTransaction(decompiled.compileToV0Message());
         } catch (decompileErr) {
-          console.warn('Could not append fee to VersionedTransaction, falling back to original:', decompileErr);
+          if (decompileErr.message.startsWith('[SECURITY]')) throw decompileErr;
+          // Could not decompile (e.g. address lookup tables) — log and proceed without fee append
+          console.warn('Could not decompile VersionedTransaction for fee append:', decompileErr);
         }
       }
 
