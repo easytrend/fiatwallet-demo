@@ -206,7 +206,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       const totalRequested = resolvedRecipients.reduce((sum, r) => sum + r.tokAmt, 0);
 
       if (tok.symbol === 'SOL') {
-        const freshLamports = await connection.getBalance(publicKey, { commitment: 'confirmed' });
+        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
         const freshSolBalance = freshLamports / 1e9;
 
         if (totalRequested > freshSolBalance) {
@@ -281,7 +281,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         });
 
         // Query fresh SOL balance
-        const freshLamports = await connection.getBalance(publicKey, { commitment: 'confirmed' });
+        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
         const freshSolBalance = freshLamports / 1e9;
         
         const requiredRentSOL = newAtasCount * 0.00203928;

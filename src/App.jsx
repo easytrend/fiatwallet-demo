@@ -466,20 +466,19 @@ export default function App() {
       transaction.feePayer = publicKey;
       transaction.recentBlockhash = latestBlockhash.blockhash;
 
+      let senderATA = null;
+      let needsAtaCreation = false;
+
       if (tokLive.symbol === 'SOL') {
-        // Fetch fresh SOL balance immediately before constructing the transaction to prevent race conditions
-        const freshLamports = await connection.getBalance(publicKey, { commitment: 'confirmed' });
-        const solBalanceLamports = BigInt(freshLamports);
         let lamports = BigInt(Math.round(tokAmt * 1e9));
 
-        // [AUDIT FIX] Balance pre-check: reject if amount exceeds available balance before
-        // even building the transaction, giving a clear user-facing error.
         if (lamports <= 0n) {
           throw new Error('Transfer amount must be greater than zero.');
         }
-        if (lamports > solBalanceLamports) {
-          throw new Error(`Insufficient SOL balance. You have ${(Number(solBalanceLamports) / 1e9).toFixed(6)} SOL but tried to send ${(Number(lamports) / 1e9).toFixed(6)} SOL.`);
-        }
+
+        // Fetch fresh SOL balance to calculate final send lamports if sending max
+        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
+        const solBalanceLamports = BigInt(freshLamports);
 
         // If trying to send everything or very close to everything, estimate and subtract the exact fee
         if (lamports >= solBalanceLamports - BigInt(50000)) {
@@ -527,43 +526,15 @@ export default function App() {
           }
         } catch (e) { /* default to legacy Token program */ }
 
-        const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
-
-        // Fetch fresh SPL token balance immediately before constructing the transaction to prevent race conditions
-        let freshTokenBalance = 0;
-        try {
-          const balanceResp = await connection.getTokenAccountBalance(senderATA, 'confirmed');
-          freshTokenBalance = balanceResp.value.uiAmount || 0;
-        } catch (e) {
-          freshTokenBalance = 0;
-        }
-
-        if (tokAmt > freshTokenBalance) {
-          throw new Error(`Insufficient ${tokLive.symbol} balance. You have ${freshTokenBalance} but tried to send ${tokAmt}.`);
-        }
-
+        senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
         const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient, false, tokenProgramId);
 
-        // Fetch fresh SOL balance to ensure the user can cover ATA rent and transaction fee
-        const freshSolLamports = await connection.getBalance(publicKey, { commitment: 'confirmed' });
-        const freshSolBalance = freshSolLamports / 1e9;
-
         // Check if recipient's ATA needs to be created
-        let needsAtaCreation = false;
         try {
           const ataInfo = await connection.getAccountInfo(receiverATA);
           if (!ataInfo) needsAtaCreation = true;
         } catch (e) {
           needsAtaCreation = true;
-        }
-
-        const requiredSOL = (needsAtaCreation ? 0.00203928 : 0) + 0.00001; // rent + fee
-        if (freshSolBalance < requiredSOL) {
-          if (needsAtaCreation) {
-            throw new Error(`Insufficient SOL balance. Creating a new recipient account requires 0.002039 SOL for rent, but you only have ${freshSolBalance.toFixed(6)} SOL.`);
-          } else {
-            throw new Error(`Insufficient SOL balance. You need at least 0.00001 SOL to cover network transaction fees, but only have ${freshSolBalance.toFixed(6)} SOL.`);
-          }
         }
 
         // Fetch decimals from on-chain mint info
@@ -572,14 +543,12 @@ export default function App() {
         const decimals = mintInfo.value.data.parsed.info.decimals;
 
         // [AUDIT FIX MEDIUM] Use safe BigInt integer math to avoid floating-point rounding errors
-        // that could cause incorrect token-unit amounts for high-decimal tokens.
         const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
         if (amountUnits <= 0n) {
           throw new Error('Transfer amount must be greater than zero token units.');
         }
 
         // Instruction 1: Idempotently create the receiver's ATA if it doesn't exist yet.
-        // This also pays the rent for the new account from the sender's SOL balance.
         transaction.add(
           createAssociatedTokenAccountIdempotentInstruction(
             publicKey,      // payer of rent
@@ -590,8 +559,7 @@ export default function App() {
           )
         );
 
-        // Instruction 2: Transfer tokens using TransferChecked — explicitly validates
-        // mint, decimals, and amount to prevent silent precision/mint mismatch attacks.
+        // Instruction 2: Transfer tokens using TransferChecked
         transaction.add(
           createTransferCheckedInstruction(
             senderATA,      // source token account
@@ -607,16 +575,47 @@ export default function App() {
       }
 
       // [AUDIT] Instruction injection guard — reject transaction if it has more instructions
-      // than expected (1 for SOL, 2 for SPL: ATA create + transferChecked).
       const expectedMaxInstructions = tokLive.symbol === 'SOL' ? 1 : 2;
       if (transaction.instructions.length > expectedMaxInstructions) {
         throw new Error(`Transaction has unexpected instructions (${transaction.instructions.length}). Refusing to sign.`);
       }
 
       // [AUDIT] Verify feePayer and recentBlockhash are explicitly set before signing.
-      // These must ALWAYS be present — missing either is a critical transaction bug.
       if (!transaction.feePayer || !transaction.recentBlockhash) {
         throw new Error('INTERNAL: Transaction is missing feePayer or recentBlockhash. Refusing to sign.');
+      }
+
+      // ────────────────────────────────────────────────────────────────────────
+      // ATOMIC BALANCE CHECK GUARD (Before simulation/send to minimize race window)
+      // ────────────────────────────────────────────────────────────────────────
+      if (tokLive.symbol === 'SOL') {
+        const latestBalance = await connection.getBalance(publicKey, 'confirmed');
+        const lamportsNeeded = BigInt(Math.round(tokAmt * 1e9));
+
+        if (BigInt(latestBalance) < lamportsNeeded + BigInt(5000)) {
+          throw new Error(`Insufficient SOL balance. You have ${(Number(latestBalance) / 1e9).toFixed(6)} SOL but need at least ${((Number(lamportsNeeded) + 5000) / 1e9).toFixed(6)} SOL.`);
+        }
+      } else {
+        if (!senderATA) {
+          throw new Error('Internal Error: sender ATA is null');
+        }
+        // Fetch fresh SPL token balance using confirmed commitment
+        const tokenBalanceResp = await connection.getTokenAccountBalance(senderATA, 'confirmed');
+        const freshTokenBalance = tokenBalanceResp.value.uiAmount || 0;
+        if (tokAmt > freshTokenBalance) {
+          throw new Error(`Insufficient ${tokLive.symbol} balance. You have ${freshTokenBalance} but tried to send ${tokAmt}.`);
+        }
+
+        // Fetch fresh SOL balance for rent and transaction fee using confirmed commitment
+        const latestSolBalance = await connection.getBalance(publicKey, 'confirmed');
+        const requiredSOL = (needsAtaCreation ? 0.00203928 : 0) + 0.00001;
+        if ((latestSolBalance / 1e9) < requiredSOL) {
+          if (needsAtaCreation) {
+            throw new Error(`Insufficient SOL balance. Creating a new recipient account requires 0.002039 SOL for rent, but you only have ${(latestSolBalance / 1e9).toFixed(6)} SOL.`);
+          } else {
+            throw new Error(`Insufficient SOL balance. You need at least 0.00001 SOL to cover network transaction fees, but only have ${(latestSolBalance / 1e9).toFixed(6)} SOL.`);
+          }
+        }
       }
 
       // Pre-flight simulation immediately before sendTransaction
