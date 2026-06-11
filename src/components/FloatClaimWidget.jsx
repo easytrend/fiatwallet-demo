@@ -169,7 +169,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     }
   }, [connected, publicKey?.toString()]);
 
-  // If connected and user's real balance is 0, offer to toggle demo mode
+  // Check if wallet has no empty accounts or cashback left
   const isRealWalletClean = useMemo(() => {
     return connected && emptyAccounts.length === 0 && realCashback === 0;
   }, [connected, emptyAccounts, realCashback]);
@@ -669,8 +669,6 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
                 <button className="toast-close" onClick={() => setToast(null)}>✕</button>
               </div>
             )}
-
-            {/* Demo Mode Toggle completely removed in live wallet connected mode */}
 
             {/* Back Button */}
             <div className="claim-modal-footer">
