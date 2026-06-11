@@ -258,6 +258,39 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         if (totalRequested > freshTokenBalance) {
           throw new Error(`Insufficient ${tok.symbol} balance. You need ${totalRequested} ${tok.symbol} but have ${freshTokenBalance}.`);
         }
+
+        // Fetch receiver ATAs and check if they exist to estimate rent fees
+        const receiverATAs = resolvedRecipients.map(rec => 
+          getAssociatedTokenAddressSync(mintPubkey, rec.pubkey, false, tokenProgramId)
+        );
+
+        let accountsInfo = [];
+        if (receiverATAs.length > 0) {
+          try {
+            accountsInfo = await connection.getMultipleAccountsInfo(receiverATAs);
+          } catch (e) {
+            console.warn('Failed to fetch receiver ATA info:', e);
+            accountsInfo = new Array(receiverATAs.length).fill(null);
+          }
+        }
+
+        let newAtasCount = 0;
+        accountsInfo.forEach(info => {
+          if (info === null) newAtasCount++;
+        });
+
+        // Query fresh SOL balance
+        const freshLamports = await connection.getBalance(publicKey, 'confirmed');
+        const freshSolBalance = freshLamports / 1e9;
+        
+        const requiredRentSOL = newAtasCount * 0.00203928;
+        const txCount = Math.ceil(resolvedRecipients.length / 5);
+        const estimatedFeesSOL = txCount * 0.00001;
+        const totalSolNeeded = requiredRentSOL + estimatedFeesSOL;
+
+        if (freshSolBalance < totalSolNeeded) {
+          throw new Error(`Insufficient SOL balance for transaction rent/fees. You need at least ${totalSolNeeded.toFixed(6)} SOL to pay for ${newAtasCount} new recipient accounts, but only have ${freshSolBalance.toFixed(6)} SOL.`);
+        }
       }
 
       setSendingState('signing');
@@ -283,7 +316,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           for (const rec of chunk) {
             const amountUnits = BigInt(Math.round(rec.tokAmt * Math.pow(10, decimals)));
             const receiverATA = getAssociatedTokenAddressSync(mintPubkey, rec.pubkey, false, tokenProgramId);
-            tx.add(createAssociatedTokenAccountIdempotentInstruction(publicKey, receiverATA, rec.pubkey, mintPubkey));
+            tx.add(createAssociatedTokenAccountIdempotentInstruction(publicKey, receiverATA, rec.pubkey, mintPubkey, tokenProgramId));
             tx.add(createTransferCheckedInstruction(senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals));
           }
         }
@@ -332,9 +365,6 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       const signatures = [];
 
       if (transactions.length > 1 && signAllTransactions) {
-        if (!confirm(`Sign and send ${transactions.length} transactions? Review them carefully.`)) {
-          throw new Error('User cancelled batch signing');
-        }
         const signedTxs = await signAllTransactions(transactions);
         setSendingState('sending');
 

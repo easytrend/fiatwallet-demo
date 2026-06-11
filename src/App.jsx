@@ -541,6 +541,30 @@ export default function App() {
           throw new Error(`Insufficient ${tokLive.symbol} balance. You have ${freshTokenBalance} but tried to send ${tokAmt}.`);
         }
 
+        const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient, false, tokenProgramId);
+
+        // Fetch fresh SOL balance to ensure the user can cover ATA rent and transaction fee
+        const freshSolLamports = await connection.getBalance(publicKey, 'confirmed');
+        const freshSolBalance = freshSolLamports / 1e9;
+
+        // Check if recipient's ATA needs to be created
+        let needsAtaCreation = false;
+        try {
+          const ataInfo = await connection.getAccountInfo(receiverATA);
+          if (!ataInfo) needsAtaCreation = true;
+        } catch (e) {
+          needsAtaCreation = true;
+        }
+
+        const requiredSOL = (needsAtaCreation ? 0.00203928 : 0) + 0.00001; // rent + fee
+        if (freshSolBalance < requiredSOL) {
+          if (needsAtaCreation) {
+            throw new Error(`Insufficient SOL balance. Creating a new recipient account requires 0.002039 SOL for rent, but you only have ${freshSolBalance.toFixed(6)} SOL.`);
+          } else {
+            throw new Error(`Insufficient SOL balance. You need at least 0.00001 SOL to cover network transaction fees, but only have ${freshSolBalance.toFixed(6)} SOL.`);
+          }
+        }
+
         // Fetch decimals from on-chain mint info
         const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
         if (!mintInfo.value) throw new Error('Invalid token mint');
@@ -552,8 +576,6 @@ export default function App() {
         if (amountUnits <= 0n) {
           throw new Error('Transfer amount must be greater than zero token units.');
         }
-
-        const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient, false, tokenProgramId);
 
         // Instruction 1: Idempotently create the receiver's ATA if it doesn't exist yet.
         // This also pays the rent for the new account from the sender's SOL balance.
