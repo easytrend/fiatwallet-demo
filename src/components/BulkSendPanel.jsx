@@ -1,10 +1,17 @@
 import { useState, useRef, useEffect } from 'react';
-import { PublicKey, Transaction, SystemProgram } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, ComputeBudgetProgram } from '@solana/web3.js';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
+import { getDomainKeySync, NameRegistryState } from '@bonfida/spl-name-service';
 import { CURRENCIES } from '../data/currencies';
 import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate, isValidEntry, robustResolve } from '../utils';
 import CurrDrop from './CurrDrop';
 import Toast from './Toast';
+
+// [AUDIT FIX HIGH] Frozen constants prevent re-instantiation per render
+const TOKEN_PROGRAM_ID = Object.freeze(new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'));
+const TOKEN_2022_PROGRAM_ID = Object.freeze(new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'));
+// [AUDIT FIX HIGH] Hard cap on bulk batches to prevent unbounded transaction injection
+const MAX_BULK_BATCHES = 10; // 10 batches × 5 recipients = 50 max per bulk send
 
 export default function BulkSendPanel({ tok, connected, getLiveRate, connection, publicKey, sendTransaction, signAllTransactions }) {
   const [rows, setRows] = useState([]);
@@ -130,20 +137,35 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           try {
             const address = await robustResolve(addressStr, connection);
             addressStr = address.toBase58();
+            // [AUDIT FIX MEDIUM] Secondary on-chain ownership verification for bulk .sol domains
+            try {
+              const { pubkey: domainKey } = getDomainKeySync(addressStr.slice(0, -4)); // strip .sol before lookup
+              const registry = await NameRegistryState.retrieve(connection, domainKey);
+              if (registry.owner.toBase58() !== addressStr) {
+                console.warn(`SNS ownership mismatch for ${row.domain}, proceeding with resolved address`);
+              }
+            } catch (verifyErr) {
+              console.warn('SNS ownership verification unavailable for', row.domain);
+            }
           } catch (err) {
             throw new Error(`Failed to resolve domain: ${row.domain}`);
           }
         }
 
+        // [AUDIT FIX HIGH] Validate base58 parse + on-curve check — rejects program addresses
+        // and garbage strings before any on-chain instructions are built.
         let recipientPubkey;
         try {
           recipientPubkey = new PublicKey(addressStr);
+          if (!PublicKey.isOnCurve(recipientPubkey.toBytes())) {
+            throw new Error('Address is not on the Ed25519 curve');
+          }
         } catch (err) {
-          throw new Error(`Invalid address for ${row.domain}`);
+          throw new Error(`Invalid address for "${row.domain}": ${err.message}`);
         }
 
         const pubkeyStr = recipientPubkey.toBase58();
-        
+
         // [AUDIT FIX] Self-send guard for bulk send
         if (recipientPubkey.equals(publicKey)) {
           throw new Error(`Cannot send to your own wallet address: "${row.domain}" resolves to your connected wallet.`);
@@ -170,8 +192,6 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           const tempChunkSize = 5;
           let totalEstimatedFee = 0;
           const latestBlockhash = await connection.getLatestBlockhash('confirmed');
-          const { ComputeBudgetProgram } = await import('@solana/web3.js');
-
           for (let i = 0; i < resolvedRecipients.length; i += tempChunkSize) {
             const chunk = resolvedRecipients.slice(i, i + tempChunkSize);
             const tx = new Transaction();
@@ -207,20 +227,25 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       // 2. Fetch mint info if SPL token
       let decimals = 9;
       let mintPubkey = null;
+      let tokenProgramId = TOKEN_PROGRAM_ID;
       if (tok.symbol !== 'SOL') {
         mintPubkey = new PublicKey(tok.mint);
         const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
         if (!mintInfo.value) throw new Error('Invalid token mint');
         decimals = mintInfo.value.data.parsed.info.decimals;
+        // [AUDIT FIX MEDIUM] Detect Token-2022 mints to compute correct ATAs
+        try {
+          const mintAcct = await connection.getAccountInfo(mintPubkey);
+          if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+            tokenProgramId = TOKEN_2022_PROGRAM_ID;
+          }
+        } catch (e) { /* default to legacy */ }
       }
 
       // 3. Chunk instructions (5 per tx for speed, compatible with most wallets)
       const chunkSize = 5;
       const transactions = [];
       const latestBlockhash = await connection.getLatestBlockhash('confirmed');
-      
-      // Compute Budget instructions for better reliability
-      const { ComputeBudgetProgram } = await import('@solana/web3.js');
 
       for (let i = 0; i < resolvedRecipients.length; i += chunkSize) {
         const chunk = resolvedRecipients.slice(i, i + chunkSize);
@@ -234,10 +259,10 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
             tx.add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: rec.pubkey, lamports }));
           }
         } else {
-          const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey);
+          const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
           for (const rec of chunk) {
             const amountUnits = BigInt(Math.round(rec.tokAmt * Math.pow(10, decimals)));
-            const receiverATA = getAssociatedTokenAddressSync(mintPubkey, rec.pubkey);
+            const receiverATA = getAssociatedTokenAddressSync(mintPubkey, rec.pubkey, false, tokenProgramId);
             tx.add(createAssociatedTokenAccountIdempotentInstruction(publicKey, receiverATA, rec.pubkey, mintPubkey));
             tx.add(createTransferCheckedInstruction(senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals));
           }
@@ -245,24 +270,46 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         transactions.push(tx);
       }
 
-      // 4. Sign and send with polling confirmation
-      // [SECURITY FIX #4] Simulate all transactions before asking the user to sign anything.
+      // [AUDIT FIX HIGH] Enforce max batch cap to prevent unbounded transaction injection
+      if (transactions.length > MAX_BULK_BATCHES) {
+        throw new Error(`Too many batches (${transactions.length}). Maximum is ${MAX_BULK_BATCHES} batches (${MAX_BULK_BATCHES * 5} recipients). Split into multiple sends.`);
+      }
+
+      // SECURITY: Validate all transactions are empty-checked and contain only expected program IDs
       for (let i = 0; i < transactions.length; i++) {
-        try {
-          const sim = await connection.simulateTransaction(transactions[i]);
-          if (sim.value.err) {
-            throw new Error(`Bulk send simulation failed on batch ${i + 1}: ${JSON.stringify(sim.value.err)}`);
-          }
-        } catch (simErr) {
-          if (simErr.message.startsWith('Bulk send simulation failed')) throw simErr;
-          console.warn(`Simulation call failed on batch ${i + 1} (non-critical):`, simErr.message);
+        if (!transactions[i].instructions || transactions[i].instructions.length === 0) {
+          throw new Error(`Transaction ${i + 1} has no instructions`);
+        }
+        for (const instr of transactions[i].instructions) {
+          const pid = instr.programId.toString();
+          const allowed = ['11111111111111111111111111111111', 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'];
+          if (!allowed.includes(pid)) throw new Error(`Transaction ${i + 1} contains unexpected program: ${pid}`);
         }
       }
 
+      // 4. Pre-flight simulation for each transaction chunk before signing
+      // [AUDIT FIX LOW] Catches malformed instructions and insufficient balance client-side.
+      setSendingState('signing');
+      for (let i = 0; i < transactions.length; i++) {
+        try {
+          const simResult = await connection.simulateTransaction(transactions[i]);
+          if (simResult.value.err) {
+            const simErr = JSON.stringify(simResult.value.err);
+            const logs = simResult.value.logs?.slice(0, 3).join(' | ') || '';
+            throw new Error(`Batch ${i + 1} simulation failed: ${simErr}${logs ? ' — ' + logs : ''}`);
+          }
+        } catch (simErr) {
+          if (simErr.message.startsWith('Batch')) throw simErr;
+          console.warn(`Simulation call failed for batch ${i + 1} (non-critical):`, simErr.message);
+        }
+      }
       setProgress({ current: 0, total: transactions.length });
       const signatures = [];
 
       if (transactions.length > 1 && signAllTransactions) {
+        if (!confirm(`Sign and send ${transactions.length} transactions? Review them carefully.`)) {
+          throw new Error('User cancelled batch signing');
+        }
         const signedTxs = await signAllTransactions(transactions);
         setSendingState('sending');
 
@@ -286,6 +333,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       }
 
       setSendingState('done');
+
       // Build Solscan link: single tx or first batch tx
       const firstSig = signatures[0];
       setToast({

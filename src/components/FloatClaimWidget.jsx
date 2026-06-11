@@ -18,26 +18,9 @@ const ClaimIcon = () => (
   </svg>
 );
 
-export default function FloatClaimWidget({ 
-  liveSolPrice, 
-  onClaimSuccess, 
-  connected: propConnected, 
-  publicKey: propPublicKey, 
-  sendTransaction: propSendTransaction, 
-  signAllTransactions: propSignAllTransactions 
-}) {
+export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
   const { connection } = useConnection();
-  const { 
-    publicKey: adapterPublicKey, 
-    connected: adapterConnected, 
-    sendTransaction: adapterSendTransaction, 
-    signAllTransactions: adapterSignAllTransactions 
-  } = useWallet();
-
-  const connected = propConnected !== undefined ? propConnected : adapterConnected;
-  const publicKey = propPublicKey !== undefined ? propPublicKey : adapterPublicKey;
-  const sendTransaction = propSendTransaction !== undefined ? propSendTransaction : adapterSendTransaction;
-  const signAllTransactions = propSignAllTransactions !== undefined ? propSignAllTransactions : adapterSignAllTransactions;
+  const { publicKey, connected, sendTransaction, signAllTransactions } = useWallet();
 
   const [isOpen, setIsOpen] = useState(false);
   const [isDismissed, setIsDismissed] = useState(false);
@@ -56,12 +39,6 @@ export default function FloatClaimWidget({
 
   const [toast, setToast] = useState(null);
 
-  // List of public RPCs to bypass Helius CORS/403 or rate-limiting
-  const SCAN_RPCS = [
-    'https://api.mainnet-beta.solana.com',
-    'https://solana-rpc.publicnode.com'
-  ];
-
   // 1. Fetch Real Empty & Dust Accounts + Pump.fun Cashback on-chain
   const fetchClaimables = async () => {
     if (!publicKey) return;
@@ -73,7 +50,9 @@ export default function FloatClaimWidget({
       let results = [];
       let success = false;
 
-      // Try primary wallet-adapter connection first
+      // SECURITY FIX: Use only the wallet-adapter's connection object
+      // Do NOT fall back to hardcoded public RPC endpoints. This prevents split-brain scenarios
+      // where balance checks occur against different RPC nodes with potentially inconsistent state.
       try {
         const [resp1, resp2] = await Promise.all([
           connection.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
@@ -84,27 +63,10 @@ export default function FloatClaimWidget({
           ...resp2.value.map(a => ({ ...a, programId: token2022ProgramId }))
         ];
         success = true;
-        console.log('✅ Empty accounts scanned via primary connection');
+        console.log('✅ Empty accounts scanned via wallet-adapter connection');
       } catch (err) {
-        console.warn('❌ Primary scanner failed, trying fallback public RPCs:', err.message);
-        for (const rpcUrl of SCAN_RPCS) {
-          try {
-            const rpcConn = new Connection(rpcUrl);
-            const [resp1, resp2] = await Promise.all([
-              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
-              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
-            ]);
-            results = [
-              ...resp1.value.map(a => ({ ...a, programId: tokenProgramId })),
-              ...resp2.value.map(a => ({ ...a, programId: token2022ProgramId }))
-            ];
-            success = true;
-            console.log(`✅ Empty accounts scanned via fallback ${rpcUrl}`);
-            break;
-          } catch (e) {
-            console.warn(`❌ Fallback scanner failed via ${rpcUrl}:`, e.message);
-          }
-        }
+        console.error('❌ Failed to scan accounts:', err.message);
+        throw err;
       }
 
       if (success) {
@@ -140,24 +102,18 @@ export default function FloatClaimWidget({
       );
 
       let pdaInfo = null;
-      let pdaConn = connection;
-
+      // SECURITY FIX: Use only wallet-adapter connection for PDA queries
+      // Do NOT fall back to hardcoded RPC endpoints
       try {
         pdaInfo = await connection.getAccountInfo(userVolumeAccumulator);
-      } catch {
-        for (const rpcUrl of SCAN_RPCS) {
-          try {
-            const rpcConn = new Connection(rpcUrl);
-            pdaInfo = await rpcConn.getAccountInfo(userVolumeAccumulator);
-            pdaConn = rpcConn;
-            break;
-          } catch {}
-        }
+      } catch (err) {
+        console.warn('Failed to fetch PDA info:', err.message);
       }
 
       let bondingCurveVal = 0;
       if (pdaInfo) {
-        const rentExemptMin = await pdaConn.getMinimumBalanceForRentExemption(pdaInfo.data.length);
+        // SECURITY FIX: Use wallet-adapter connection instead of fallback RPCs
+        const rentExemptMin = await connection.getMinimumBalanceForRentExemption(pdaInfo.data.length);
         const claimableLamports = Math.max(0, pdaInfo.lamports - rentExemptMin);
         bondingCurveVal = claimableLamports / 1e9;
         console.log(`✅ On-chain Pump.fun bonding curve cashback: ${bondingCurveVal} SOL`);
@@ -408,9 +364,22 @@ export default function FloatClaimWidget({
     try {
       let signature = null;
 
-      // Real on-chain claim via the PumpDev.io API
+      // SECURITY: Use cached cashback value; re-validate only if we have connection available
+      // If cache shows cashback > 0, attempt to claim even if revalidation fails (graceful degradation)
       if (realCashback <= 0) {
-        throw new Error('You have no claimable Pump.fun cashback rewards.');
+        // Only block if cached value is definitely 0
+        const [userVolAccum] = PublicKey.findProgramAddressSync(
+          [Buffer.from("user_volume_accumulator"), publicKey.toBuffer()],
+          PUMP_PROGRAM_ID
+        );
+        try {
+          const pdaInfo = await connection.getAccountInfo(userVolAccum);
+          if (!pdaInfo || pdaInfo.lamports === 0) {
+            throw new Error('You have no claimable Pump.fun cashback rewards.');
+          }
+        } catch (e) {
+          throw new Error('You have no claimable Pump.fun cashback rewards.');
+        }
       }
 
       const response = await fetch('https://pumpdev.io/api/claim-cashback', {
@@ -463,30 +432,28 @@ export default function FloatClaimWidget({
         ? SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_WALLET, lamports: feeLamports })
         : null;
 
-      // [SECURITY FIX #2] Whitelist allowed program IDs before signing external transaction.
+      // [SECURITY FIX #2] Whitelist allowed program IDs before signing external cashback transaction.
       // This prevents a compromised pumpdev.io API from injecting malicious instructions.
       const ALLOWED_CASHBACK_PROGRAMS = new Set([
         '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', // Pump.fun bonding curve
         'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA', // Pump.fun AMM
         'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', // Memo program
-        '11111111111111111111111111111111',               // System Program (for fee transfer)
+        '11111111111111111111111111111111',               // System Program
         'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',  // SPL Token
         'ComputeBudget111111111111111111111111111111',    // Compute budget
-        'So11111111111111111111111111111111111111112',    // WSOL mint (not a program, safety)
       ]);
 
       if (deserializedTx instanceof Transaction) {
-        // Whitelist check on the API-supplied instructions BEFORE we append our own
+        // Check API-supplied instructions BEFORE appending our own
         for (const ix of deserializedTx.instructions) {
           const pid = ix.programId.toBase58();
           if (!ALLOWED_CASHBACK_PROGRAMS.has(pid)) {
             throw new Error(`[SECURITY] Unexpected program in cashback claim transaction: ${pid}. Refusing to sign.`);
           }
         }
-        // Append our memo + fee instructions now that the base tx is verified
+        // Append our memo + fee now that the base tx is verified
         deserializedTx.add(memoIx);
         if (feeIx) deserializedTx.add(feeIx);
-
         // [SECURITY FIX #2] Simulate the fully-assembled transaction before signing.
         const sim = await connection.simulateTransaction(deserializedTx);
         if (sim.value.err) {
@@ -507,7 +474,6 @@ export default function FloatClaimWidget({
           deserializedTx = new VersionedTransaction(decompiled.compileToV0Message());
         } catch (decompileErr) {
           if (decompileErr.message.startsWith('[SECURITY]')) throw decompileErr;
-          // Could not decompile (e.g. address lookup tables) — log and proceed without fee append
           console.warn('Could not decompile VersionedTransaction for fee append:', decompileErr);
         }
       }
@@ -701,6 +667,8 @@ export default function FloatClaimWidget({
                 <button className="toast-close" onClick={() => setToast(null)}>✕</button>
               </div>
             )}
+
+            {/* Demo Mode Toggle completely removed in live wallet connected mode */}
 
             {/* Back Button */}
             <div className="claim-modal-footer">

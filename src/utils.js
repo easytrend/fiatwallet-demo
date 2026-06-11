@@ -53,6 +53,8 @@ export function dlTemplate() {
   a.click();
 }
 
+// [AUDIT FIX HIGH] Removed hardcoded Helius API key — credential leak.
+// Only free, keyless public endpoints remain.
 export const RPC_LIST = [
   "https://api.mainnet-beta.solana.com",
   "https://rpc.ankr.com/solana",
@@ -82,7 +84,9 @@ export async function rpcFetch(method, params) {
 }
 
 // [AUDIT FIX CRITICAL] robustResolve accepts an optional wallet-adapter `connection` and tries it
-// first before falling back to the internal RPC list.
+// first before falling back to the internal RPC list. This keeps domain resolution inside the
+// trusted wallet context when called from the send UI, and only falls back to public nodes when
+// the connection object is unavailable (e.g. during bulk import preview).
 export async function robustResolve(domain, walletConnection) {
   const RESOLVE_RPCS = [
     'https://api.mainnet-beta.solana.com',
@@ -90,7 +94,7 @@ export async function robustResolve(domain, walletConnection) {
     'https://solana-rpc.publicnode.com'
   ];
 
-  // Try the wallet-adapter connection first
+  // Try the wallet-adapter connection first (trusted, user-configured endpoint)
   if (walletConnection) {
     try {
       const addr = await Promise.race([
@@ -103,7 +107,7 @@ export async function robustResolve(domain, walletConnection) {
     }
   }
 
-  // Fall back to public RPCs
+  // Fall back to public RPCs if wallet connection is unavailable or failed
   for (const rpcUrl of RESOLVE_RPCS) {
     try {
       const conn = new Connection(rpcUrl);
@@ -149,31 +153,3 @@ export async function robustReverseLookup(connection, publicKeyObj) {
   }
   return null;
 }
-
-const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-export function decodeBase58(string) {
-  if (!string || typeof string !== 'string') return new Uint8Array(0);
-  const bytes = [0];
-  for (let i = 0; i < string.length; i++) {
-    const char = string[i];
-    const value = BASE58_ALPHABET.indexOf(char);
-    if (value === -1) {
-      throw new Error('Invalid base58 character: ' + char);
-    }
-    let carry = value;
-    for (let j = 0; j < bytes.length; j++) {
-      carry += bytes[j] * 58;
-      bytes[j] = carry & 0xff;
-      carry >>= 8;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
-  }
-  for (let i = 0; string[i] === '1' && i < string.length - 1; i++) {
-    bytes.push(0);
-  }
-  return new Uint8Array(bytes.reverse());
-}
-

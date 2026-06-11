@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { PublicKey, Transaction, SystemProgram, Connection } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Connection, Keypair } from '@solana/web3.js';
 import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
@@ -16,27 +16,46 @@ import TokenModal from './components/TokenModal';
 import Toast from './components/Toast';
 import FloatClaimWidget from './components/FloatClaimWidget';
 
-const SNS_LINK = 'https://www.sns.id?easytrend.sol';
+// [AUDIT FIX HIGH] SNS_LINK must not embed referral/tracking parameters.
+// [AUDIT FIX HIGH] TOKEN_PROGRAM_ID declared as a module-level frozen constant — never re-instantiated inside a component body.
+const SNS_LINK = 'https://www.sns.id';
+const TOKEN_PROGRAM_ID = Object.freeze(new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'));
+const TOKEN_2022_PROGRAM_ID = Object.freeze(new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'));
+// Rate staleness threshold — warn user if rates are older than 5 minutes
+const RATE_STALENESS_MS = 5 * 60 * 1000;
+
+// [AUDIT FIX LOW] Enforce https-only and restrict image sources to trusted CDN domains.
+// Prevents malicious SVG injection, tracking pixels, and data exfiltration from untrusted origins.
+const TRUSTED_IMAGE_HOSTS = [
+  'raw.githubusercontent.com',
+  'arweave.net',
+  'ipfs.io',
+  'nftstorage.link',
+  'shdw-drive.genesysgo.net',
+  'tokens.jup.ag',
+  'cdn.jsdelivr.net',
+  'assets.coingecko.com',
+];
+function isTrustedImageOrigin(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+    return TRUSTED_IMAGE_HOSTS.some(host => parsed.hostname === host || parsed.hostname.endsWith('.' + host));
+  } catch { return false; }
+}
 
 export default function App() {
   const { connection } = useConnection();
-  const { 
-    publicKey, 
-    connected, 
-    disconnect, 
-    sendTransaction, 
-    signAllTransactions
-  } = useWallet();
+  const { publicKey, connected, disconnect, sendTransaction, signAllTransactions } = useWallet();
   const { setVisible } = useWalletModal();
 
-  // SPL Token Program ID
-  const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-  const TOKEN_2022_PROGRAM_ID = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
 
   const [inputMode, setInputMode] = useState('fiat'); // fiat or crypto
   const [bulkMode, setBulkMode] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [walletPubkey, setWalletPubkey] = useState(null);
+  // [AUDIT FIX MEDIUM] walletPubkey string state removed — use `publicKey` from useWallet() directly to
+  // avoid exposing a redundant plaintext string that malicious extensions can enumerate via React fiber.
   const [walletDomain, setWalletDomain] = useState(null);
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletError, setWalletError] = useState(null);
@@ -53,15 +72,23 @@ export default function App() {
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [token, setToken] = useState('');
+  // Track when rates were last successfully fetched to detect staleness
+  const [ratesTimestamp, setRatesTimestamp] = useState(null);
 
   const { liveRates, ratesLoading } = useLiveRates();
 
+  // Update timestamp whenever live rates successfully arrive
   useEffect(() => {
-    setWalletPubkey(publicKey?.toString() || null);
-  }, [publicKey]);
+    if (liveRates.updatedAt) setRatesTimestamp(Date.now());
+  }, [liveRates.updatedAt]);
 
-  // Resolve .sol domains automatically
+  // [AUDIT FIX MEDIUM] Detect stale rates — warn user if rates are older than RATE_STALENESS_MS
+  const ratesAreStale = ratesTimestamp != null && (Date.now() - ratesTimestamp) > RATE_STALENESS_MS;
+
+  // [AUDIT FIX CRITICAL] Resolve .sol domains with on-chain ownership re-verification via NameRegistryState.
+  // [AUDIT FIX HIGH] Raw addresses now validated with new PublicKey() + isOnCurve() — garbage strings rejected.
   useEffect(() => {
+    let cancelled = false;
     async function checkDomain() {
       if (recipient.endsWith('.sol')) {
         setResolving(true);
@@ -69,21 +96,44 @@ export default function App() {
         setResolvedAddress(null);
         try {
           const address = await robustResolve(recipient, connection);
-          setResolvedAddress(address.toBase58());
+          if (cancelled) return;
+          // Secondary on-chain ownership verification to prevent MITM substitution
+          try {
+            const { pubkey: domainKey } = getDomainKeySync(recipient);
+            const registry = await NameRegistryState.retrieve(connection, domainKey);
+            if (cancelled) return;
+            const resolvedBase58 = address.toBase58();
+            const ownerBase58 = registry.owner.toBase58();
+            if (ownerBase58 !== resolvedBase58) {
+              setResolveError('Domain ownership mismatch — possible spoofing attempt');
+              setResolving(false);
+              return;
+            }
+          } catch (verifyErr) {
+            // Registry verification unavailable — still proceed but note it
+            console.warn('SNS ownership re-verification failed:', verifyErr.message);
+          }
+          if (!cancelled) setResolvedAddress(address.toBase58());
         } catch (err) {
-          setResolveError('Domain not found or invalid');
+          if (!cancelled) setResolveError('Domain not found or invalid');
         }
-        setResolving(false);
-      } else if (recipient.length > 30) {
-        // [SECURITY FIX #5] Validate the raw address with PublicKey() before accepting it.
-        // A length > 30 check alone accepts malformed strings that fail later at send time.
+        if (!cancelled) setResolving(false);
+      } else if (recipient.length >= 32) {
+        // [AUDIT FIX HIGH] Validate raw public key with try/catch + isOnCurve to reject garbage strings
         try {
-          new PublicKey(recipient);
-          setResolvedAddress(recipient);
-          setResolveError(null);
-        } catch {
-          setResolvedAddress(null);
-          setResolveError('Invalid Solana address format');
+          const pk = new PublicKey(recipient);
+          if (!PublicKey.isOnCurve(pk.toBytes())) {
+            throw new Error('Address is not on the Ed25519 curve (program address not allowed)');
+          }
+          if (!cancelled) {
+            setResolvedAddress(pk.toBase58());
+            setResolveError(null);
+          }
+        } catch (e) {
+          if (!cancelled) {
+            setResolvedAddress(null);
+            setResolveError('Invalid Solana address');
+          }
         }
       } else {
         setResolvedAddress(null);
@@ -91,16 +141,36 @@ export default function App() {
       }
     }
     const t = setTimeout(checkDomain, 500);
-    return () => clearTimeout(t);
-  }, [recipient]);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [recipient, connection]);
 
   function getLiveCurrRate(code) {
     const s = CURRENCIES.find(c => c.code === code) || CURRENCIES[0];
-    return liveRates.fiat[code] || s.rate;
+    const live = liveRates.fiat[code];
+    const staticRate = s.rate;
+    // [AUDIT FIX MEDIUM] Reject live rates that deviate >50% from static baseline — possible oracle manipulation
+    if (live && staticRate > 0) {
+      const deviation = Math.abs(live - staticRate) / staticRate;
+      if (deviation > 0.5) {
+        console.warn(`Rate deviation too large for ${code}: live=${live}, static=${staticRate}, deviation=${(deviation*100).toFixed(1)}%`);
+        return staticRate;
+      }
+    }
+    return live || staticRate;
   }
   function getLiveTokPrice(symbol) {
     const s = TOKENS.find(t => t.symbol === symbol);
-    return liveRates.crypto[symbol] || s?.price || 0;
+    const live = liveRates.crypto[symbol];
+    const staticPrice = s?.price || 0;
+    // [AUDIT FIX MEDIUM] Reject live crypto prices that deviate >50% from static baseline
+    if (live && staticPrice > 0) {
+      const deviation = Math.abs(live - staticPrice) / staticPrice;
+      if (deviation > 0.5) {
+        console.warn(`Price deviation too large for ${symbol}: live=${live}, static=${staticPrice}, deviation=${(deviation*100).toFixed(1)}%`);
+        return staticPrice;
+      }
+    }
+    return live || staticPrice;
   }
 
   const liveSolPrice = liveRates.crypto['SOL'] || 148.5;
@@ -124,13 +194,16 @@ export default function App() {
   // When not connected → show full static list so user can browse
   const selectableTokens = useMemo(() => {
     if (connected && walletTokenList) return walletTokenList;
-    return TOKENS.map(t => ({ 
-      ...t, 
-      price: getLiveTokPrice(t.symbol) || t.price || 0,
-      logoURI: t.symbol === 'SOL'
-        ? 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png'
-        : Object.values(KNOWN_MINTS).find(k => k.symbol === t.symbol)?.logoURI
-    }));
+    return TOKENS.map(t => {
+      let logoURI = '';
+      if (t.symbol === 'SOL') {
+        logoURI = 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png';
+      } else {
+        const knownMint = Object.values(KNOWN_MINTS).find(k => k.symbol === t.symbol);
+        logoURI = (knownMint?.logoURI && isTrustedImageOrigin(knownMint.logoURI)) ? knownMint.logoURI : '';
+      }
+      return { ...t, price: getLiveTokPrice(t.symbol) || t.price || 0, logoURI };
+    });
   }, [connected, walletTokenList, liveRates]);
 
   const tok = token ? ((walletTokenList && walletTokenList.find(t => t.symbol === token))
@@ -143,29 +216,48 @@ export default function App() {
   const dispTok = fmtTok(tokAmt);
   const tokLive = tok ? { ...tok, price: tokPrice } : null;
 
-  // Check if receiver already has the ATA for the selected SPL token
-  // to decide whether to show rent fee or just network fee
+  // [AUDIT FIX HIGH] Check if receiver already has the ATA for the selected SPL token.
+  // AbortController cancellation flag prevents stale in-flight responses from writing back
+  // after the recipient/token has already changed (race condition fix).
   useEffect(() => {
+    let cancelled = false;
     async function checkReceiverATA() {
-      if (!connection || !tokLive || tokLive.symbol === 'SOL' || !tokLive.mint) {
+      if (!connection || !tokLive || tokLive.symbol === 'SOL' || !tokLive.mint || !publicKey) {
         setRentFeeInfo(null);
         return;
       }
-      const addrStr = resolvedAddress || (recipient.length > 30 ? recipient : null);
+      const addrStr = resolvedAddress || (recipient.length >= 32 ? recipient : null);
       if (!addrStr) { setRentFeeInfo(null); return; }
       try {
         const recipientPubkey = new PublicKey(addrStr);
         const mintPubkey = new PublicKey(tokLive.mint);
-        const ata = getAssociatedTokenAddressSync(mintPubkey, recipientPubkey);
-        const accountInfo = await connection.getAccountInfo(ata);
-        setRentFeeInfo(accountInfo ? 'network' : 'rent');
-      } catch {
-        setRentFeeInfo(null);
+        // [AUDIT FIX MEDIUM] Detect Token-2022 mints by checking the mint account owner
+        // to compute the correct ATA. Token-2022 ATAs differ from legacy Token ATAs.
+        let tokenProgramId = TOKEN_PROGRAM_ID;
+        try {
+          const mintAcct = await connection.getAccountInfo(mintPubkey);
+          if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+            tokenProgramId = TOKEN_2022_PROGRAM_ID;
+          }
+        } catch (e) { /* default to legacy */ }
+
+        const ata = getAssociatedTokenAddressSync(mintPubkey, recipientPubkey, false, tokenProgramId);
+        const testTransaction = new Transaction();
+        testTransaction.add(
+          createAssociatedTokenAccountIdempotentInstruction(
+            publicKey, ata, recipientPubkey, mintPubkey, tokenProgramId
+          )
+        );
+        const { value: { err } } = await connection.simulateTransaction(testTransaction, [publicKey]);
+        if (!cancelled) setRentFeeInfo(err ? 'network' : 'rent');
+      } catch (e) {
+        console.warn('ATA check failed:', e);
+        if (!cancelled) setRentFeeInfo(null);
       }
     }
     const t = setTimeout(checkReceiverATA, 400);
-    return () => clearTimeout(t);
-  }, [resolvedAddress, recipient, tokLive, connection]);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [resolvedAddress, recipient, tokLive, connection, publicKey]);
 
   // Fetch real on-chain balances using the wallet-adapter connection object
   const fetchBalances = useCallback(async () => {
@@ -177,39 +269,21 @@ export default function App() {
       const lamports = await connection.getBalance(publicKey, 'confirmed');
       setSolBalance(lamports / 1e9);
 
-      // 1. Fetch ALL token accounts
-      // Try the primary connection first. If it's a premium RPC, it will succeed and return all tokens.
-      // NOTE: Some public RPCs (like publicnode) block getParsedTokenAccountsByOwner. We fallback to others if needed.
-      const TOKEN_FETCH_RPCS = [
-        'https://api.mainnet-beta.solana.com',
-      ];
-      const tokenProgramId = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
-      const token2022ProgramId = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
-
+      // [AUDIT FIX CRITICAL] Use ONLY the wallet-adapter connection for ALL token fetches.
+      // Hardcoded fallback RPC arrays removed — they bypass wallet security, expose public keys
+      // to unauthenticated third-party endpoints, and can return falsified balances.
       let results = [];
       try {
         const [resp1, resp2] = await Promise.all([
-          connection.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
-          connection.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
+          connection.getParsedTokenAccountsByOwner(publicKey, { programId: TOKEN_PROGRAM_ID }),
+          connection.getParsedTokenAccountsByOwner(publicKey, { programId: TOKEN_2022_PROGRAM_ID }).catch(() => ({ value: [] })),
         ]);
         results = [...(resp1.value || []), ...(resp2.value || [])];
-        console.log(`✅ Token accounts fetched via primary connection`);
+        console.log(`✅ Token accounts fetched via wallet-adapter connection`);
       } catch (primaryErr) {
-        console.warn(`❌ Primary token fetch failed, falling back to public RPCs:`, primaryErr.message);
-        for (const rpcUrl of TOKEN_FETCH_RPCS) {
-          try {
-            const rpcConn = new Connection(rpcUrl);
-            const [resp1, resp2] = await Promise.all([
-              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: tokenProgramId }),
-              rpcConn.getParsedTokenAccountsByOwner(publicKey, { programId: token2022ProgramId }).catch(() => ({ value: [] })),
-            ]);
-            results = [...(resp1.value || []), ...(resp2.value || [])];
-            console.log(`✅ Token accounts fetched via ${rpcUrl}`);
-            break; // success — stop trying
-          } catch (e) {
-            console.warn(`❌ Token fetch failed via ${rpcUrl}:`, e.message);
-          }
-        }
+        console.warn(`❌ Token fetch failed on wallet-adapter connection:`, primaryErr.message);
+        // Do not fall back to hardcoded RPCs — surface the error to the user instead.
+        throw primaryErr;
       }
 
       const mintMap = {};
@@ -252,6 +326,9 @@ export default function App() {
         const staticMeta = KNOWN_MINTS[mint] || {};
         const jupMeta = jupTokensMap[mint] || {};
 
+        // [AUDIT FIX LOW] Sanitize token logo URIs through isTrustedImageOrigin
+        const candidateLogoURI = jupMeta.logoURI || staticMeta.logoURI || `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${mint}/logo.png`;
+
         return {
           mint,
           uiAmount: balance,
@@ -260,7 +337,7 @@ export default function App() {
           price:    parseFloat(priceInfo.price || staticMeta.price || 0),
           color:    staticMeta.color   || '#aaa',
           bg:       staticMeta.bg      || 'rgba(255,255,255,0.08)',
-          logoURI:  jupMeta.logoURI || staticMeta.logoURI || `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${mint}/logo.png`,
+          logoURI:  isTrustedImageOrigin(candidateLogoURI) ? candidateLogoURI : null,
         };
       });
 
@@ -277,14 +354,25 @@ export default function App() {
   // Auto-fetch when wallet connects or changes
   useEffect(() => {
     if (connected && publicKey) {
-      const pubkeyStr = publicKey.toString();
       fetchBalances();
+    } else {
+      setSolBalance(null);
+      setSplTokens([]);
+      setWalletError(null);
+      setWalletDomain(null);
+      setResolvedAddress(null);
+      setRecipient('');
+      setAmount('');
+    }
+  }, [connected]);
 
-      // 1. Instant Cache Load
+  // Separate domain lookup
+  useEffect(() => {
+    if (connected && publicKey) {
+      const pubkeyStr = publicKey.toString();
       const cached = localStorage.getItem(`sns_${pubkeyStr}`);
       if (cached) setWalletDomain(cached);
 
-      // 2. High-Speed Parallel Lookup (Race for fastest resolution)
       const lookupDomain = async () => {
         try {
           const apiPromise = fetch(`https://sns-sdk-proxy.bonfida.workers.dev/reverse-lookup/${pubkeyStr}`)
@@ -299,7 +387,6 @@ export default function App() {
           })();
 
           const winner = await Promise.any([apiPromise, rpcPromise]).catch(() => null);
-          
           if (winner) {
             setWalletDomain(winner);
             localStorage.setItem(`sns_${pubkeyStr}`, winner);
@@ -308,15 +395,9 @@ export default function App() {
           console.warn('Domain lookup failed:', e);
         }
       };
-
       lookupDomain();
-    } else { 
-      setSolBalance(null); 
-      setSplTokens([]); 
-      setWalletError(null); 
-      setWalletDomain(null);
     }
-  }, [connected, publicKey?.toString()]);
+  }, [connected, publicKey?.toString(), connection]);
 
   function handleDisconnect() {
     disconnect();
@@ -330,89 +411,131 @@ export default function App() {
     setSending(true);
     setWalletError(null);
     try {
-      const finalRecipient = new PublicKey(resolvedAddress || recipient);
-      
-      // [AUDIT FIX] Self-send guard
+      // SECURITY FIX: Re-validate SNS domain resolution immediately before transaction
+      // to prevent TOCTOU (Time-of-Check-Time-of-Use) race condition where a domain
+      // could be transferred to another address between resolution and transaction submission
+      let finalRecipient;
+      if (recipient.endsWith('.sol')) {
+        // Re-resolve the domain atomically at transaction build time
+        try {
+          const freshAddress = await robustResolve(recipient, connection);
+          const freshAddrStr = freshAddress.toBase58();
+          // Validate the re-resolved address matches the cached one
+          if (freshAddrStr !== resolvedAddress) {
+            throw new Error('Recipient changed! Domain was transferred during transaction preparation. Please verify the recipient and try again.');
+          }
+          finalRecipient = freshAddress;
+        } catch (err) {
+          throw new Error(`Domain re-validation failed: ${err.message}`);
+        }
+      } else {
+        const addrStr = resolvedAddress || recipient;
+        try {
+          finalRecipient = new PublicKey(addrStr);
+        } catch (err) {
+          throw new Error(`Invalid recipient address: ${err.message}`);
+        }
+      }
+
+      // [AUDIT FIX HIGH] Validate the resolved/raw recipient with PublicKey + isOnCurve.
+      // Rejects program/off-curve addresses from receiving directly.
+      if (!PublicKey.isOnCurve(finalRecipient.toBytes())) {
+        throw new Error('Recipient address is not a valid Ed25519 public key (program/off-curve addresses cannot receive funds directly)');
+      }
+
+      // [AUDIT FIX] Guard against self-sends — sending to your own address is almost always a user error.
       if (finalRecipient.equals(publicKey)) {
         throw new Error('Cannot send to your own wallet address.');
       }
 
-      // [AUDIT FIX] Amount validity guard
+      // [AUDIT FIX] Validate transfer amount is a positive finite number before any arithmetic.
       if (!Number.isFinite(tokAmt) || tokAmt <= 0) {
-        throw new Error('Invalid transfer amount.');
+        throw new Error('Invalid transfer amount. Please enter a positive number.');
       }
 
-      const transaction = new Transaction();
-
-      // [AUDIT FIX] Fetch blockhash up front and set it immediately
+      // ─────────────────────────────────────────────
+      // Step 1: Fetch latest blockhash ONCE up front.
+      // This is set explicitly on the transaction so that
+      // feePayer and recentBlockhash are ALWAYS present
+      // on every instruction path — required for auditing.
+      // ─────────────────────────────────────────────
       const latestBlockhash = await connection.getLatestBlockhash('confirmed');
-      transaction.recentBlockhash = latestBlockhash.blockhash;
+
+      const transaction = new Transaction();
       transaction.feePayer = publicKey;
+      transaction.recentBlockhash = latestBlockhash.blockhash;
 
       if (tokLive.symbol === 'SOL') {
-        let lamports = Math.round(tokAmt * 1e9);
-        const solBalanceLamports = Math.round(solBalance * 1e9);
+        // [AUDIT FIX MEDIUM] Use safe integer arithmetic — avoid float rounding on lamport amounts.
+        const solBalanceLamports = BigInt(Math.round(solBalance * 1e9));
+        let lamports = BigInt(Math.round(tokAmt * 1e9));
 
-        // [AUDIT FIX] SOL balance pre-check
+        // [AUDIT FIX] Balance pre-check: reject if amount exceeds available balance before
+        // even building the transaction, giving a clear user-facing error.
+        if (lamports <= 0n) {
+          throw new Error('Transfer amount must be greater than zero.');
+        }
         if (lamports > solBalanceLamports) {
-          throw new Error(`Insufficient SOL balance. You have ${solBalance} but tried to send ${tokAmt}.`);
+          throw new Error(`Insufficient SOL balance. You have ${solBalance.toFixed(6)} SOL but tried to send ${(Number(lamports) / 1e9).toFixed(6)} SOL.`);
         }
 
         // If trying to send everything or very close to everything, estimate and subtract the exact fee
-        if (lamports >= solBalanceLamports - 50000) {
-          // [AUDIT FIX] Probe tx for fee estimation
+        if (lamports >= solBalanceLamports - BigInt(50000)) {
+          // Build a probe transaction to estimate the fee accurately
           const probeTx = new Transaction();
           probeTx.feePayer = publicKey;
           probeTx.recentBlockhash = latestBlockhash.blockhash;
           probeTx.add(SystemProgram.transfer({
             fromPubkey: publicKey,
             toPubkey: finalRecipient,
-            lamports: 1000
+            lamports: Number(1000n)
           }));
 
-          let fee = 5000;
+          let fee = 5000n;
           try {
             const feeResponse = await probeTx.getEstimatedFee(connection);
-            if (feeResponse !== null && feeResponse !== undefined) {
-              fee = feeResponse;
-            }
+            if (feeResponse !== null && feeResponse !== undefined) fee = BigInt(feeResponse);
           } catch (e) {
-            console.warn("Failed to estimate transaction fee:", e);
+            console.warn('Failed to estimate transaction fee:', e);
           }
 
           lamports = solBalanceLamports - fee;
-          if (lamports <= 0) {
-            throw new Error(`Insufficient SOL balance to cover the network fee of ${fee / 1e9} SOL.`);
+          if (lamports <= 0n) {
+            throw new Error(`Insufficient SOL balance to cover the network fee of ${Number(fee) / 1e9} SOL.`);
           }
         }
-        
+
         transaction.add(
           SystemProgram.transfer({
             fromPubkey: publicKey,
             toPubkey: finalRecipient,
-            lamports
+            lamports: Number(lamports)
           })
         );
       } else {
+        // ── SPL Token transfer ──
         const mintPubkey = new PublicKey(tokLive.mint);
-        
+
         // Fetch decimals from on-chain mint info
         const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
-        if (!mintInfo.value) throw new Error("Invalid token mint");
+        if (!mintInfo.value) throw new Error('Invalid token mint');
         const decimals = mintInfo.value.data.parsed.info.decimals;
-        
-        // [AUDIT FIX] SPL balance pre-check
+
+        // [AUDIT FIX] Balance pre-check: verify the sender holds enough tokens before
+        // building the transaction so that the error is surfaced before signing.
         const tokenBalance = tokLive.uiAmount ?? tokLive.balance ?? 0;
         if (tokAmt > tokenBalance) {
           throw new Error(`Insufficient ${tokLive.symbol} balance. You have ${tokenBalance} but tried to send ${tokAmt}.`);
         }
 
-        // [AUDIT FIX] safe BigInt cast
+        // [AUDIT FIX MEDIUM] Use safe BigInt integer math to avoid floating-point rounding errors
+        // that could cause incorrect token-unit amounts for high-decimal tokens.
         const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
         if (amountUnits <= 0n) {
           throw new Error('Transfer amount must be greater than zero token units.');
         }
 
+        // [AUDIT FIX MEDIUM] Detect Token-2022 mints to pass correct programId to ATA functions
         let tokenProgramId = TOKEN_PROGRAM_ID;
         try {
           const mintAcct = await connection.getAccountInfo(mintPubkey);
@@ -424,59 +547,67 @@ export default function App() {
         const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
         const receiverATA = getAssociatedTokenAddressSync(mintPubkey, finalRecipient, false, tokenProgramId);
 
+        // Instruction 1: Idempotently create the receiver's ATA if it doesn't exist yet.
+        // This also pays the rent for the new account from the sender's SOL balance.
         transaction.add(
           createAssociatedTokenAccountIdempotentInstruction(
-            publicKey, // payer
-            receiverATA, // ata
-            finalRecipient, // owner
-            mintPubkey, // mint
-            tokenProgramId // tokenProgramId
+            publicKey,      // payer of rent
+            receiverATA,    // ATA to create
+            finalRecipient, // owner of ATA
+            mintPubkey,     // mint
+            tokenProgramId  // Token-2022 or legacy
           )
         );
 
-        // [AUDIT FIX] TransferChecked passes tokenProgramId and explicit [] multisigners
+        // Instruction 2: Transfer tokens using TransferChecked — explicitly validates
+        // mint, decimals, and amount to prevent silent precision/mint mismatch attacks.
         transaction.add(
           createTransferCheckedInstruction(
-            senderATA, // source
-            mintPubkey, // mint
-            receiverATA, // destination
-            publicKey, // owner of source
-            amountUnits, // amount
-            decimals, // decimals
-            [], // multisigners
-            tokenProgramId // Token program ID
+            senderATA,      // source token account
+            mintPubkey,     // mint (verified by instruction)
+            receiverATA,    // destination token account
+            publicKey,      // authority (owner of source ATA)
+            amountUnits,    // amount in base units
+            decimals,       // decimals (verified by instruction)
+            [],             // multisigners (none)
+            tokenProgramId  // Token-2022 or legacy
           )
         );
       }
 
-      // [AUDIT FIX] Instruction injection guard
+      // [AUDIT] Instruction injection guard — reject transaction if it has more instructions
+      // than expected (1 for SOL, 2 for SPL: ATA create + transferChecked).
       const expectedMaxInstructions = tokLive.symbol === 'SOL' ? 1 : 2;
       if (transaction.instructions.length > expectedMaxInstructions) {
         throw new Error(`Transaction has unexpected instructions (${transaction.instructions.length}). Refusing to sign.`);
       }
 
-      // [AUDIT FIX] Final feePayer/recentBlockhash assertion
+      // [AUDIT] Verify feePayer and recentBlockhash are explicitly set before signing.
+      // These must ALWAYS be present — missing either is a critical transaction bug.
       if (!transaction.feePayer || !transaction.recentBlockhash) {
         throw new Error('INTERNAL: Transaction is missing feePayer or recentBlockhash. Refusing to sign.');
       }
 
-      // Pre-flight simulation
+      // [AUDIT FIX LOW] Pre-flight simulation before signing — catches malformed/manipulated
+      // instructions client-side so the user doesn't waste SOL on failed transactions.
       try {
-        const sim = await connection.simulateTransaction(transaction);
-        if (sim.value.err) {
-          const simErr = JSON.stringify(sim.value.err);
-          const logs = sim.value.logs ? sim.value.logs.join('\n') : '';
+        const simResult = await connection.simulateTransaction(transaction);
+        if (simResult.value.err) {
+          const simErr = JSON.stringify(simResult.value.err);
+          const logs = simResult.value.logs?.slice(0, 3).join(' | ') || '';
           throw new Error(`Transaction simulation failed: ${simErr}${logs ? ' — ' + logs : ''}`);
         }
       } catch (simErr) {
+        // Surface simulation errors but continue if it's a fee-estimation artefact
         if (simErr.message.startsWith('Transaction simulation failed:')) throw simErr;
         console.warn('Simulation call failed (non-critical):', simErr.message);
       }
 
+      // All checks passed — submit to wallet for signing and broadcast.
       const signature = await sendTransaction(transaction, connection);
       console.log('Transaction sent:', signature);
 
-      // Poll for confirmation instead of relying on the WS subscription
+      // Poll for confirmation instead of relying on the WS subscription.
       // This prevents false "failed" messages when the RPC drops the WS but
       // the transaction is already finalized on-chain.
       let confirmed = false;
@@ -541,31 +672,17 @@ export default function App() {
         </div>
 
         <div className="nav-actions">
-          {connected && walletPubkey && (
-            <span className="nav-addr" title={walletPubkey}>
-              ◎ {walletDomain || (walletPubkey.slice(0,4) + '…' + walletPubkey.slice(-4))}
-            </span>
+          {connected && publicKey && (
+            <span className="nav-addr" title={publicKey.toBase58()}>{walletDomain || (publicKey.toBase58().slice(0,4) + '…' + publicKey.toBase58().slice(-4))}</span>
           )}
-          {connected ? (
-            <button className="btn-connected" onClick={disconnect}>
-              <span className="live-dot" />Disconnect
-            </button>
-          ) : (
-            <button className="btn-connect" onClick={() => setVisible(true)}>
-              Connect Wallet
-            </button>
-          )}
+          {connected
+            ? <button className="btn-connected" onClick={handleDisconnect}><span className="live-dot" />Disconnect ▾</button>
+            : <button className="btn-connect" onClick={() => setVisible(true)}>Connect Wallet</button>
+          }
         </div>
       </nav>
 
-      <FloatClaimWidget 
-        liveSolPrice={liveSolPrice} 
-        onClaimSuccess={fetchBalances} 
-        connected={connected}
-        publicKey={publicKey}
-        sendTransaction={sendTransaction}
-        signAllTransactions={signAllTransactions}
-      />
+      <FloatClaimWidget liveSolPrice={liveSolPrice} onClaimSuccess={fetchBalances} />
 
       <div className="main">
         <div className="app-card">
@@ -642,13 +759,20 @@ export default function App() {
               </div>
             </div>
 
+            {/* [AUDIT FIX MEDIUM] Display staleness warning when live rates exceed threshold */}
+            {ratesAreStale && (
+              <div style={{fontSize:11,color:'#f87171',padding:'6px 10px',background:'rgba(248,113,113,0.12)',borderRadius:8,marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
+                ⚠️ Rate data may be stale — send button disabled until rates refresh.
+              </div>
+            )}
             {tokLive && (
               <div className="rate-badge" style={{marginBottom:'0.75rem'}}>
                 <span className="rate-dot" />
                 1 {tokLive.symbol} = <strong>${tokLive.price < 0.0001 ? tokLive.price.toFixed(8) : tokLive.price < 1 ? tokLive.price.toFixed(4) : tokLive.price.toLocaleString()}</strong> USD
                 <span className="rate-sep">·</span>
                 1 USD = <strong>{fmtRate(currRate)}</strong> {currency}
-                {liveRates.updatedAt && <span style={{color:'var(--text3)',fontSize:10}}> · live</span>}
+                {liveRates.updatedAt && !ratesAreStale && <span style={{color:'var(--text3)',fontSize:10}}> · live</span>}
+                {ratesAreStale && <span style={{color:'#f87171',fontSize:10}}> · stale</span>}
               </div>
             )}
 
@@ -665,8 +789,15 @@ export default function App() {
                 </div>
                 {walletError && <div style={{fontSize:12, color:'#f87171', marginBottom:12, padding:'8px 12px', background:'rgba(248,113,113,0.1)', borderRadius:8}}>{walletError}</div>}
 
-                <button className="send-btn" disabled={!connected || !tokLive || !recipient || !num || (recipient.endsWith('.sol') && !resolvedAddress) || sending} onClick={handleSend}>
-                  {sending ? 'Sending…' : !connected ? 'Connect wallet to send' : !tokLive ? 'Select a token to continue' : (!recipient || (recipient.endsWith('.sol') && !resolvedAddress)) ? 'Enter a valid recipient' : `Send ${dispTok} ${tokLive.symbol}`}
+                <button className="send-btn"
+                  disabled={!connected || !tokLive || !recipient || !num || !resolvedAddress || sending || ratesAreStale}
+                  onClick={handleSend}>
+                  {sending ? 'Sending…'
+                    : !connected ? 'Connect wallet to send'
+                    : !tokLive ? 'Select a token to continue'
+                    : ratesAreStale ? 'Waiting for fresh rates…'
+                    : !resolvedAddress ? 'Enter a valid recipient'
+                    : `Send ${dispTok} ${tokLive.symbol}`}
                 </button>
               </>
             )}
@@ -710,9 +841,10 @@ export default function App() {
       </div>
 
       <footer>
-        Powered by <a href="https://x.com/solana" target="_blank" rel="noopener">Solana</a> ·
-        Domains by <a href="https://x.com/sns" target="_blank" rel="noopener">SNS</a> ·
-        Rates by <a href="https://x.com/coingecko?s=20" target="_blank" rel="noopener">CoinGecko</a>
+        {/* [AUDIT FIX HIGH] All external links use rel="noopener noreferrer" to prevent tab-napping and referrer leakage */}
+        Powered by <a href="https://x.com/solana" target="_blank" rel="noopener noreferrer">Solana</a> ·
+        Domains by <a href="https://www.sns.id" target="_blank" rel="noopener noreferrer">SNS</a> ·
+        Rates by <a href="https://www.coingecko.com" target="_blank" rel="noopener noreferrer">CoinGecko</a>
       </footer>
 
       {showModal && (
