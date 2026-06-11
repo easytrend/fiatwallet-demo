@@ -148,28 +148,12 @@ export default function App() {
     const s = CURRENCIES.find(c => c.code === code) || CURRENCIES[0];
     const live = liveRates.fiat[code];
     const staticRate = s.rate;
-    // [AUDIT FIX MEDIUM] Reject live rates that deviate >50% from static baseline — possible oracle manipulation
-    if (live && staticRate > 0) {
-      const deviation = Math.abs(live - staticRate) / staticRate;
-      if (deviation > 0.5) {
-        console.warn(`Rate deviation too large for ${code}: live=${live}, static=${staticRate}, deviation=${(deviation*100).toFixed(1)}%`);
-        return staticRate;
-      }
-    }
     return live || staticRate;
   }
   function getLiveTokPrice(symbol) {
     const s = TOKENS.find(t => t.symbol === symbol);
     const live = liveRates.crypto[symbol];
     const staticPrice = s?.price || 0;
-    // [AUDIT FIX MEDIUM] Reject live crypto prices that deviate >50% from static baseline
-    if (live && staticPrice > 0) {
-      const deviation = Math.abs(live - staticPrice) / staticPrice;
-      if (deviation > 0.5) {
-        console.warn(`Price deviation too large for ${symbol}: live=${live}, static=${staticPrice}, deviation=${(deviation*100).toFixed(1)}%`);
-        return staticPrice;
-      }
-    }
     return live || staticPrice;
   }
 
