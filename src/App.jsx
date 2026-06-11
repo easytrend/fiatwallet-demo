@@ -452,6 +452,8 @@ export default function App() {
 
       let senderATA = null;
       let needsAtaCreation = false;
+      let solTransferLamports = 0n;
+      let estimatedFee = 5000n;
 
       if (tokLive.symbol === 'SOL') {
         let lamports = BigInt(Math.round(tokAmt * 1e9));
@@ -484,11 +486,14 @@ export default function App() {
             console.warn('Failed to estimate transaction fee:', e);
           }
 
+          estimatedFee = fee;
           lamports = solBalanceLamports - fee;
           if (lamports <= 0n) {
             throw new Error(`Insufficient SOL balance to cover the network fee of ${Number(fee) / 1e9} SOL.`);
           }
         }
+
+        solTransferLamports = lamports;
 
         transaction.add(
           SystemProgram.transfer({
@@ -574,10 +579,9 @@ export default function App() {
       // ────────────────────────────────────────────────────────────────────────
       if (tokLive.symbol === 'SOL') {
         const latestBalance = await connection.getBalance(publicKey, 'confirmed');
-        const lamportsNeeded = BigInt(Math.round(tokAmt * 1e9));
 
-        if (BigInt(latestBalance) < lamportsNeeded + BigInt(5000)) {
-          throw new Error(`Insufficient SOL balance. You have ${(Number(latestBalance) / 1e9).toFixed(6)} SOL but need at least ${((Number(lamportsNeeded) + 5000) / 1e9).toFixed(6)} SOL.`);
+        if (BigInt(latestBalance) < solTransferLamports + estimatedFee) {
+          throw new Error(`Insufficient SOL balance. You have ${(Number(latestBalance) / 1e9).toFixed(6)} SOL but need at least ${((Number(solTransferLamports) + estimatedFee) / 1e9).toFixed(6)} SOL.`);
         }
       } else {
         if (!senderATA) {
