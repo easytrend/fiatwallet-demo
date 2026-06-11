@@ -405,6 +405,7 @@ export default function App() {
   }
 
   async function handleSend() {
+    if (sending) return;
     if (!publicKey || !connection || !num) return;
     setToast(null);
     

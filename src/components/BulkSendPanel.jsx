@@ -105,6 +105,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
   }
 
   const handleBulkSend = async () => {
+    if (['resolving', 'signing', 'sending'].includes(sendingState)) return;
     if (!connected || !publicKey || validRows.length === 0) return;
     setSendingState('resolving');
     setErrorMsg('');

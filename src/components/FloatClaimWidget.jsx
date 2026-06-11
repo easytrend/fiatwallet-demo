@@ -230,6 +230,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
   // 3. Close Empty Accounts
   const handleClaimRent = async () => {
+    if (claimingRent) return;
     if (!publicKey || !connection) return;
     setClaimingRent(true);
     setToast(null);
@@ -358,6 +359,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
   // 4. Claim Pump.fun Cashback (Calls the actual pumpdev.io API, no fallback in live mode)
   const handleClaimCashback = async () => {
+    if (claimingCashback) return;
     if (!publicKey || !connection) return;
     setClaimingCashback(true);
     setToast(null);
