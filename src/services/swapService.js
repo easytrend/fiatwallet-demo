@@ -78,7 +78,7 @@ export async function buildSwapTransaction(quote, userPublicKey) {
       userPublicKey,
       wrapAndUnwrapSol: true,
       dynamicSlippage: true,
-      prioritizationFeeLamports: 'auto',
+      prioritizationFeeLamports: 10000,
       asLegacyTransaction: false,
       dynamicComputeUnitLimit: true,
     }),
