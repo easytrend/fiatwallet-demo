@@ -546,13 +546,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
             <div className="capsule-pill"></div>
           </div>
           <div className="claim-pill-text">
-            <span>
-              <span className="claim-pill-prefix">You have </span>
-              <span className="claim-pill-action">Claim </span>
-              <strong>{totalSOL.toFixed(5)} SOL</strong>
-              <span className="claim-pill-suffix"> to claim</span>
-              <span className="claim-usd-value"> (${totalUSD.toFixed(2)})</span>
-            </span>
+            <strong>Claim your Sol</strong>
           </div>
           <button 
             className="claim-pill-close" 
