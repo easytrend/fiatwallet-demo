@@ -15,6 +15,7 @@ import BulkSendPanel from './components/BulkSendPanel';
 import TokenModal from './components/TokenModal';
 import Toast from './components/Toast';
 import FloatClaimWidget from './components/FloatClaimWidget';
+import SwapWidget from './components/SwapWidget';
 
 // [AUDIT FIX HIGH] SNS_LINK must not embed referral/tracking parameters.
 // [AUDIT FIX HIGH] TOKEN_PROGRAM_ID declared as a module-level frozen constant — never re-instantiated inside a component body.
@@ -851,11 +852,17 @@ export default function App() {
         </div>
       </div>
 
+      {/* Below-fold widgets row: Swap + Claim side by side */}
+      <div className="widgets-row">
+        <SwapWidget walletTokenList={walletTokenList} onSwapSuccess={fetchBalances} />
+      </div>
+
       <footer>
         {/* [AUDIT FIX HIGH] All external links use rel="noopener noreferrer" to prevent tab-napping and referrer leakage */}
         Powered by <a href="https://x.com/solana" target="_blank" rel="noopener noreferrer">Solana</a> ·
         Domains by <a href="https://www.sns.id" target="_blank" rel="noopener noreferrer">SNS</a> ·
-        Rates by <a href="https://www.coingecko.com" target="_blank" rel="noopener noreferrer">CoinGecko</a>
+        Rates by <a href="https://www.coingecko.com" target="_blank" rel="noopener noreferrer">CoinGecko</a> ·
+        Swaps by <a href="https://titan.exchange" target="_blank" rel="noopener noreferrer">⚡ Titan</a>
       </footer>
 
       {showModal && (
