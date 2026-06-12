@@ -15,7 +15,7 @@
  *   };
  */
 
-const QUOTE_API = 'https://quote-api.jup.ag/v6';
+const QUOTE_API = 'https://api.jup.ag/swap/v1';
 
 // Well-known mint addresses
 export const SOL_MINT   = 'So11111111111111111111111111111111111111112';
