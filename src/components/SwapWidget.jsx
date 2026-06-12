@@ -306,10 +306,8 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
             </svg>
           </div>
           <span className="swp-pill-label">
-            <span className="swp-pill-prefix">Swap </span>
-            <strong>on Titan</strong>
+            <strong>Swap</strong>
           </span>
-          <span className="swp-titan-dot">⚡</span>
         </div>
       </div>
 
