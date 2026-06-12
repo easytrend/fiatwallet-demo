@@ -695,6 +695,7 @@ export default function App() {
       </nav>
 
       <FloatClaimWidget liveSolPrice={liveSolPrice} onClaimSuccess={fetchBalances} />
+      <SwapWidget walletTokenList={walletTokenList} onSwapSuccess={fetchBalances} />
 
       <div className="main">
         <div className="app-card">
@@ -850,11 +851,6 @@ export default function App() {
             )}
           </div>
         </div>
-      </div>
-
-      {/* Below-fold widgets row: Swap + Claim side by side */}
-      <div className="widgets-row">
-        <SwapWidget walletTokenList={walletTokenList} onSwapSuccess={fetchBalances} />
       </div>
 
       <footer>
