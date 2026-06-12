@@ -5,6 +5,14 @@
  * Titan Exchange aggregates Jupiter routes among others (OKX, DFlow, Argos).
  * Phase 1: Jupiter V6 REST — free, public, production-ready.
  * Phase 2: Replace QUOTE_API/SWAP_API with Titan SDK when API key obtained.
+ *
+ * Template Titan WebSocket snippet for real-time price streaming (RPCpool Integration):
+ *   const ws = new WebSocket(import.meta.env.VITE_TITAN_WS_URL || 'wss://your-endpoint.rpcpool.com/your-token/titan/api/v1/ws');
+ *   ws.onopen = () => console.log('Connected to Titan Swap API');
+ *   ws.onmessage = (event) => {
+ *     const data = JSON.parse(event.data);
+ *     console.log('Price update:', data);
+ *   };
  */
 
 const QUOTE_API = 'https://quote-api.jup.ag/v6';
