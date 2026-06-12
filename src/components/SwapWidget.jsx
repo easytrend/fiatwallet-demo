@@ -11,7 +11,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { VersionedTransaction } from '@solana/web3.js';
+import { VersionedTransaction, PublicKey } from '@solana/web3.js';
 import { useSwapQuote } from '../hooks/useSwapQuote';
 import {
   buildSwapTransaction,
@@ -45,13 +45,95 @@ const SLIPPAGE_PRESETS = [
 
 const TOKEN_COLORS = { SOL: '#9945FF', USDC: '#2775CA', USDT: '#26A17B', BONK: '#f5a623', JUP: '#C7F284', WIF: '#a78bfa' };
 
-const TRUSTED_HOSTS = ['raw.githubusercontent.com', 'assets.coingecko.com', 'tokens.jup.ag', 'arweave.net', 'nftstorage.link', 'cdn.jsdelivr.net'];
+const TRUSTED_HOSTS = ['raw.githubusercontent.com', 'assets.coingecko.com', 'tokens.jup.ag', 'arweave.net', 'nftstorage.link', 'cdn.jsdelivr.net', 'coin-images.coingecko.com', 'dd.dexscreener.com'];
 function isTrustedLogo(url) {
   if (!url) return false;
   try {
     const p = new URL(url);
     return p.protocol === 'https:' && TRUSTED_HOSTS.some(h => p.hostname === h || p.hostname.endsWith('.' + h));
   } catch { return false; }
+}
+
+async function fetchTokenMetadata(mintAddress, connection) {
+  // 1. Try CoinGecko
+  try {
+    const cgRes = await fetch(`https://api.coingecko.com/api/v3/coins/solana/contract/${mintAddress}`);
+    if (cgRes.ok) {
+      const data = await cgRes.json();
+      if (data && data.symbol) {
+        return {
+          symbol: data.symbol.toUpperCase(),
+          name: data.name,
+          mint: mintAddress,
+          decimals: data.detail_platforms?.solana?.decimal_place ?? 9,
+          logoURI: data.image?.small || ''
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("CoinGecko lookup failed:", e);
+  }
+
+  // 2. Try DEX Screener
+  let dexMetadata = null;
+  try {
+    const dsRes = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${mintAddress}`);
+    if (dsRes.ok) {
+      const data = await dsRes.json();
+      const pair = data.pairs?.find(p => p.chainId === 'solana');
+      if (pair) {
+        const isBase = pair.baseToken?.address?.toLowerCase() === mintAddress.toLowerCase();
+        const token = isBase ? pair.baseToken : pair.quoteToken;
+        if (token) {
+          dexMetadata = {
+            symbol: token.symbol.toUpperCase(),
+            name: token.name,
+            mint: mintAddress,
+            logoURI: pair.info?.imageUrl || ''
+          };
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("DEX Screener lookup failed:", e);
+  }
+
+  // 3. Get Decimals from on-chain RPC (especially if DEX Screener succeeded but lacks decimals, or if both failed)
+  let decimals = 9;
+  if (connection) {
+    try {
+      const info = await connection.getParsedAccountInfo(new PublicKey(mintAddress));
+      if (info?.value?.data?.parsed?.info?.decimals !== undefined) {
+        decimals = info.value.data.parsed.info.decimals;
+      } else {
+        if (!dexMetadata) return null; // If not a valid mint account, fail early
+      }
+    } catch (e) {
+      console.warn("On-chain decimals lookup failed:", e);
+      if (!dexMetadata) return null;
+    }
+  }
+
+  if (dexMetadata) {
+    return {
+      ...dexMetadata,
+      decimals
+    };
+  }
+
+  // If nothing worked but it's a valid mint with decimals, return a fallback object
+  if (connection) {
+    const short = mintAddress.slice(0, 4) + '...' + mintAddress.slice(-4);
+    return {
+      symbol: short.toUpperCase(),
+      name: `Token ${short}`,
+      mint: mintAddress,
+      decimals,
+      logoURI: ''
+    };
+  }
+
+  return null;
 }
 
 /* ── Tiny reusable token icon ── */
@@ -75,10 +157,14 @@ function TokenIcon({ token, size = 26 }) {
 }
 
 /* ── Inline Token Picker ── */
-function TokenPicker({ selected, options, onChange, excludeMint, id }) {
+function TokenPicker({ selected, options, onChange, excludeMint, id, onAddCustomToken }) {
+  const { connection } = useConnection();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const wrapRef = useRef(null);
+
+  const [loadingMetadata, setLoadingMetadata] = useState(false);
+  const [resolvedToken, setResolvedToken] = useState(null);
 
   // Close on outside click
   useEffect(() => {
@@ -87,6 +173,47 @@ function TokenPicker({ selected, options, onChange, excludeMint, id }) {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
+
+  // Lookup custom token if search is a mint address
+  useEffect(() => {
+    const mint = search.trim();
+    const isMintAddress = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint);
+    if (!isMintAddress) {
+      setResolvedToken(null);
+      return;
+    }
+
+    const exists = options.some(t => t.mint.toLowerCase() === mint.toLowerCase());
+    if (exists) {
+      setResolvedToken(null);
+      return;
+    }
+
+    let active = true;
+    const lookup = async () => {
+      setLoadingMetadata(true);
+      setResolvedToken(null);
+      try {
+        const token = await fetchTokenMetadata(mint, connection);
+        if (active && token) {
+          setResolvedToken(token);
+        }
+      } catch (err) {
+        console.error("Token metadata lookup failed:", err);
+      } finally {
+        if (active) setLoadingMetadata(false);
+      }
+    };
+
+    const t = setTimeout(() => {
+      lookup();
+    }, 500);
+
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+  }, [search, options, connection]);
 
   const filtered = options.filter(t =>
     t.mint !== excludeMint &&
@@ -111,7 +238,7 @@ function TokenPicker({ selected, options, onChange, excludeMint, id }) {
         <div className="swp-dropdown">
           <input
             className="swp-dropdown-search"
-            placeholder="Search…"
+            placeholder="Search name or address…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             autoFocus
@@ -128,7 +255,36 @@ function TokenPicker({ selected, options, onChange, excludeMint, id }) {
               <span className="swp-di-name">{t.name}</span>
             </button>
           ))}
-          {filtered.length === 0 && (
+
+          {/* Render dynamically looked up token if found */}
+          {resolvedToken && (
+            <button
+              className="swp-dropdown-item custom-import-item"
+              type="button"
+              style={{ borderTop: '1px dashed rgba(34, 211, 238, 0.4)', background: 'rgba(34, 211, 238, 0.05)' }}
+              onClick={() => {
+                if (onAddCustomToken) onAddCustomToken(resolvedToken);
+                onChange(resolvedToken);
+                setOpen(false);
+                setSearch('');
+              }}
+            >
+              <TokenIcon token={resolvedToken} size={22} />
+              <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}>
+                <span className="swp-di-sym">{resolvedToken.symbol} <span style={{ fontSize: 9, color: 'var(--cyan)' }}>(Import)</span></span>
+                <span className="swp-di-name" style={{ fontSize: 10 }}>{resolvedToken.name}</span>
+              </div>
+            </button>
+          )}
+
+          {/* Loading / Empty states */}
+          {loadingMetadata && (
+            <div style={{ padding: '12px 14px', color: 'var(--text3)', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="swp-mini-spin" /> Searching…
+            </div>
+          )}
+
+          {filtered.length === 0 && !loadingMetadata && !resolvedToken && (
             <div style={{ padding: '12px 14px', color: 'var(--text3)', fontSize: 12 }}>No tokens found</div>
           )}
         </div>
@@ -158,8 +314,10 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
   const [swapError, setSwapError]       = useState(null);
   const [swapSuccess, setSwapSuccess]   = useState(null);
 
-  // Build merged input token list (wallet + popular)
-  const allInputOptions = useMemo(() => {
+  const [customTokens, setCustomTokens] = useState([]);
+
+  // Build merged options list (wallet + popular + custom)
+  const allOptions = useMemo(() => {
     const wallet = (walletTokenList || []).map(t => ({
       symbol: t.symbol, name: t.name || t.symbol,
       mint: t.symbol === 'SOL' ? SOL_MINT : (t.mint || ''),
@@ -168,8 +326,32 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
       balance: t.balance,
     })).filter(t => t.mint);
     const mints = new Set(wallet.map(t => t.mint));
-    return [...wallet, ...POPULAR_TOKENS.filter(t => !mints.has(t.mint))];
-  }, [walletTokenList]);
+    
+    const combined = [...wallet];
+    
+    POPULAR_TOKENS.forEach(t => {
+      if (!mints.has(t.mint)) {
+        combined.push(t);
+        mints.add(t.mint);
+      }
+    });
+
+    customTokens.forEach(t => {
+      if (!mints.has(t.mint)) {
+        combined.push(t);
+        mints.add(t.mint);
+      }
+    });
+
+    return combined;
+  }, [walletTokenList, customTokens]);
+
+  const handleAddCustomToken = useCallback((token) => {
+    setCustomTokens(prev => {
+      if (prev.some(t => t.mint.toLowerCase() === token.mint.toLowerCase())) return prev;
+      return [...prev, token];
+    });
+  }, []);
 
   const inputDecimals  = inputToken?.decimals  ?? 9;
   const outputDecimals = outputToken?.decimals ?? 6;
@@ -376,10 +558,11 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
               <div className="swp-field-body">
                 <TokenPicker
                   selected={inputToken}
-                  options={allInputOptions}
+                  options={allOptions}
                   onChange={t => { setInputToken(t); setInputAmount(''); setSwapError(null); setSwapSuccess(null); }}
                   excludeMint={outputToken?.mint}
                   id="swap-input-picker"
+                  onAddCustomToken={handleAddCustomToken}
                 />
                 <input
                   id="swap-amount-input"
@@ -415,10 +598,11 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
               <div className="swp-field-body">
                 <TokenPicker
                   selected={outputToken}
-                  options={POPULAR_TOKENS}
+                  options={allOptions}
                   onChange={t => { setOutputToken(t); setSwapError(null); setSwapSuccess(null); }}
                   excludeMint={inputToken?.mint}
                   id="swap-output-picker"
+                  onAddCustomToken={handleAddCustomToken}
                 />
                 <div className="swp-output-wrap">
                   {quoteLoading && hasAmount
