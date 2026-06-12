@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { PublicKey, Transaction, SystemProgram, ComputeBudgetProgram } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, ComputeBudgetProgram, SystemInstruction } from '@solana/web3.js';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import { getDomainKeySync, NameRegistryState } from '@bonfida/spl-name-service';
 import { CURRENCIES } from '../data/currencies';
@@ -12,6 +12,123 @@ const TOKEN_PROGRAM_ID = Object.freeze(new PublicKey('TokenkegQfeZyiNwAJbNbGKPFX
 const TOKEN_2022_PROGRAM_ID = Object.freeze(new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'));
 // [AUDIT FIX HIGH] Hard cap on bulk batches to prevent unbounded transaction injection
 const MAX_BULK_BATCHES = 10; // 10 batches × 5 recipients = 50 max per bulk send
+
+/**
+ * Verifies that the built transaction has not been tampered with before signing/sending.
+ * Asserts recipient addresses and transfer amounts match expected values.
+ *
+ * @param {Transaction} transaction - Solana Transaction object
+ * @param {Array<{ recipient: string, amountBaseUnits: bigint, mint?: string }>} expectedTransfers - List of expected transfers
+ */
+function verifyTransactionIntegrity(transaction, expectedTransfers) {
+  if (!transaction.instructions || transaction.instructions.length === 0) {
+    throw new Error('Transaction integrity violation: Transaction contains no instructions.');
+  }
+
+  let transferCheckedCount = 0;
+  let systemTransferCount = 0;
+
+  for (const ix of transaction.instructions) {
+    const programIdStr = ix.programId.toBase58();
+
+    if (ix.programId.equals(SystemProgram.programId)) {
+      try {
+        const decoded = SystemInstruction.decodeTransfer(ix);
+        const toPubkeyStr = decoded.toPubkey.toBase58();
+        const lamports = BigInt(decoded.lamports);
+
+        const match = expectedTransfers.find(expected => 
+          !expected.mint &&
+          expected.recipient === toPubkeyStr &&
+          expected.amountBaseUnits === lamports
+        );
+
+        if (!match) {
+          throw new Error(`Transaction integrity violation: Unexpected SOL transfer of ${lamports} lamports to ${toPubkeyStr}.`);
+        }
+        systemTransferCount++;
+      } catch (err) {
+        throw new Error(`Transaction integrity violation: Failed to validate System Program instruction: ${err.message}`);
+      }
+    } else if (
+      programIdStr === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' || // Token Program
+      programIdStr === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'     // Token-2022 Program
+    ) {
+      const ixType = ix.data[0];
+      if (ixType === 12) { // TransferChecked
+        if (ix.data.length < 10) {
+          throw new Error('Transaction integrity violation: Invalid TransferChecked instruction data size.');
+        }
+        const mint = ix.keys[1].pubkey.toBase58();
+        const destinationATA = ix.keys[2].pubkey.toBase58();
+
+        let amount = 0n;
+        for (let idx = 0; idx < 8; idx++) {
+          amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
+        }
+
+        const match = expectedTransfers.find(expected =>
+          expected.mint === mint &&
+          expected.amountBaseUnits === amount
+        );
+
+        if (!match) {
+          throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units for mint ${mint}.`);
+        }
+
+        const expectedATA = getAssociatedTokenAddressSync(
+          new PublicKey(mint),
+          new PublicKey(match.recipient),
+          false,
+          ix.programId
+        ).toBase58();
+
+        if (destinationATA !== expectedATA) {
+          throw new Error(`Transaction integrity violation: Token destination ATA mismatch. Expected ${expectedATA}, got ${destinationATA}.`);
+        }
+
+        transferCheckedCount++;
+      } else if (ixType === 3) { // Transfer (legacy)
+        if (ix.data.length < 9) {
+          throw new Error('Transaction integrity violation: Invalid Transfer instruction data size.');
+        }
+        const destinationATA = ix.keys[1].pubkey.toBase58();
+
+        let amount = 0n;
+        for (let idx = 0; idx < 8; idx++) {
+          amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
+        }
+
+        const match = expectedTransfers.find(expected =>
+          expected.amountBaseUnits === amount
+        );
+
+        if (!match) {
+          throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units.`);
+        }
+
+        const expectedATA = getAssociatedTokenAddressSync(
+          new PublicKey(match.mint),
+          new PublicKey(match.recipient),
+          false,
+          ix.programId
+        ).toBase58();
+
+        if (destinationATA !== expectedATA) {
+          throw new Error(`Transaction integrity violation: Token destination ATA mismatch. Expected ${expectedATA}, got ${destinationATA}.`);
+        }
+
+        transferCheckedCount++;
+      }
+    }
+  }
+
+  const totalExpectedTransfers = expectedTransfers.length;
+  const totalFoundTransfers = systemTransferCount + transferCheckedCount;
+  if (totalFoundTransfers !== totalExpectedTransfers) {
+    throw new Error(`Transaction integrity violation: Expected ${totalExpectedTransfers} transfer instructions, but found ${totalFoundTransfers}.`);
+  }
+}
 
 export default function BulkSendPanel({ tok, connected, getLiveRate, connection, publicKey, sendTransaction, signAllTransactions }) {
   const [rows, setRows] = useState([]);
@@ -321,6 +438,14 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
             tx.add(createTransferCheckedInstruction(senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals));
           }
         }
+        const chunkExpectedTransfers = chunk.map(rec => ({
+          recipient: rec.pubkey.toBase58(),
+          amountBaseUnits: tok.symbol === 'SOL'
+            ? BigInt(Math.round(rec.tokAmt * 1e9))
+            : BigInt(Math.round(rec.tokAmt * Math.pow(10, decimals))),
+          mint: tok.symbol === 'SOL' ? null : tok.mint
+        }));
+        verifyTransactionIntegrity(tx, chunkExpectedTransfers);
         transactions.push(tx);
       }
 

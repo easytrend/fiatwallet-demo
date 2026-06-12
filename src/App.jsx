@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { PublicKey, Transaction, SystemProgram, Connection, Keypair } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Connection, Keypair, SystemInstruction } from '@solana/web3.js';
 import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
@@ -44,6 +44,123 @@ function isTrustedImageOrigin(url) {
     if (parsed.protocol !== 'https:') return false;
     return TRUSTED_IMAGE_HOSTS.some(host => parsed.hostname === host || parsed.hostname.endsWith('.' + host));
   } catch { return false; }
+}
+
+/**
+ * Verifies that the built transaction has not been tampered with before signing/sending.
+ * Asserts recipient addresses and transfer amounts match expected values.
+ *
+ * @param {Transaction} transaction - Solana Transaction object
+ * @param {Array<{ recipient: string, amountBaseUnits: bigint, mint?: string }>} expectedTransfers - List of expected transfers
+ */
+function verifyTransactionIntegrity(transaction, expectedTransfers) {
+  if (!transaction.instructions || transaction.instructions.length === 0) {
+    throw new Error('Transaction integrity violation: Transaction contains no instructions.');
+  }
+
+  let transferCheckedCount = 0;
+  let systemTransferCount = 0;
+
+  for (const ix of transaction.instructions) {
+    const programIdStr = ix.programId.toBase58();
+
+    if (ix.programId.equals(SystemProgram.programId)) {
+      try {
+        const decoded = SystemInstruction.decodeTransfer(ix);
+        const toPubkeyStr = decoded.toPubkey.toBase58();
+        const lamports = BigInt(decoded.lamports);
+
+        const match = expectedTransfers.find(expected => 
+          !expected.mint &&
+          expected.recipient === toPubkeyStr &&
+          expected.amountBaseUnits === lamports
+        );
+
+        if (!match) {
+          throw new Error(`Transaction integrity violation: Unexpected SOL transfer of ${lamports} lamports to ${toPubkeyStr}.`);
+        }
+        systemTransferCount++;
+      } catch (err) {
+        throw new Error(`Transaction integrity violation: Failed to validate System Program instruction: ${err.message}`);
+      }
+    } else if (
+      programIdStr === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' || // Token Program
+      programIdStr === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'     // Token-2022 Program
+    ) {
+      const ixType = ix.data[0];
+      if (ixType === 12) { // TransferChecked
+        if (ix.data.length < 10) {
+          throw new Error('Transaction integrity violation: Invalid TransferChecked instruction data size.');
+        }
+        const mint = ix.keys[1].pubkey.toBase58();
+        const destinationATA = ix.keys[2].pubkey.toBase58();
+
+        let amount = 0n;
+        for (let idx = 0; idx < 8; idx++) {
+          amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
+        }
+
+        const match = expectedTransfers.find(expected =>
+          expected.mint === mint &&
+          expected.amountBaseUnits === amount
+        );
+
+        if (!match) {
+          throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units for mint ${mint}.`);
+        }
+
+        const expectedATA = getAssociatedTokenAddressSync(
+          new PublicKey(mint),
+          new PublicKey(match.recipient),
+          false,
+          ix.programId
+        ).toBase58();
+
+        if (destinationATA !== expectedATA) {
+          throw new Error(`Transaction integrity violation: Token destination ATA mismatch. Expected ${expectedATA}, got ${destinationATA}.`);
+        }
+
+        transferCheckedCount++;
+      } else if (ixType === 3) { // Transfer (legacy)
+        if (ix.data.length < 9) {
+          throw new Error('Transaction integrity violation: Invalid Transfer instruction data size.');
+        }
+        const destinationATA = ix.keys[1].pubkey.toBase58();
+
+        let amount = 0n;
+        for (let idx = 0; idx < 8; idx++) {
+          amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
+        }
+
+        const match = expectedTransfers.find(expected =>
+          expected.amountBaseUnits === amount
+        );
+
+        if (!match) {
+          throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units.`);
+        }
+
+        const expectedATA = getAssociatedTokenAddressSync(
+          new PublicKey(match.mint),
+          new PublicKey(match.recipient),
+          false,
+          ix.programId
+        ).toBase58();
+
+        if (destinationATA !== expectedATA) {
+          throw new Error(`Transaction integrity violation: Token destination ATA mismatch. Expected ${expectedATA}, got ${destinationATA}.`);
+        }
+
+        transferCheckedCount++;
+      }
+    }
+  }
+
+  const totalExpectedTransfers = expectedTransfers.length;
+  const totalFoundTransfers = systemTransferCount + transferCheckedCount;
+  if (totalFoundTransfers !== totalExpectedTransfers) {
+    throw new Error(`Transaction integrity violation: Expected ${totalExpectedTransfers} transfer instructions, but found ${totalFoundTransfers}.`);
+  }
 }
 
 export default function App() {
@@ -606,6 +723,14 @@ export default function App() {
           }
         }
       }
+
+      // Verify transaction integrity before simulation/submission
+      const expectedTransfers = [{
+        recipient: finalRecipient.toBase58(),
+        amountBaseUnits: tokLive.symbol === 'SOL' ? solTransferLamports : amountUnits,
+        mint: tokLive.symbol === 'SOL' ? null : tokLive.mint
+      }];
+      verifyTransactionIntegrity(transaction, expectedTransfers);
 
       // Pre-flight simulation immediately before sendTransaction
       const simResult = await connection.simulateTransaction(transaction);
