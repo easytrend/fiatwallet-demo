@@ -26,7 +26,7 @@ import {
   WIF_MINT,
 } from '../services/swapService';
 
-const TITAN_REFERRAL = 'https://titan.exchange';
+const TITAN_REFERRAL = 'https://titan.exchange/@easytrend';
 
 const POPULAR_TOKENS = [
   { symbol: 'SOL',  name: 'Solana',    mint: SOL_MINT,  decimals: 9, logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png' },
