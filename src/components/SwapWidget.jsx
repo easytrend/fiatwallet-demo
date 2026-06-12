@@ -366,6 +366,7 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
     outputMint: outputToken?.mint ?? null,
     amountBaseUnits,
     slippageBps,
+    userPublicKey: publicKey?.toBase58() || null,
   });
 
   const outputAmount = useMemo(() => {

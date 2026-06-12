@@ -13,7 +13,7 @@ const REFRESH_INTERVAL_MS = 15_000; // Auto-refresh every 15 seconds
  * @param {number} params.amountBaseUnits  — amount in smallest units (lamports, etc.)
  * @param {number} params.slippageBps
  */
-export function useSwapQuote({ inputMint, outputMint, amountBaseUnits, slippageBps }) {
+export function useSwapQuote({ inputMint, outputMint, amountBaseUnits, slippageBps, userPublicKey }) {
   const [quote, setQuote]       = useState(null);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(null);
@@ -42,7 +42,7 @@ export function useSwapQuote({ inputMint, outputMint, amountBaseUnits, slippageB
     setCountdown(REFRESH_INTERVAL_MS / 1000);
 
     try {
-      const q = await getQuote({ inputMint, outputMint, amount: amountBaseUnits, slippageBps });
+      const q = await getQuote({ inputMint, outputMint, amount: amountBaseUnits, slippageBps, userPublicKey });
       setQuote(q);
       setError(null);
     } catch (err) {
@@ -53,7 +53,7 @@ export function useSwapQuote({ inputMint, outputMint, amountBaseUnits, slippageB
     } finally {
       setLoading(false);
     }
-  }, [inputMint, outputMint, amountBaseUnits, slippageBps, canFetch]);
+  }, [inputMint, outputMint, amountBaseUnits, slippageBps, userPublicKey, canFetch]);
 
   // Fetch on parameter change (debounced 600ms)
   useEffect(() => {

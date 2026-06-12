@@ -33,9 +33,10 @@ export const PYTH_MINT  = 'HZ1JovNiVvGqkvK2mFfszzgXahygABErEpoFeis2mkai';
  * @param {string} params.outputMint
  * @param {number} params.amount - in base units (lamports for SOL, smallest unit for SPL)
  * @param {number} params.slippageBps - slippage in basis points (50 = 0.5%)
- * @returns {Promise<Object>} Jupiter quote response
+ * @param {string} [params.userPublicKey] - user wallet public key for Titan quote builder
+ * @returns {Promise<Object>} mapped quote response
  */
-export async function getQuote({ inputMint, outputMint, amount, slippageBps = 50 }) {
+export async function getQuote({ inputMint, outputMint, amount, slippageBps = 50, userPublicKey }) {
   if (!inputMint || !outputMint || !amount || amount <= 0) {
     throw new Error('Invalid quote parameters');
   }
@@ -43,6 +44,44 @@ export async function getQuote({ inputMint, outputMint, amount, slippageBps = 50
     throw new Error('Input and output tokens must be different');
   }
 
+  const router = import.meta.env.VITE_SWAP_ROUTER || 'jupiter';
+  if (router === 'titan') {
+    // Titan DART API POST /swap
+    const res = await fetch('https://api.titan.exchange/dart/swap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(import.meta.env.VITE_TITAN_API_KEY ? { 'Authorization': `Bearer ${import.meta.env.VITE_TITAN_API_KEY}` } : {})
+      },
+      body: JSON.stringify({
+        inputMint,
+        outputMint,
+        amount: Number(amount),
+        slippageBps: Number(slippageBps),
+        userPublicKey: userPublicKey || 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' // Fallback dummy pubkey for quote simulation if wallet is not connected
+      })
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => null);
+      throw new Error(errBody?.error || `Titan DART quote error: ${res.status}`);
+    }
+
+    const data = await res.json();
+    return {
+      isTitan: true,
+      inputMint,
+      outputMint,
+      inAmount: String(amount),
+      outAmount: String(data.outAmount || data.outputAmount || 0),
+      priceImpactPct: String(data.priceImpactPct || 0),
+      otherAmountThreshold: String(data.otherAmountThreshold || data.minimumReceived || 0),
+      routePlan: data.routePlan || [{ swapInfo: { label: 'Titan DART' }, percent: 100 }],
+      swapTransaction: data.swapTransaction || data.transaction // Cache transaction payload
+    };
+  }
+
+  // Default Jupiter V1 Flow
   const params = new URLSearchParams({
     inputMint,
     outputMint,
@@ -70,6 +109,35 @@ export async function getQuote({ inputMint, outputMint, amount, slippageBps = 50
  * @returns {Promise<string>} base64-encoded unsigned VersionedTransaction
  */
 export async function buildSwapTransaction(quote, userPublicKey) {
+  if (quote?.isTitan) {
+    if (quote.swapTransaction) {
+      return quote.swapTransaction;
+    }
+    const res = await fetch('https://api.titan.exchange/dart/swap', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(import.meta.env.VITE_TITAN_API_KEY ? { 'Authorization': `Bearer ${import.meta.env.VITE_TITAN_API_KEY}` } : {})
+      },
+      body: JSON.stringify({
+        inputMint: quote.inputMint,
+        outputMint: quote.outputMint,
+        amount: Number(quote.inAmount),
+        slippageBps: Number(quote.slippageBps || 50),
+        userPublicKey
+      })
+    });
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => null);
+      throw new Error(errBody?.error || `Titan DART transaction error: ${res.status}`);
+    }
+
+    const data = await res.json();
+    return data.swapTransaction || data.transaction;
+  }
+
+  // Default Jupiter V1 Flow
   const res = await fetch(`${QUOTE_API}/swap`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
