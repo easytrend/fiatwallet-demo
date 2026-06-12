@@ -853,13 +853,7 @@ export default function App() {
         </div>
       </div>
 
-      <footer>
-        {/* [AUDIT FIX HIGH] All external links use rel="noopener noreferrer" to prevent tab-napping and referrer leakage */}
-        Powered by <a href="https://x.com/solana" target="_blank" rel="noopener noreferrer">Solana</a> ·
-        Domains by <a href="https://www.sns.id" target="_blank" rel="noopener noreferrer">SNS</a> ·
-        Rates by <a href="https://www.coingecko.com" target="_blank" rel="noopener noreferrer">CoinGecko</a> ·
-        Swaps by <a href="https://titan.exchange/@easytrend" target="_blank" rel="noopener noreferrer">⚡ Titan</a>
-      </footer>
+
 
       {showModal && (
         <TokenModal
