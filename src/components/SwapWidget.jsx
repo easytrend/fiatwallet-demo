@@ -303,9 +303,9 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
 
   const [isOpen, setIsOpen]   = useState(false);
 
-  // Swap state
-  const [inputToken, setInputToken]     = useState(POPULAR_TOKENS[0]); // SOL
-  const [outputToken, setOutputToken]   = useState(POPULAR_TOKENS[1]); // USDC
+  // Selected mints state
+  const [selectedInputMint, setSelectedInputMint] = useState(null);
+  const [selectedOutputMint, setSelectedOutputMint] = useState(null);
   const [inputAmount, setInputAmount]   = useState('');
   const [slippageBps, setSlippageBps]   = useState(50);
   const [customSlip, setCustomSlip]     = useState('');
@@ -316,8 +316,10 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
 
   const [customTokens, setCustomTokens] = useState([]);
 
-  // Build merged options list (wallet + popular + custom)
+  // Build merged options list (wallet + custom)
   const allOptions = useMemo(() => {
+    if (!connected || !walletTokenList) return [];
+
     const wallet = (walletTokenList || []).map(t => ({
       symbol: t.symbol, name: t.name || t.symbol,
       mint: t.symbol === 'SOL' ? SOL_MINT : (t.mint || ''),
@@ -325,17 +327,10 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
       logoURI: t.logoURI || '',
       balance: t.balance,
     })).filter(t => t.mint);
-    const mints = new Set(wallet.map(t => t.mint));
     
+    const mints = new Set(wallet.map(t => t.mint));
     const combined = [...wallet];
     
-    POPULAR_TOKENS.forEach(t => {
-      if (!mints.has(t.mint)) {
-        combined.push(t);
-        mints.add(t.mint);
-      }
-    });
-
     customTokens.forEach(t => {
       if (!mints.has(t.mint)) {
         combined.push(t);
@@ -344,7 +339,20 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
     });
 
     return combined;
-  }, [walletTokenList, customTokens]);
+  }, [connected, walletTokenList, customTokens]);
+
+  // Derive inputToken and outputToken based on connected status and walletTokenList
+  const inputToken = useMemo(() => {
+    if (!connected || allOptions.length === 0) return null;
+    return allOptions.find(o => o.mint === selectedInputMint) || allOptions.find(o => o.symbol === 'SOL') || allOptions[0];
+  }, [connected, allOptions, selectedInputMint]);
+
+  const outputToken = useMemo(() => {
+    if (!connected || allOptions.length === 0) return null;
+    return allOptions.find(o => o.mint === selectedOutputMint && o.mint !== inputToken?.mint) 
+      || allOptions.find(o => o.mint !== inputToken?.mint) 
+      || null;
+  }, [connected, allOptions, selectedOutputMint, inputToken]);
 
   const handleAddCustomToken = useCallback((token) => {
     setCustomTokens(prev => {
@@ -391,8 +399,9 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
   }, [inputToken, walletTokenList]);
 
   function handleFlip() {
-    setInputToken(outputToken);
-    setOutputToken(inputToken);
+    const temp = inputToken?.mint || null;
+    setSelectedInputMint(outputToken?.mint || null);
+    setSelectedOutputMint(temp);
     setInputAmount('');
     setSwapError(null);
     setSwapSuccess(null);
@@ -563,7 +572,7 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
                 <TokenPicker
                   selected={inputToken}
                   options={allOptions}
-                  onChange={t => { setInputToken(t); setInputAmount(''); setSwapError(null); setSwapSuccess(null); }}
+                  onChange={t => { setSelectedInputMint(t.mint); setInputAmount(''); setSwapError(null); setSwapSuccess(null); }}
                   excludeMint={outputToken?.mint}
                   id="swap-input-picker"
                   onAddCustomToken={handleAddCustomToken}
@@ -603,7 +612,7 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
                 <TokenPicker
                   selected={outputToken}
                   options={allOptions}
-                  onChange={t => { setOutputToken(t); setSwapError(null); setSwapSuccess(null); }}
+                  onChange={t => { setSelectedOutputMint(t.mint); setSwapError(null); setSwapSuccess(null); }}
                   excludeMint={inputToken?.mint}
                   id="swap-output-picker"
                   onAddCustomToken={handleAddCustomToken}
