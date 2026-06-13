@@ -68,7 +68,8 @@ async function fetchTokenMetadata(mintAddress, connection) {
           name: data.name,
           mint: mintAddress,
           decimals: data.detail_platforms?.solana?.decimal_place ?? 9,
-          logoURI: data.image?.small || ''
+          logoURI: data.image?.small || '',
+          price: data.market_data?.current_price?.usd || 0
         };
       }
     }
@@ -91,7 +92,8 @@ async function fetchTokenMetadata(mintAddress, connection) {
             symbol: token.symbol.toUpperCase(),
             name: token.name,
             mint: mintAddress,
-            logoURI: pair.info?.imageUrl || ''
+            logoURI: pair.info?.imageUrl || '',
+            price: parseFloat(pair.priceUsd) || 0
           };
         }
       }
@@ -342,6 +344,7 @@ export default function SwapWidget({
       decimals: t.symbol === 'SOL' ? 9 : (t.decimals || 6),
       logoURI: t.logoURI || '',
       balance: t.balance,
+      price: t.price || 0,
     })).filter(t => t.mint);
     
     const mints = new Set(wallet.map(t => t.mint));

@@ -95,6 +95,18 @@ export async function getQuote({ inputMint, outputMint, amount, slippageBps = 50
   const res = await fetch(`${QUOTE_API}/quote?${params}`);
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');
+    let friendlyMessage = '';
+    try {
+      const parsed = JSON.parse(errBody);
+      if (parsed.error) {
+        friendlyMessage = parsed.error;
+      }
+    } catch (parseErr) {
+      // Ignore
+    }
+    if (friendlyMessage) {
+      throw new Error(friendlyMessage);
+    }
     throw new Error(`Quote API error ${res.status}: ${errBody || res.statusText}`);
   }
   const data = await res.json();
