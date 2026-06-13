@@ -25,6 +25,7 @@ import {
   JUP_MINT,
   WIF_MINT,
 } from '../services/swapService';
+import { logTransaction } from '../services/supabase';
 
 const TITAN_REFERRAL = 'https://titan.exchange/@easytrend';
 
@@ -326,6 +327,7 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
       decimals: t.symbol === 'SOL' ? 9 : (t.decimals || 6),
       logoURI: t.logoURI || '',
       balance: t.balance,
+      price: t.price,
     })).filter(t => t.mint);
     
     const mints = new Set(wallet.map(t => t.mint));
@@ -457,6 +459,17 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
         await new Promise(r => setTimeout(r, 2000));
       }
       if (!confirmed) throw new Error('Swap submitted but confirmation timed out.');
+
+      // Log transaction to Supabase
+      const inputPrice = inputToken?.price || 0;
+      const usdValue = n * inputPrice;
+      logTransaction({
+        signature: sig,
+        userAddress: publicKey.toBase58(),
+        type: 'swap',
+        symbol: inputToken?.symbol || 'UNKNOWN',
+        usdValue
+      });
 
       setSwapSuccess({ sig, from: `${n} ${inputToken.symbol}`, to: `${outputAmount?.toFixed(4) ?? '?'} ${outputToken.symbol}` });
       setInputAmount('');

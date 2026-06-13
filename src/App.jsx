@@ -16,6 +16,7 @@ import TokenModal from './components/TokenModal';
 import Toast from './components/Toast';
 import FloatClaimWidget from './components/FloatClaimWidget';
 import SwapWidget from './components/SwapWidget';
+import { logTransaction } from './services/supabase';
 
 // [AUDIT FIX HIGH] SNS_LINK must not embed referral/tracking parameters.
 // [AUDIT FIX HIGH] TOKEN_PROGRAM_ID declared as a module-level frozen constant — never re-instantiated inside a component body.
@@ -779,6 +780,16 @@ export default function App() {
 
       if (confirmed) {
         setWalletError(null);
+
+        // Log transaction to Supabase
+        logTransaction({
+          signature,
+          userAddress: publicKey.toBase58(),
+          type: 'send',
+          symbol: tokLive.symbol,
+          usdValue: tokAmt * tokPrice
+        });
+
         setToast({
           type: 'success',
           title: `✓ Sent ${dispTok} ${tokLive.symbol}`,
