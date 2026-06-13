@@ -820,7 +820,13 @@ export default function App() {
       </nav>
 
       <FloatClaimWidget liveSolPrice={liveSolPrice} onClaimSuccess={fetchBalances} />
-      <SwapWidget walletTokenList={walletTokenList} onSwapSuccess={fetchBalances} />
+      <SwapWidget
+        walletTokenList={walletTokenList}
+        onSwapSuccess={fetchBalances}
+        currency={currency}
+        setCurrency={setCurrency}
+        currRate={currRate}
+      />
 
       <div className="main">
         <div className="app-card">

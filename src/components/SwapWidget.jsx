@@ -25,6 +25,8 @@ import {
   JUP_MINT,
   WIF_MINT,
 } from '../services/swapService';
+import { fmtTok, fmtFiat } from '../utils';
+import CurrDrop from './CurrDrop';
 
 const TITAN_REFERRAL = 'https://titan.exchange/@easytrend';
 
@@ -296,12 +298,26 @@ function TokenPicker({ selected, options, onChange, excludeMint, id, onAddCustom
 /* ══════════════════════════════════════════════════════
    MAIN COMPONENT
    ══════════════════════════════════════════════════════ */
-export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
+export default function SwapWidget({
+  walletTokenList,
+  onSwapSuccess,
+  currency: parentCurrency,
+  setCurrency: parentSetCurrency,
+  currRate: parentCurrRate,
+}) {
   const { connection } = useConnection();
   const { publicKey, connected, sendTransaction } = useWallet();
   const { setVisible } = useWalletModal();
 
   const [isOpen, setIsOpen]   = useState(false);
+
+  // Currency configuration
+  const [localCurrency, setLocalCurrency] = useState('USD');
+  const currency = parentCurrency || localCurrency;
+  const setCurrency = parentSetCurrency || setLocalCurrency;
+  const currRate = parentCurrRate || 1;
+
+  const [swapInputMode, setSwapInputMode] = useState('crypto'); // 'crypto' or 'fiat'
 
   // Selected mints state
   const [selectedInputMint, setSelectedInputMint] = useState(null);
@@ -361,13 +377,59 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
     });
   }, []);
 
+  const inputTokenPrice = inputToken?.price || 0;
+  const num = parseFloat(inputAmount) || 0;
+
+  const tokAmt  = swapInputMode === 'fiat'   ? (num / currRate) / (inputTokenPrice || 1) : num;
+  const fiatAmt = swapInputMode === 'crypto' ? num * inputTokenPrice * currRate : num;
+
+  const convertedLabel = useMemo(() => {
+    if (!inputToken) return '≈ 0';
+    if (swapInputMode === 'fiat') {
+      if (inputTokenPrice === 0) return `≈ -- ${inputToken.symbol}`;
+      return `≈ ${fmtTok(tokAmt)} ${inputToken.symbol}`;
+    } else {
+      if (inputTokenPrice === 0) return `≈ -- ${currency}`;
+      return `≈ ${fmtFiat(fiatAmt, currency)}`;
+    }
+  }, [swapInputMode, inputToken, inputTokenPrice, tokAmt, fiatAmt, currency]);
+
+  const toggleInputMode = useCallback((newMode) => {
+    if (newMode === swapInputMode) return;
+    setSwapError(null);
+    setSwapSuccess(null);
+    
+    const numVal = parseFloat(inputAmount);
+    if (numVal > 0) {
+      const price = inputToken?.price || 0;
+      const r = currRate || 1;
+      if (newMode === 'fiat') {
+        const fiatAmtVal = numVal * price * r;
+        setInputAmount(fiatAmtVal.toFixed(2));
+      } else {
+        const cryptoAmtVal = price > 0 ? (numVal / r) / price : 0;
+        setInputAmount(cryptoAmtVal > 0 ? String(+cryptoAmtVal.toFixed(6)) : '');
+      }
+    }
+    setSwapInputMode(newMode);
+  }, [swapInputMode, inputAmount, inputToken, currRate]);
+
   const inputDecimals  = inputToken?.decimals  ?? 9;
   const outputDecimals = outputToken?.decimals ?? 6;
 
   const amountBaseUnits = useMemo(() => {
     const n = parseFloat(inputAmount);
-    return (n > 0) ? toBaseUnits(n, inputDecimals) : 0;
-  }, [inputAmount, inputDecimals]);
+    if (!(n > 0)) return 0;
+    
+    let cryptoAmt = n;
+    if (swapInputMode === 'fiat') {
+      const price = inputToken?.price || 0;
+      if (price <= 0) return 0;
+      cryptoAmt = (n / currRate) / price;
+    }
+    
+    return (cryptoAmt > 0) ? toBaseUnits(cryptoAmt, inputDecimals) : 0;
+  }, [inputAmount, swapInputMode, currRate, inputToken, inputDecimals]);
 
   const { quote, loading: quoteLoading, error: quoteError, countdown, refresh } = useSwapQuote({
     inputMint: inputToken?.mint ?? null,
@@ -409,8 +471,20 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
 
   function handleMax() {
     if (inputBalance == null) return;
-    const max = inputToken.symbol === 'SOL' ? Math.max(0, inputBalance - 0.01) : inputBalance;
-    setInputAmount(max > 0 ? String(+max.toFixed(6)) : '');
+    const maxBalance = inputToken.symbol === 'SOL' ? Math.max(0, inputBalance - 0.01) : inputBalance;
+    if (maxBalance <= 0) {
+      setInputAmount('');
+      return;
+    }
+    
+    if (swapInputMode === 'fiat') {
+      const price = inputToken?.price || 0;
+      const r = currRate || 1;
+      const fiatMax = maxBalance * price * r;
+      setInputAmount(fiatMax.toFixed(2));
+    } else {
+      setInputAmount(String(+maxBalance.toFixed(6)));
+    }
   }
 
   const handleSwap = useCallback(async () => {
@@ -423,10 +497,17 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
       const n = parseFloat(inputAmount);
       if (!n || n <= 0) throw new Error('Enter a valid amount to swap.');
 
+      let cryptoAmt = n;
+      if (swapInputMode === 'fiat') {
+        const price = inputToken?.price || 0;
+        if (price <= 0) throw new Error('Cannot swap: Price of input token is not available.');
+        cryptoAmt = (n / currRate) / price;
+      }
+
       // Fresh SOL balance check
       if (inputToken.symbol === 'SOL') {
         const freshLamports = await connection.getBalance(publicKey, 'confirmed');
-        if (n + 0.005 > freshLamports / 1e9) throw new Error(`Insufficient SOL (need ${n} + fees, have ${(freshLamports/1e9).toFixed(5)}).`);
+        if (cryptoAmt + 0.005 > freshLamports / 1e9) throw new Error(`Insufficient SOL (need ${cryptoAmt.toFixed(5)} + fees, have ${(freshLamports/1e9).toFixed(5)}).`);
       }
 
       const base64Tx = await buildSwapTransaction(quote, publicKey.toBase58());
@@ -563,11 +644,21 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
                 <span className="swp-field-lbl">From</span>
                 {connected && inputBalance != null && (
                   <span className="swp-bal-row">
-                    Bal: <strong>{inputBalance < 0.0001 ? inputBalance.toExponential(2) : inputBalance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</strong>
+                    Bal: <strong>{swapInputMode === 'fiat' && inputTokenPrice > 0
+                      ? fmtFiat(inputBalance * inputTokenPrice * currRate, currency)
+                      : (inputBalance < 0.0001 ? inputBalance.toExponential(2) : inputBalance.toLocaleString(undefined, { maximumFractionDigits: 4 }))} {swapInputMode === 'crypto' ? inputToken?.symbol : ''}</strong>
                     <button className="swp-max-btn" onClick={handleMax}>MAX</button>
                   </span>
                 )}
               </div>
+              
+              {swapInputMode === 'fiat' && (
+                <div style={{ marginBottom: '8px' }}>
+                  <CurrDrop selected={currency} onSelect={setCurrency} showAsRow={true}
+                    rateLabel={`1 USD = ${(currRate || 1).toLocaleString()} ${currency}`} />
+                </div>
+              )}
+
               <div className="swp-field-body">
                 <TokenPicker
                   selected={inputToken}
@@ -588,6 +679,16 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
                   onChange={e => { setInputAmount(e.target.value); setSwapError(null); setSwapSuccess(null); }}
                 />
               </div>
+
+              <div className="swp-divider" style={{ height: '1px', background: 'var(--border)', margin: '10px 0 8px 0', opacity: 0.3 }} />
+
+              <div className="swp-field-bottom" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="swp-converted-lbl" style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: 'var(--mono)' }}>{convertedLabel}</span>
+                <div className="input-mode-toggle">
+                  <button className={`imt-btn ${swapInputMode === 'fiat' ? 'active' : ''}`} type="button" onClick={() => toggleInputMode('fiat')}>{currency}</button>
+                  <button className={`imt-btn ${swapInputMode === 'crypto' ? 'active' : ''}`} disabled={!inputToken} type="button" onClick={() => toggleInputMode('crypto')}>{inputToken?.symbol || 'Token'}</button>
+                </div>
+              </div>
             </div>
 
             {/* Flip + Countdown row */}
@@ -607,6 +708,11 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
             <div className="swp-field-card">
               <div className="swp-field-top">
                 <span className="swp-field-lbl">To (estimated)</span>
+                {outputAmount != null && outputToken?.price > 0 && (
+                  <span style={{ fontSize: '11px', color: 'var(--text3)', fontFamily: 'var(--mono)' }}>
+                    ≈ {fmtFiat(outputAmount * outputToken.price * currRate, currency)}
+                  </span>
+                )}
               </div>
               <div className="swp-field-body">
                 <TokenPicker
