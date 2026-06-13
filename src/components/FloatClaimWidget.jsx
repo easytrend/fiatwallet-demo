@@ -347,7 +347,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           userAddress: publicKey.toBase58(),
           type: 'rent_claim',
           symbol: 'SOL',
-          usdValue: rentUSD
+          usdValue: netSOL
         });
       }
 
@@ -520,7 +520,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           userAddress: publicKey.toBase58(),
           type: 'cashback_claim',
           symbol: 'SOL',
-          usdValue: cashbackUSD
+          usdValue: netCashbackAmount
         });
       }
 
