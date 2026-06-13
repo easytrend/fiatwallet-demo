@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, SystemProgram, Connection, VersionedTransaction, TransactionMessage, TransactionInstruction } from '@solana/web3.js';
 import { createCloseAccountInstruction } from '@solana/spl-token';
+import { logTransaction } from '../services/supabase';
 
 const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
 const PUMP_AMM_PROGRAM_ID = new PublicKey("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
@@ -338,6 +339,18 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       );
 
       setRentClaimed(true);
+
+      // Log transaction to Supabase
+      if (signatures[0]) {
+        logTransaction({
+          signature: signatures[0],
+          userAddress: publicKey.toBase58(),
+          type: 'rent_claim',
+          symbol: 'SOL',
+          usdValue: rentUSD
+        });
+      }
+
       setEmptyAccounts([]);
       setToast({
         type: 'success',
@@ -499,6 +512,18 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       if (!confirmed) throw new Error('Transaction confirmation timed out.');
 
       setCashbackClaimed(true);
+
+      // Log transaction to Supabase
+      if (signature) {
+        logTransaction({
+          signature,
+          userAddress: publicKey.toBase58(),
+          type: 'cashback_claim',
+          symbol: 'SOL',
+          usdValue: cashbackUSD
+        });
+      }
+
       setToast({
         type: 'success',
         title: '✓ Cashback Claimed!',
