@@ -146,58 +146,99 @@ function verifyTransactionIntegrity(transaction, expectedTransfers, expectedSign
       programIdStr === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'     // Token-2022 Program
     ) {
       const ixType = ix.data[0];
-      // [FIX 2] Reject any Token opcode that is not TransferChecked (12).
-      // This explicitly blocks Approve (4), SetAuthority (6), MintTo (7), Burn (8), etc.
+
+      // Allowlist gate: only TransferChecked (opcode 12) is permitted.
+      // This explicitly blocks Approve (4), SetAuthority (6), MintTo (7), Burn (8),
+      // legacy Transfer (3), and any other opcode — none can reach the validation below.
       if (!ALLOWED_TOKEN_OPCODES.has(ixType)) {
         throw new Error(
           `Transaction integrity violation: Disallowed Token Program instruction opcode ${ixType}. ` +
-          `Only TransferChecked (opcode 12) is permitted.`
+          `Only TransferChecked (opcode 12) is permitted. ` +
+          `Legacy Transfer (3), Approve (4), SetAuthority (6), and all others are rejected.`
         );
       }
-      if (ixType === 12) { // TransferChecked
-        if (ix.data.length < 10) {
-          throw new Error('Transaction integrity violation: Invalid TransferChecked instruction data size.');
-        }
-        const mint = ix.keys[1].pubkey.toBase58();
-        const destinationATA = ix.keys[2].pubkey.toBase58();
 
-        let amount = 0n;
-        for (let idx = 0; idx < 8; idx++) {
-          amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
-        }
+      // ── TransferChecked (opcode 12) full validation ──────────────────────────
+      // Instruction layout (SPL Token spec):
+      //   data[0]      = opcode (12)
+      //   data[1..8]   = amount (u64 LE)
+      //   data[9]      = decimals (u8)
+      //   keys[0]      = source ATA        (writable)
+      //   keys[1]      = mint              (read-only)
+      //   keys[2]      = destination ATA   (writable)
+      //   keys[3]      = owner/authority   (signer)
+      // ─────────────────────────────────────────────────────────────────────────
 
-        const match = expectedTransfers.find(expected =>
-          expected.mint === mint &&
-          expected.amountBaseUnits === amount
-        );
-
-        if (!match) {
-          throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units for mint ${mint}.`);
-        }
-
-        const expectedATA = getAssociatedTokenAddressSync(
-          new PublicKey(mint),
-          new PublicKey(match.recipient),
-          false,
-          ix.programId
-        ).toBase58();
-
-        if (destinationATA !== expectedATA) {
-          throw new Error(`Transaction integrity violation: Token destination ATA mismatch. Expected ${expectedATA}, got ${destinationATA}.`);
-        }
-
-        transferCheckedCount++;
-      } else if (ixType === 3) { // Transfer (legacy) — REJECTED for security
-        // SECURITY: Legacy SPL Transfer (opcode 3) does NOT encode the mint in
-        // the instruction data. An attacker can substitute a worthless-token
-        // transfer of the same base-unit amount and bypass integrity checks.
-        // We reject all legacy Transfer instructions and require TransferChecked
-        // (opcode 12) exclusively, which includes the mint address and decimals.
+      // Step 1 — data size: need at least opcode(1) + amount(8) + decimals(1) = 10 bytes
+      if (ix.data.length < 10) {
         throw new Error(
-          'Transaction integrity violation: Legacy SPL Transfer instructions (opcode 3) ' +
-          'are not permitted. Only TransferChecked (opcode 12) is accepted.'
+          'Transaction integrity violation: TransferChecked instruction data is too short ' +
+          `(got ${ix.data.length} bytes, expected at least 10).`
         );
       }
+
+      // Step 2 — decode fields from instruction data and account keys
+      const mint           = ix.keys[1].pubkey.toBase58(); // keys[1] = mint
+      const destinationATA = ix.keys[2].pubkey.toBase58(); // keys[2] = destination ATA
+      const sourceATA      = ix.keys[0].pubkey.toBase58(); // keys[0] = source ATA
+      const ownerKey       = ix.keys[3]?.pubkey.toBase58(); // keys[3] = owner/authority
+
+      // Decode amount (u64, little-endian, bytes 1-8)
+      let amount = 0n;
+      for (let idx = 0; idx < 8; idx++) {
+        amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
+      }
+
+      // Decode decimals (u8, byte 9)
+      const decimals = ix.data[9];
+
+      // Step 3 — match against expectedTransfers (mint + amount must both match)
+      const match = expectedTransfers.find(expected =>
+        expected.mint === mint &&
+        expected.amountBaseUnits === amount
+      );
+
+      if (!match) {
+        throw new Error(
+          `Transaction integrity violation: No expected transfer matches ` +
+          `mint=${mint}, amount=${amount}. ` +
+          `Possible token substitution or amount tampering.`
+        );
+      }
+
+      // Step 4 — verify the destination ATA is derived from the expected recipient + mint
+      const expectedATA = getAssociatedTokenAddressSync(
+        new PublicKey(mint),
+        new PublicKey(match.recipient),
+        false,
+        ix.programId
+      ).toBase58();
+
+      if (destinationATA !== expectedATA) {
+        throw new Error(
+          `Transaction integrity violation: Token destination ATA mismatch. ` +
+          `Expected ${expectedATA} (for recipient ${match.recipient}), ` +
+          `got ${destinationATA}.`
+        );
+      }
+
+      // Step 5 — verify the owner/signer is the connected wallet (prevents authority hijacking)
+      if (ownerKey && ownerKey !== expectedSignerPublicKey.toBase58()) {
+        throw new Error(
+          `Transaction integrity violation: TransferChecked owner/authority mismatch. ` +
+          `Expected ${expectedSignerPublicKey.toBase58()}, got ${ownerKey}.`
+        );
+      }
+
+      // Step 6 — sanity-check amount is non-zero (zero-value transfers serve no legitimate purpose)
+      if (amount === 0n) {
+        throw new Error(
+          'Transaction integrity violation: TransferChecked instruction has zero amount.'
+        );
+      }
+
+      // All checks passed — count this as a verified transfer
+      transferCheckedCount++;
     }
   }
 
