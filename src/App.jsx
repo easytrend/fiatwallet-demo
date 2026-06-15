@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { PublicKey, Transaction, SystemProgram, Connection, Keypair, SystemInstruction } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, Connection, Keypair, SystemInstruction, TransactionInstruction } from '@solana/web3.js';
 import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
@@ -122,37 +122,16 @@ function verifyTransactionIntegrity(transaction, expectedTransfers) {
         }
 
         transferCheckedCount++;
-      } else if (ixType === 3) { // Transfer (legacy)
-        if (ix.data.length < 9) {
-          throw new Error('Transaction integrity violation: Invalid Transfer instruction data size.');
-        }
-        const destinationATA = ix.keys[1].pubkey.toBase58();
-
-        let amount = 0n;
-        for (let idx = 0; idx < 8; idx++) {
-          amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
-        }
-
-        const match = expectedTransfers.find(expected =>
-          expected.amountBaseUnits === amount
+      } else if (ixType === 3) { // Transfer (legacy) — REJECTED for security
+        // SECURITY: Legacy SPL Transfer (opcode 3) does NOT encode the mint in
+        // the instruction data. An attacker can substitute a worthless-token
+        // transfer of the same base-unit amount and bypass integrity checks.
+        // We reject all legacy Transfer instructions and require TransferChecked
+        // (opcode 12) exclusively, which includes the mint address and decimals.
+        throw new Error(
+          'Transaction integrity violation: Legacy SPL Transfer instructions (opcode 3) ' +
+          'are not permitted. Only TransferChecked (opcode 12) is accepted.'
         );
-
-        if (!match) {
-          throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units.`);
-        }
-
-        const expectedATA = getAssociatedTokenAddressSync(
-          new PublicKey(match.mint),
-          new PublicKey(match.recipient),
-          false,
-          ix.programId
-        ).toBase58();
-
-        if (destinationATA !== expectedATA) {
-          throw new Error(`Transaction integrity violation: Token destination ATA mismatch. Expected ${expectedATA}, got ${destinationATA}.`);
-        }
-
-        transferCheckedCount++;
       }
     }
   }
@@ -682,8 +661,18 @@ export default function App() {
         );
       }
 
+      // Add custom on-chain memo instruction
+      const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+      transaction.add(
+        new TransactionInstruction({
+          keys: [],
+          programId: MEMO_PROGRAM_ID,
+          data: new TextEncoder().encode(`fiatwallet:send:${tokLive.symbol}:${tokAmt}`)
+        })
+      );
+
       // [AUDIT] Instruction injection guard — reject transaction if it has more instructions
-      const expectedMaxInstructions = tokLive.symbol === 'SOL' ? 1 : 2;
+      const expectedMaxInstructions = tokLive.symbol === 'SOL' ? 2 : 3;
       if (transaction.instructions.length > expectedMaxInstructions) {
         throw new Error(`Transaction has unexpected instructions (${transaction.instructions.length}). Refusing to sign.`);
       }
