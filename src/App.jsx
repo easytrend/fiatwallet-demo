@@ -47,16 +47,50 @@ function isTrustedImageOrigin(url) {
   } catch { return false; }
 }
 
+// [SECURITY] Strict allowlist of program IDs permitted in any transaction.
+// Any instruction whose programId is not in this set will cause an immediate rejection.
+const ALLOWED_PROGRAM_IDS = new Set([
+  SystemProgram.programId.toBase58(),                        // System Program
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',           // SPL Token Program
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',           // Token-2022 Program
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',          // Associated Token Program
+]);
+
+// [SECURITY] Permitted opcodes for SPL Token / Token-2022 programs.
+// Only TransferChecked (12) is allowed — all others (Approve=4, SetAuthority=6, etc.) are rejected.
+const ALLOWED_TOKEN_OPCODES = new Set([12]); // TransferChecked only
+
+// [SECURITY] Permitted opcodes for the Associated Token Program.
+// Only CreateIdempotent (1) is allowed for ATA creation.
+const ALLOWED_ATA_OPCODES = new Set([1]); // CreateAssociatedTokenAccountIdempotent only
+
 /**
  * Verifies that the built transaction has not been tampered with before signing/sending.
- * Asserts recipient addresses and transfer amounts match expected values.
+ * Asserts:
+ *   1. feePayer matches the connected wallet (prevents fee-payer hijacking).
+ *   2. Every instruction belongs to a strict program allowlist (prevents hidden Approve/SetAuthority injection).
+ *   3. Token program instructions use only TransferChecked (opcode 12).
+ *   4. Recipient addresses and transfer amounts match expected values.
  *
  * @param {Transaction} transaction - Solana Transaction object
  * @param {Array<{ recipient: string, amountBaseUnits: bigint, mint?: string }>} expectedTransfers - List of expected transfers
+ * @param {PublicKey} expectedSignerPublicKey - The connected wallet's public key
  */
-function verifyTransactionIntegrity(transaction, expectedTransfers) {
+function verifyTransactionIntegrity(transaction, expectedTransfers, expectedSignerPublicKey) {
   if (!transaction.instructions || transaction.instructions.length === 0) {
     throw new Error('Transaction integrity violation: Transaction contains no instructions.');
+  }
+
+  // [FIX 1] Assert the fee payer is the connected wallet.
+  // A malicious intermediary could set an arbitrary fee payer to front-run or drain the wallet.
+  if (!transaction.feePayer) {
+    throw new Error('Transaction integrity violation: Transaction has no fee payer set.');
+  }
+  if (!transaction.feePayer.equals(expectedSignerPublicKey)) {
+    throw new Error(
+      `Transaction integrity violation: Fee payer mismatch. ` +
+      `Expected ${expectedSignerPublicKey.toBase58()}, got ${transaction.feePayer.toBase58()}.`
+    );
   }
 
   let transferCheckedCount = 0;
@@ -64,6 +98,16 @@ function verifyTransactionIntegrity(transaction, expectedTransfers) {
 
   for (const ix of transaction.instructions) {
     const programIdStr = ix.programId.toBase58();
+
+    // [FIX 2] Reject any instruction from a program not in the strict allowlist.
+    // This closes the silent-ignore hole where Approve (opcode 4), SetAuthority (opcode 6),
+    // or arbitrary CPI calls to unknown programs would pass through without raising an error.
+    if (!ALLOWED_PROGRAM_IDS.has(programIdStr)) {
+      throw new Error(
+        `Transaction integrity violation: Instruction from disallowed program ${programIdStr}. ` +
+        `Only System Program, Token Program, Token-2022, and Associated Token Program are permitted.`
+      );
+    }
 
     if (ix.programId.equals(SystemProgram.programId)) {
       try {
@@ -85,10 +129,31 @@ function verifyTransactionIntegrity(transaction, expectedTransfers) {
         throw new Error(`Transaction integrity violation: Failed to validate System Program instruction: ${err.message}`);
       }
     } else if (
+      programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs' // Associated Token Program
+    ) {
+      // [FIX 2] Only CreateAssociatedTokenAccountIdempotent (opcode 1) is permitted.
+      // Any other ATA instruction (e.g. undocumented opcodes) is rejected.
+      const ixType = ix.data[0];
+      if (!ALLOWED_ATA_OPCODES.has(ixType)) {
+        throw new Error(
+          `Transaction integrity violation: Disallowed Associated Token Program instruction opcode ${ixType}. ` +
+          `Only CreateAssociatedTokenAccountIdempotent (opcode 1) is permitted.`
+        );
+      }
+      // CreateIdempotent is safe to allow through — it only creates ATAs, never moves funds.
+    } else if (
       programIdStr === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' || // Token Program
       programIdStr === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'     // Token-2022 Program
     ) {
       const ixType = ix.data[0];
+      // [FIX 2] Reject any Token opcode that is not TransferChecked (12).
+      // This explicitly blocks Approve (4), SetAuthority (6), MintTo (7), Burn (8), etc.
+      if (!ALLOWED_TOKEN_OPCODES.has(ixType)) {
+        throw new Error(
+          `Transaction integrity violation: Disallowed Token Program instruction opcode ${ixType}. ` +
+          `Only TransferChecked (opcode 12) is permitted.`
+        );
+      }
       if (ixType === 12) { // TransferChecked
         if (ix.data.length < 10) {
           throw new Error('Transaction integrity violation: Invalid TransferChecked instruction data size.');
@@ -720,7 +785,7 @@ export default function App() {
         amountBaseUnits: tokLive.symbol === 'SOL' ? solTransferLamports : amountUnits,
         mint: tokLive.symbol === 'SOL' ? null : tokLive.mint
       }];
-      verifyTransactionIntegrity(transaction, expectedTransfers);
+      verifyTransactionIntegrity(transaction, expectedTransfers, publicKey);
 
       // Pre-flight simulation immediately before sendTransaction
       const simResult = await connection.simulateTransaction(transaction);
