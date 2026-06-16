@@ -54,6 +54,10 @@ const ALLOWED_PROGRAM_IDS = new Set([
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',           // SPL Token Program
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',           // Token-2022 Program
   'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',          // Associated Token Program
+  // [BUG FIX] Memo program was missing — caused verifyTransactionIntegrity to throw on
+  // every transaction because handleSend() appends a Memo instruction before calling verify.
+  // Memo carries no account keys and moves no funds, so it is safe to allowlist.
+  'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',           // SPL Memo Program
 ]);
 
 // [SECURITY] Permitted opcodes for SPL Token / Token-2022 programs.
@@ -128,6 +132,12 @@ function verifyTransactionIntegrity(transaction, expectedTransfers, expectedSign
       } catch (err) {
         throw new Error(`Transaction integrity violation: Failed to validate System Program instruction: ${err.message}`);
       }
+    } else if (
+      programIdStr === 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr' // SPL Memo Program
+    ) {
+      // [BUG FIX] Memo instructions carry no account keys and move no funds.
+      // They are safe to allow through without further validation.
+      // Do NOT increment transferCheckedCount or systemTransferCount — memo is not a transfer.
     } else if (
       programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs' // Associated Token Program
     ) {
