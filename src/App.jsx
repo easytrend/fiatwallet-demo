@@ -361,7 +361,7 @@ export default function App() {
     return live || staticPrice;
   }
 
-  const liveSolPrice = liveRates.crypto['SOL'] || 148.5;
+  const liveSolPrice = liveRates.crypto['SOL'] || 72.70;
 
   // Build wallet token list — SOL + real SPL tokens from chain
   const walletTokenList = useMemo(() => {

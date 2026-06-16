@@ -1,5 +1,5 @@
 export const TOKENS = [
-  { symbol:"SOL",   name:"Solana",         color:"#9945FF", bg:"#2d1a4e", price:148.5 },
+  { symbol:"SOL",   name:"Solana",         color:"#9945FF", bg:"#2d1a4e", price:72.70 },
   { symbol:"USDC",  name:"USD Coin",        color:"#2775CA", bg:"#1a2a3e", price:1.0 },
   { symbol:"USDT",  name:"Tether",          color:"#26a17b", bg:"#1a3030", price:1.0 },
   { symbol:"BONK",  name:"Bonk",            color:"#f5922f", bg:"#3e2a1a", price:0.0000185 },

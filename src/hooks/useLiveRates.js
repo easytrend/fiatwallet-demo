@@ -34,6 +34,21 @@ async function fetchLiveRates() {
     console.log("✅ Crypto prices loaded | SOL=$" + result.crypto.SOL);
   } catch(e) { console.warn("CoinGecko failed:", e.message); }
 
+  // Fallback to Coinbase for SOL price if CoinGecko fails or doesn't return SOL
+  if (!result.crypto.SOL) {
+    try {
+      const r = await fetch("https://api.coinbase.com/v2/prices/SOL-USD/spot");
+      const j = await r.json();
+      const solPrice = parseFloat(j?.data?.amount);
+      if (solPrice > 0) {
+        result.crypto.SOL = solPrice;
+        console.log("✅ Crypto prices loaded (Coinbase fallback) | SOL=$" + solPrice);
+      }
+    } catch (e) {
+      console.warn("Coinbase price fallback failed:", e.message);
+    }
+  }
+
   result.updatedAt = new Date().toLocaleTimeString();
   return result;
 }
