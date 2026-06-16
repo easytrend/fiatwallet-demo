@@ -53,7 +53,7 @@ export function dlTemplate() {
   a.click();
 }
 
-// [AUDIT FIX HIGH] Removed hardcoded Helius API key — credential leak.
+// Removed hardcoded Helius API key — credential leak.
 // Only free, keyless public endpoints remain.
 export const RPC_LIST = [
   "https://api.mainnet-beta.solana.com",
@@ -73,17 +73,17 @@ export async function rpcFetch(method, params) {
       if (!r.ok) throw new Error("HTTP " + r.status + " from " + url);
       const j = await r.json();
       if (j.error) throw new Error((j.error.message || JSON.stringify(j.error)) + " [" + url + "]");
-      console.log("✅ RPC success via", url);
+      
       return j.result;
     } catch(e) {
-      console.warn("❌ RPC failed (" + url + "):", e.message);
+      
       errors.push(url.split("/")[2] + ": " + e.message);
     }
   }
   throw new Error("All RPC nodes failed:\n" + errors.join("\n"));
 }
 
-// [AUDIT FIX CRITICAL] robustResolve accepts an optional wallet-adapter `connection` and tries it
+// robustResolve accepts an optional wallet-adapter `connection` and tries it
 // first before falling back to the internal RPC list. This keeps domain resolution inside the
 // trusted wallet context when called from the send UI, and only falls back to public nodes when
 // the connection object is unavailable (e.g. during bulk import preview).
@@ -103,7 +103,7 @@ export async function robustResolve(domain, walletConnection) {
       ]);
       if (addr) return addr;
     } catch (e) {
-      console.warn(`Resolve failed on wallet-adapter connection:`, e.message);
+      
     }
   }
 
@@ -117,7 +117,7 @@ export async function robustResolve(domain, walletConnection) {
       ]);
       if (addr) return addr;
     } catch (e) {
-      console.warn(`Resolve failed on ${rpcUrl}:`, e.message);
+      
     }
   }
   throw new Error(`Failed to resolve domain: ${domain}`);
@@ -131,7 +131,7 @@ export async function robustReverseLookup(connection, publicKeyObj) {
     const reverse = await performReverseLookup(connection, publicKeyObj).catch(() => null);
     if (reverse) return reverse + '.sol';
   } catch (e) {
-    console.warn("Reverse lookup failed on primary connection:", e.message);
+    
   }
 
   // Fallback to other RPCs if primary fails
@@ -148,7 +148,7 @@ export async function robustReverseLookup(connection, publicKeyObj) {
       const reverse = await performReverseLookup(conn, publicKeyObj).catch(() => null);
       if (reverse) return reverse + '.sol';
     } catch (e) {
-      console.warn(`Reverse lookup failed on ${rpcUrl}:`, e.message);
+      
     }
   }
   return null;

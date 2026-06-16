@@ -18,15 +18,15 @@ import FloatClaimWidget from './components/FloatClaimWidget';
 import SwapWidget from './components/SwapWidget';
 import { logTransaction } from './services/supabase';
 
-// [AUDIT FIX HIGH] SNS_LINK must not embed referral/tracking parameters.
-// [AUDIT FIX HIGH] TOKEN_PROGRAM_ID declared as a module-level frozen constant — never re-instantiated inside a component body.
+// SNS_LINK must not embed referral/tracking parameters.
+// TOKEN_PROGRAM_ID declared as a module-level frozen constant — never re-instantiated inside a component body.
 const SNS_LINK = 'https://www.sns.id';
 const TOKEN_PROGRAM_ID = Object.freeze(new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'));
 const TOKEN_2022_PROGRAM_ID = Object.freeze(new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'));
 // Rate staleness threshold — warn user if rates are older than 5 minutes
 const RATE_STALENESS_MS = 5 * 60 * 1000;
 
-// [AUDIT FIX LOW] Enforce https-only and restrict image sources to trusted CDN domains.
+// Enforce https-only and restrict image sources to trusted CDN domains.
 // Prevents malicious SVG injection, tracking pixels, and data exfiltration from untrusted origins.
 const TRUSTED_IMAGE_HOSTS = [
   'raw.githubusercontent.com',
@@ -47,24 +47,24 @@ function isTrustedImageOrigin(url) {
   } catch { return false; }
 }
 
-// [SECURITY] Strict allowlist of program IDs permitted in any transaction.
+// Strict allowlist of program IDs permitted in any transaction.
 // Any instruction whose programId is not in this set will cause an immediate rejection.
 const ALLOWED_PROGRAM_IDS = new Set([
   SystemProgram.programId.toBase58(),                        // System Program
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',           // SPL Token Program
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',           // Token-2022 Program
   'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',          // Associated Token Program
-  // [BUG FIX] Memo program was missing — caused verifyTransactionIntegrity to throw on
+  // Memo program was missing — caused verifyTransactionIntegrity to throw on
   // every transaction because handleSend() appends a Memo instruction before calling verify.
   // Memo carries no account keys and moves no funds, so it is safe to allowlist.
   'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',           // SPL Memo Program
 ]);
 
-// [SECURITY] Permitted opcodes for SPL Token / Token-2022 programs.
+// Permitted opcodes for SPL Token / Token-2022 programs.
 // Only TransferChecked (12) is allowed — all others (Approve=4, SetAuthority=6, etc.) are rejected.
 const ALLOWED_TOKEN_OPCODES = new Set([12]); // TransferChecked only
 
-// [SECURITY] Permitted opcodes for the Associated Token Program.
+// Permitted opcodes for the Associated Token Program.
 // Only CreateIdempotent (1) is allowed for ATA creation.
 const ALLOWED_ATA_OPCODES = new Set([1]); // CreateAssociatedTokenAccountIdempotent only
 
@@ -85,7 +85,7 @@ function verifyTransactionIntegrity(transaction, expectedTransfers, expectedSign
     throw new Error('Transaction integrity violation: Transaction contains no instructions.');
   }
 
-  // [FIX 1] Assert the fee payer is the connected wallet.
+  // Assert the fee payer is the connected wallet.
   // A malicious intermediary could set an arbitrary fee payer to front-run or drain the wallet.
   if (!transaction.feePayer) {
     throw new Error('Transaction integrity violation: Transaction has no fee payer set.');
@@ -103,7 +103,7 @@ function verifyTransactionIntegrity(transaction, expectedTransfers, expectedSign
   for (const ix of transaction.instructions) {
     const programIdStr = ix.programId.toBase58();
 
-    // [FIX 2] Reject any instruction from a program not in the strict allowlist.
+    // Reject any instruction from a program not in the strict allowlist.
     // This closes the silent-ignore hole where Approve (opcode 4), SetAuthority (opcode 6),
     // or arbitrary CPI calls to unknown programs would pass through without raising an error.
     if (!ALLOWED_PROGRAM_IDS.has(programIdStr)) {
@@ -135,13 +135,13 @@ function verifyTransactionIntegrity(transaction, expectedTransfers, expectedSign
     } else if (
       programIdStr === 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr' // SPL Memo Program
     ) {
-      // [BUG FIX] Memo instructions carry no account keys and move no funds.
+      // Memo instructions carry no account keys and move no funds.
       // They are safe to allow through without further validation.
       // Do NOT increment transferCheckedCount or systemTransferCount — memo is not a transfer.
     } else if (
       programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs' // Associated Token Program
     ) {
-      // [FIX 2] Only CreateAssociatedTokenAccountIdempotent (opcode 1) is permitted.
+      // Only CreateAssociatedTokenAccountIdempotent (opcode 1) is permitted.
       // Any other ATA instruction (e.g. undocumented opcodes) is rejected.
       const ixType = ix.data[0];
       if (!ALLOWED_ATA_OPCODES.has(ixType)) {
@@ -268,7 +268,7 @@ export default function App() {
   const [inputMode, setInputMode] = useState('fiat'); // fiat or crypto
   const [bulkMode, setBulkMode] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  // [AUDIT FIX MEDIUM] walletPubkey string state removed — use `publicKey` from useWallet() directly to
+  // walletPubkey string state removed — use `publicKey` from useWallet() directly to
   // avoid exposing a redundant plaintext string that malicious extensions can enumerate via React fiber.
   const [walletDomain, setWalletDomain] = useState(null);
   const [walletLoading, setWalletLoading] = useState(false);
@@ -296,11 +296,11 @@ export default function App() {
     if (liveRates.updatedAt) setRatesTimestamp(Date.now());
   }, [liveRates.updatedAt]);
 
-  // [AUDIT FIX MEDIUM] Detect stale rates — warn user if rates are older than RATE_STALENESS_MS
+  // Detect stale rates — warn user if rates are older than RATE_STALENESS_MS
   const ratesAreStale = ratesTimestamp != null && (Date.now() - ratesTimestamp) > RATE_STALENESS_MS;
 
-  // [AUDIT FIX CRITICAL] Resolve .sol domains with on-chain ownership re-verification via NameRegistryState.
-  // [AUDIT FIX HIGH] Raw addresses now validated with new PublicKey() + isOnCurve() — garbage strings rejected.
+  // Resolve .sol domains with on-chain ownership re-verification via NameRegistryState.
+  // Raw addresses now validated with new PublicKey() + isOnCurve() — garbage strings rejected.
   useEffect(() => {
     let cancelled = false;
     async function checkDomain() {
@@ -325,7 +325,7 @@ export default function App() {
             }
           } catch (verifyErr) {
             // Registry verification unavailable — still proceed but note it
-            console.warn('SNS ownership re-verification failed:', verifyErr.message);
+            
           }
           if (!cancelled) setResolvedAddress(address.toBase58());
         } catch (err) {
@@ -333,7 +333,7 @@ export default function App() {
         }
         if (!cancelled) setResolving(false);
       } else if (recipient.length >= 32) {
-        // [AUDIT FIX HIGH] Validate raw public key with try/catch + isOnCurve to reject garbage strings
+        // Validate raw public key with try/catch + isOnCurve to reject garbage strings
         try {
           const pk = new PublicKey(recipient);
           if (!PublicKey.isOnCurve(pk.toBytes())) {
@@ -414,7 +414,7 @@ export default function App() {
   const dispTok = fmtTok(tokAmt);
   const tokLive = tok ? { ...tok, price: tokPrice } : null;
 
-  // [AUDIT FIX HIGH] Check if receiver already has the ATA for the selected SPL token.
+  // Check if receiver already has the ATA for the selected SPL token.
   // AbortController cancellation flag prevents stale in-flight responses from writing back
   // after the recipient/token has already changed (race condition fix).
   useEffect(() => {
@@ -429,7 +429,7 @@ export default function App() {
       try {
         const recipientPubkey = new PublicKey(addrStr);
         const mintPubkey = new PublicKey(tokLive.mint);
-        // [AUDIT FIX MEDIUM] Detect Token-2022 mints by checking the mint account owner
+        // Detect Token-2022 mints by checking the mint account owner
         // to compute the correct ATA. Token-2022 ATAs differ from legacy Token ATAs.
         let tokenProgramId = TOKEN_PROGRAM_ID;
         try {
@@ -449,7 +449,7 @@ export default function App() {
         const { value: { err } } = await connection.simulateTransaction(testTransaction, [publicKey]);
         if (!cancelled) setRentFeeInfo(err ? 'network' : 'rent');
       } catch (e) {
-        console.warn('ATA check failed:', e);
+        
         if (!cancelled) setRentFeeInfo(null);
       }
     }
@@ -467,7 +467,7 @@ export default function App() {
       const lamports = await connection.getBalance(publicKey, 'confirmed');
       setSolBalance(lamports / 1e9);
 
-      // [AUDIT FIX CRITICAL] Use ONLY the wallet-adapter connection for ALL token fetches.
+      // Use ONLY the wallet-adapter connection for ALL token fetches.
       // Hardcoded fallback RPC arrays removed — they bypass wallet security, expose public keys
       // to unauthenticated third-party endpoints, and can return falsified balances.
       let results = [];
@@ -477,7 +477,7 @@ export default function App() {
           connection.getParsedTokenAccountsByOwner(publicKey, { programId: TOKEN_2022_PROGRAM_ID }).catch(() => ({ value: [] })),
         ]);
         results = [...(resp1.value || []), ...(resp2.value || [])];
-        console.log(`✅ Token accounts fetched via wallet-adapter connection`);
+        
       } catch (primaryErr) {
         console.warn(`❌ Token fetch failed on wallet-adapter connection:`, primaryErr.message);
         // Do not fall back to hardcoded RPCs — surface the error to the user instead.
@@ -513,7 +513,7 @@ export default function App() {
             }
           }
         } catch (e) {
-          console.warn('Jupiter fetch failed:', e);
+          
         }
       }
 
@@ -524,7 +524,7 @@ export default function App() {
         const staticMeta = KNOWN_MINTS[mint] || {};
         const jupMeta = jupTokensMap[mint] || {};
 
-        // [AUDIT FIX LOW] Sanitize token logo URIs through isTrustedImageOrigin
+        // Sanitize token logo URIs through isTrustedImageOrigin
         const candidateLogoURI = jupMeta.logoURI || staticMeta.logoURI || `https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/${mint}/logo.png`;
 
         return {
@@ -590,7 +590,7 @@ export default function App() {
             localStorage.setItem(`sns_${pubkeyStr}`, winner);
           }
         } catch (e) {
-          console.warn('Domain lookup failed:', e);
+          
         }
       };
       lookupDomain();
@@ -636,18 +636,18 @@ export default function App() {
         }
       }
 
-      // [AUDIT FIX HIGH] Validate the resolved/raw recipient with PublicKey + isOnCurve.
+      // Validate the resolved/raw recipient with PublicKey + isOnCurve.
       // Rejects program/off-curve addresses from receiving directly.
       if (!PublicKey.isOnCurve(finalRecipient.toBytes())) {
         throw new Error('Recipient address is not a valid Ed25519 public key (program/off-curve addresses cannot receive funds directly)');
       }
 
-      // [AUDIT FIX] Guard against self-sends — sending to your own address is almost always a user error.
+      // Guard against self-sends — sending to your own address is almost always a user error.
       if (finalRecipient.equals(publicKey)) {
         throw new Error('Cannot send to your own wallet address.');
       }
 
-      // [AUDIT FIX] Validate transfer amount is a positive finite number before any arithmetic.
+      // Validate transfer amount is a positive finite number before any arithmetic.
       if (!Number.isFinite(tokAmt) || tokAmt <= 0) {
         throw new Error('Invalid transfer amount. Please enter a positive number.');
       }
@@ -697,7 +697,7 @@ export default function App() {
             const feeResponse = await probeTx.getEstimatedFee(connection);
             if (feeResponse !== null && feeResponse !== undefined) fee = BigInt(feeResponse);
           } catch (e) {
-            console.warn('Failed to estimate transaction fee:', e);
+            
           }
 
           estimatedFee = fee;
@@ -720,7 +720,7 @@ export default function App() {
         // ── SPL Token transfer ──
         const mintPubkey = new PublicKey(tokLive.mint);
 
-        // [AUDIT FIX MEDIUM] Detect Token-2022 mints to pass correct programId to ATA functions
+        // Detect Token-2022 mints to pass correct programId to ATA functions
         let tokenProgramId = TOKEN_PROGRAM_ID;
         try {
           const mintAcct = await connection.getAccountInfo(mintPubkey);
@@ -745,7 +745,7 @@ export default function App() {
         if (!mintInfo.value) throw new Error('Invalid token mint');
         const decimals = mintInfo.value.data.parsed.info.decimals;
 
-        // [AUDIT FIX MEDIUM] Use safe BigInt integer math to avoid floating-point rounding errors
+        // Use safe BigInt integer math to avoid floating-point rounding errors
         const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
         if (amountUnits <= 0n) {
           throw new Error('Transfer amount must be greater than zero token units.');
@@ -787,13 +787,13 @@ export default function App() {
         })
       );
 
-      // [AUDIT] Instruction injection guard — reject transaction if it has more instructions
+      // Instruction injection guard — reject transaction if it has more instructions
       const expectedMaxInstructions = tokLive.symbol === 'SOL' ? 2 : 3;
       if (transaction.instructions.length > expectedMaxInstructions) {
         throw new Error(`Transaction has unexpected instructions (${transaction.instructions.length}). Refusing to sign.`);
       }
 
-      // [AUDIT] Verify feePayer and recentBlockhash are explicitly set before signing.
+      // Verify feePayer and recentBlockhash are explicitly set before signing.
       if (!transaction.feePayer || !transaction.recentBlockhash) {
         throw new Error('INTERNAL: Transaction is missing feePayer or recentBlockhash. Refusing to sign.');
       }
@@ -848,7 +848,7 @@ export default function App() {
 
       // All checks passed — submit to wallet for signing and broadcast.
       const signature = await sendTransaction(transaction, connection);
-      console.log('Transaction sent:', signature);
+      
 
       // Poll for confirmation instead of relying on the WS subscription.
       // This prevents false "failed" messages when the RPC drops the WS but
@@ -910,7 +910,7 @@ export default function App() {
       }
 
     } catch (err) {
-      console.error('Send failed:', err);
+      
       setWalletError(err.message || 'Transaction failed');
     }
     setSending(false);
@@ -1013,7 +1013,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* [AUDIT FIX MEDIUM] Display staleness warning when live rates exceed threshold */}
+            {/* Display staleness warning when live rates exceed threshold */}
             {ratesAreStale && (
               <div style={{fontSize:11,color:'#f87171',padding:'6px 10px',background:'rgba(248,113,113,0.12)',borderRadius:8,marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
                 ⚠️ Rate data may be stale — send button disabled until rates refresh.

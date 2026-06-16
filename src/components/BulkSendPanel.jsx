@@ -8,10 +8,10 @@ import CurrDrop from './CurrDrop';
 import Toast from './Toast';
 import { logTransaction } from '../services/supabase';
 
-// [AUDIT FIX HIGH] Frozen constants prevent re-instantiation per render
+// Frozen constants prevent re-instantiation per render
 const TOKEN_PROGRAM_ID = Object.freeze(new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'));
 const TOKEN_2022_PROGRAM_ID = Object.freeze(new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'));
-// [AUDIT FIX HIGH] Hard cap on bulk batches to prevent unbounded transaction injection
+// Hard cap on bulk batches to prevent unbounded transaction injection
 const MAX_BULK_BATCHES = 10; // 10 batches × 5 recipients = 50 max per bulk send
 
 /**
@@ -256,22 +256,22 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           try {
             const address = await robustResolve(addressStr, connection);
             addressStr = address.toBase58();
-            // [AUDIT FIX MEDIUM] Secondary on-chain ownership verification for bulk .sol domains
+            // Secondary on-chain ownership verification for bulk .sol domains
             try {
               const { pubkey: domainKey } = getDomainKeySync(addressStr.slice(0, -4)); // strip .sol before lookup
               const registry = await NameRegistryState.retrieve(connection, domainKey);
               if (registry.owner.toBase58() !== addressStr) {
-                console.warn(`SNS ownership mismatch for ${row.domain}, proceeding with resolved address`);
+                
               }
             } catch (verifyErr) {
-              console.warn('SNS ownership verification unavailable for', row.domain);
+              
             }
           } catch (err) {
             throw new Error(`Failed to resolve domain: ${row.domain}`);
           }
         }
 
-        // [AUDIT FIX HIGH] Validate base58 parse + on-curve check — rejects program addresses
+        // Validate base58 parse + on-curve check — rejects program addresses
         // and garbage strings before any on-chain instructions are built.
         let recipientPubkey;
         try {
@@ -285,7 +285,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
         const pubkeyStr = recipientPubkey.toBase58();
 
-        // [AUDIT FIX] Self-send guard for bulk send
+        // Self-send guard for bulk send
         if (recipientPubkey.equals(publicKey)) {
           throw new Error(`Cannot send to your own wallet address: "${row.domain}" resolves to your connected wallet.`);
         }
@@ -311,7 +311,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
         if (!mintInfo.value) throw new Error('Invalid token mint');
         decimals = mintInfo.value.data.parsed.info.decimals;
-        // [AUDIT FIX MEDIUM] Detect Token-2022 mints to compute correct ATAs
+        // Detect Token-2022 mints to compute correct ATAs
         try {
           const mintAcct = await connection.getAccountInfo(mintPubkey);
           if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
@@ -352,7 +352,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
               const est = await tx.getEstimatedFee(connection);
               if (est !== null && est !== undefined) txFee = est;
             } catch (e) {
-              console.warn("Failed to estimate bulk tx chunk fee:", e);
+              
             }
             totalEstimatedFee += txFee;
           }
@@ -388,7 +388,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           try {
             accountsInfo = await connection.getMultipleAccountsInfo(receiverATAs);
           } catch (e) {
-            console.warn('Failed to fetch receiver ATA info:', e);
+            
             accountsInfo = new Array(receiverATAs.length).fill(null);
           }
         }
@@ -450,7 +450,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         transactions.push(tx);
       }
 
-      // [AUDIT FIX HIGH] Enforce max batch cap to prevent unbounded transaction injection
+      // Enforce max batch cap to prevent unbounded transaction injection
       if (transactions.length > MAX_BULK_BATCHES) {
         throw new Error(`Too many batches (${transactions.length}). Maximum is ${MAX_BULK_BATCHES} batches (${MAX_BULK_BATCHES * 5} recipients). Split into multiple sends.`);
       }
@@ -551,7 +551,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       }, 2000);
 
     } catch (err) {
-      console.error(err);
+      
       const msg = err.message || 'An error occurred';
       setErrorMsg(msg);
       setSendingState('error');

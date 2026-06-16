@@ -4,7 +4,7 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn("Supabase credentials missing in environment variables. Analytics logging disabled.");
+  
 }
 
 export const supabase = (supabaseUrl && supabaseAnonKey) 
@@ -22,7 +22,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
  */
 export async function logTransaction({ signature, userAddress, type, symbol, usdValue }) {
   if (!supabase) {
-    console.warn("Supabase client not initialized. Skipping transaction log.");
+    
     return;
   }
 
@@ -40,11 +40,11 @@ export async function logTransaction({ signature, userAddress, type, symbol, usd
       ]);
 
     if (error) {
-      console.error("Supabase logTransaction error:", error.message);
+      
     } else {
-      console.log(`Successfully logged transaction (${type}) to Supabase:`, signature);
+      
     }
   } catch (err) {
-    console.error("Failed to execute logTransaction:", err);
+    
   }
 }

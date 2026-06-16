@@ -72,7 +72,7 @@ async function fetchTokenMetadata(mintAddress, connection) {
       }
     }
   } catch (e) {
-    console.warn("CoinGecko lookup failed:", e);
+    
   }
 
   // 2. Try DEX Screener
@@ -96,7 +96,7 @@ async function fetchTokenMetadata(mintAddress, connection) {
       }
     }
   } catch (e) {
-    console.warn("DEX Screener lookup failed:", e);
+    
   }
 
   // 3. Get Decimals from on-chain RPC (especially if DEX Screener succeeded but lacks decimals, or if both failed)
@@ -110,7 +110,7 @@ async function fetchTokenMetadata(mintAddress, connection) {
         if (!dexMetadata) return null; // If not a valid mint account, fail early
       }
     } catch (e) {
-      console.warn("On-chain decimals lookup failed:", e);
+      
       if (!dexMetadata) return null;
     }
   }
@@ -200,7 +200,7 @@ function TokenPicker({ selected, options, onChange, excludeMint, id, onAddCustom
           setResolvedToken(token);
         }
       } catch (err) {
-        console.error("Token metadata lookup failed:", err);
+        
       } finally {
         if (active) setLoadingMetadata(false);
       }
@@ -475,7 +475,7 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
       setInputAmount('');
       if (onSwapSuccess) onSwapSuccess();
     } catch (err) {
-      console.error('Swap failed:', err);
+      
       setSwapError(err.message || 'Swap failed.');
     }
     setSwapping(false);

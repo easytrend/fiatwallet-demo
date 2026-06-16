@@ -19,9 +19,9 @@ async function fetchLiveRates() {
       if (!rates || typeof rates !== "object") throw new Error("Bad response");
       result.fiat = { USD:1, ...rates };
       result.fiatSource = api.url.split("/")[2];
-      console.log("✅ Fiat rates loaded from", result.fiatSource, "| NGN =", rates.NGN);
+      
       break;
-    } catch(e) { console.warn("Fiat API failed (" + api.url + "):", e.message); }
+    } catch(e) {  }
   }
 
   try {
@@ -31,8 +31,8 @@ async function fetchLiveRates() {
     Object.entries(COINGECKO_IDS).forEach(([sym, id]) => {
       if (j[id]?.usd) result.crypto[sym] = j[id].usd;
     });
-    console.log("✅ Crypto prices loaded | SOL=$" + result.crypto.SOL);
-  } catch(e) { console.warn("CoinGecko failed:", e.message); }
+    
+  } catch(e) {  }
 
   // Fallback 1: Coinbase
   if (!result.crypto.SOL) {
@@ -42,10 +42,10 @@ async function fetchLiveRates() {
       const solPrice = parseFloat(j?.data?.amount);
       if (solPrice > 0) {
         result.crypto.SOL = solPrice;
-        console.log("✅ Crypto prices loaded (Coinbase fallback) | SOL=$" + solPrice);
+        
       }
     } catch (e) {
-      console.warn("Coinbase price fallback failed:", e.message);
+      
     }
   }
 
@@ -57,10 +57,10 @@ async function fetchLiveRates() {
       const solPrice = parseFloat(j?.price);
       if (solPrice > 0) {
         result.crypto.SOL = solPrice;
-        console.log("✅ Crypto prices loaded (Binance fallback) | SOL=$" + solPrice);
+        
       }
     } catch (e) {
-      console.warn("Binance price fallback failed:", e.message);
+      
     }
   }
 
@@ -72,10 +72,10 @@ async function fetchLiveRates() {
       const solPrice = parseFloat(j?.data?.["So11111111111111111111111111111111111111112"]?.price);
       if (solPrice > 0) {
         result.crypto.SOL = solPrice;
-        console.log("✅ Crypto prices loaded (Jupiter fallback) | SOL=$" + solPrice);
+        
       }
     } catch (e) {
-      console.warn("Jupiter price fallback failed:", e.message);
+      
     }
   }
 

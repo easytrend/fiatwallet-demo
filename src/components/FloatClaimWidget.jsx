@@ -64,7 +64,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           ...resp2.value.map(a => ({ ...a, programId: token2022ProgramId }))
         ];
         success = true;
-        console.log('✅ Empty accounts scanned via wallet-adapter connection');
+        
       } catch (err) {
         console.error('❌ Failed to scan accounts:', err.message);
         throw err;
@@ -108,7 +108,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       try {
         pdaInfo = await connection.getAccountInfo(userVolumeAccumulator);
       } catch (err) {
-        console.warn('Failed to fetch PDA info:', err.message);
+        
       }
 
       let bondingCurveVal = 0;
@@ -117,7 +117,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         const rentExemptMin = await connection.getMinimumBalanceForRentExemption(pdaInfo.data.length);
         const claimableLamports = Math.max(0, pdaInfo.lamports - rentExemptMin);
         bondingCurveVal = claimableLamports / 1e9;
-        console.log(`✅ On-chain Pump.fun bonding curve cashback: ${bondingCurveVal} SOL`);
+        
       }
 
       // Fetch Real PumpSwap AMM Cashback (WSOL ATA balance of userAmmVolumeAccumulator)
@@ -141,10 +141,10 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         if (tokenBalanceResp && tokenBalanceResp.value) {
           ammVal = tokenBalanceResp.value.uiAmount || 0;
         }
-        console.log(`✅ On-chain PumpSwap AMM cashback: ${ammVal} WSOL`);
+        
       } catch (err) {
         // ATA does not exist if they have never graded/traded AMM or no rewards, perfectly expected
-        console.log('No on-chain PumpSwap AMM cashback ATA found.');
+        
       }
 
       setRealBondingCurveCashback(bondingCurveVal);
@@ -152,7 +152,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       setRealCashback(bondingCurveVal + ammVal);
 
     } catch (err) {
-      console.error('Error scanning claimables:', err);
+      
     }
     setLoading(false);
   };
@@ -301,12 +301,12 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         transactions.push(tx);
       });
 
-      console.log(`Closing ${emptyAccounts.length} accounts in ${transactions.length} transaction(s)...`);
+      
 
       // Sign + send all transactions
       let signatures = [];
       if (signAllTransactions && transactions.length > 1) {
-        // [SECURITY FIX #3] Simulate every batch transaction before sending.
+        // Simulate every batch transaction before sending.
         for (const tx of transactions) {
           const sim = await connection.simulateTransaction(tx);
           if (sim.value.err) {
@@ -319,16 +319,16 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
             connection.sendRawTransaction(s.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' })
           )
         );
-        console.log('Rent claim transactions sent:', signatures);
+        
       } else {
-        // [SECURITY FIX #3] Simulate single transaction before sending.
+        // Simulate single transaction before sending.
         const sim = await connection.simulateTransaction(transactions[0]);
         if (sim.value.err) {
           throw new Error(`Rent claim simulation failed: ${JSON.stringify(sim.value.err)}`);
         }
         const sig = await sendTransaction(transactions[0], connection);
         signatures = [sig];
-        console.log('Rent claim transaction sent:', sig);
+        
       }
 
       // Wait for confirmations
@@ -360,7 +360,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       });
       if (onClaimSuccess) onClaimSuccess();
     } catch (err) {
-      console.error('Rent claim failed:', err);
+      
       setToast({
         type: 'error',
         title: '✕ Claim Failed',
@@ -447,7 +447,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         ? SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_WALLET, lamports: feeLamports })
         : null;
 
-      // [SECURITY FIX #2] Whitelist allowed program IDs before signing external cashback transaction.
+      // Whitelist allowed program IDs before signing external cashback transaction.
       // This prevents a compromised pumpdev.io API from injecting malicious instructions.
       const ALLOWED_CASHBACK_PROGRAMS = new Set([
         '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', // Pump.fun bonding curve
@@ -486,7 +486,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           deserializedTx = new VersionedTransaction(decompiled.compileToV0Message());
         } catch (decompileErr) {
           if (decompileErr.message.startsWith('[SECURITY]')) throw decompileErr;
-          console.warn('Could not decompile VersionedTransaction for fee append:', decompileErr);
+          
         }
       }
 
@@ -497,7 +497,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       }
 
       signature = await sendTransaction(deserializedTx, connection);
-      console.log('Real Pump.fun cashback claim sent:', signature);
+      
 
       // Wait for confirmation (up to 60s)
       let confirmed = false;
@@ -534,7 +534,7 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
       await fetchClaimables();
 
     } catch (err) {
-      console.error('Cashback claim failed:', err);
+      
       setToast({
         type: 'error',
         title: '✕ Cashback Claim Failed',
