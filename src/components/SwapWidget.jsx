@@ -11,7 +11,7 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { useWalletModal } from '@solana/wallet-adapter-react-ui';
-import { VersionedTransaction, PublicKey } from '@solana/web3.js';
+import { VersionedTransaction, TransactionMessage, PublicKey } from '@solana/web3.js';
 import { useSwapQuote } from '../hooks/useSwapQuote';
 import {
   buildSwapTransaction,
@@ -415,6 +415,139 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
     setInputAmount(max > 0 ? String(+max.toFixed(6)) : '');
   }
 
+  // ─── Swap transaction integrity verification ──────────────────────────────
+  // Called after deserializing the VersionedTransaction received from Jupiter/Titan
+  // and before simulation/signing. Mirrors verifyTransactionIntegrity() in App.jsx.
+  //
+  // Checks:
+  //   1. Fee payer is the connected wallet (prevents fee-payer hijacking)
+  //   2. No Token Approve/SetAuthority/ApproveChecked opcodes (blocks delegation attacks)
+  //   3. Every instruction's program is in a known DEX allowlist (blocks unknown programs)
+  //   4. Quoted input and output mints appear in transaction account keys (blocks mint substitution)
+  function verifySwapTransaction(vTx, expectedInputMint, expectedOutputMint, connectedPubkey) {
+    let decompiled;
+    try {
+      decompiled = TransactionMessage.decompile(vTx.message, { addressLookupTableAccounts: [] });
+    } catch (e) {
+      throw new Error('[SECURITY] Could not decompile swap transaction for verification. Refusing to sign.');
+    }
+
+    // 1. Fee payer must be the connected wallet — prevents a rogue API from setting
+    //    an arbitrary payer that could be used to front-run or drain a different account.
+    if (!decompiled.payerKey.equals(connectedPubkey)) {
+      throw new Error(
+        `[SECURITY] Swap tx fee payer mismatch. Expected ${connectedPubkey.toBase58()}, ` +
+        `got ${decompiled.payerKey.toBase58()}. Refusing to sign.`
+      );
+    }
+
+    // 2. Dangerous token opcodes that must NEVER appear in a swap transaction.
+    //    Approve (4)        — grants a delegate unlimited spend authority over the ATA
+    //    SetAuthority (6)   — permanently transfers ownership of the token account
+    //    ApproveChecked (25)— same as Approve but with decimals check (still dangerous)
+    const BLOCKED_TOKEN_OPCODES = new Set([4, 6, 25]);
+    const BLOCKED_OPCODE_NAMES  = { 4: 'Approve', 6: 'SetAuthority', 25: 'ApproveChecked' };
+    const TOKEN_PROGRAMS = new Set([
+      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+      'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+    ]);
+
+    // 3. Strict allowlist of program IDs Jupiter/Titan may route through.
+    //    Any instruction from a program not in this set causes immediate rejection.
+    const ALLOWED_SWAP_PROGRAMS = new Set([
+      // ── Core Solana ───────────────────────────────────────────────────────────
+      '11111111111111111111111111111111',                           // System Program
+      'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',              // SPL Token
+      'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',              // Token-2022
+      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',             // Associated Token Program
+      'ComputeBudget111111111111111111111111111111',                // Compute Budget
+      'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',              // Memo
+      // ── Jupiter ──────────────────────────────────────────────────────────────
+      'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4',              // Jupiter V6
+      'JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB',              // Jupiter V4
+      'JUP3c2Uh3WA4Ng34tw6kPd2G4LFLKyz7XN5U5VifaMVH',            // Jupiter V3
+      // ── Raydium ──────────────────────────────────────────────────────────────
+      '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',             // Raydium AMM V4
+      '5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h',             // Raydium AMM V5
+      'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK',             // Raydium CLMM
+      'routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS',              // Raydium Route
+      'RVKd61ztZW9GUwhRbbLoYVRE5Xf1B2tVscKqwZqXgEr',             // Raydium (legacy)
+      // ── Orca ─────────────────────────────────────────────────────────────────
+      'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3sFjiste',             // Orca Whirlpool
+      '9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP',             // Orca V2
+      'DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt99MQ59qw1',             // Orca (Aldrin)
+      // ── Meteora ──────────────────────────────────────────────────────────────
+      'Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB',            // Meteora Dynamic AMM
+      'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo',             // Meteora DLMM
+      'M2mx93ekt1fmXSVkTrUL9xVFHkmME8HTUi5Cyc5aF7K',             // Meteora AMM
+      // ── OpenBook / Serum ─────────────────────────────────────────────────────
+      'opnb2LAfJYbRMAHHvqjCwQxanZn7n734bNwrmycumJS',              // OpenBook V2
+      'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX',              // Serum DEX V3 / OpenBook V1
+      '9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin',             // Serum DEX V3 (old)
+      // ── Phoenix ──────────────────────────────────────────────────────────────
+      'PhoeNiXZ8ByJGLkxNfZRnkUfjvmuYqLR89jjFHGqdXY',              // Phoenix
+      // ── Saber / Mercurial / Stable ───────────────────────────────────────────
+      'SSwpkEEcbUqx4vtoEByFjSkhKdCT862DNVb52nZg1UZ',             // Saber
+      'MERLuDFBMmsHnsBPZw2sDQZHvXFMwp8EdjudcU2pgJavB',            // Mercurial
+      // ── Lifinity ─────────────────────────────────────────────────────────────
+      'EewxydAPCCVuNEyrVN68PuSYdQ7wKn27V9Gjeoi8dy3S',             // Lifinity V1
+      '2wT8Yq49kHgDzXuPxZSaeLaH1qbmGXtEyPy64bL7aD3c',            // Lifinity V2
+      // ── Titan ────────────────────────────────────────────────────────────────
+      'TitanV9s8gN9e4mPkH9JSqnKFmiwRDTVa3t3Q9UKKAV',              // Titan (if active)
+    ]);
+
+    // Track whether we saw the expected mints in any instruction's account keys
+    let sawInputMint  = false;
+    let sawOutputMint = false;
+
+    for (const ix of decompiled.instructions) {
+      const pid = ix.programId.toBase58();
+
+      // Check 2 — block dangerous token opcodes
+      if (TOKEN_PROGRAMS.has(pid) && ix.data.length > 0) {
+        const opcode = ix.data[0];
+        if (BLOCKED_TOKEN_OPCODES.has(opcode)) {
+          throw new Error(
+            `[SECURITY] Swap transaction contains forbidden token instruction: ` +
+            `${BLOCKED_OPCODE_NAMES[opcode] || opcode} (opcode ${opcode}). Refusing to sign.`
+          );
+        }
+      }
+
+      // Check 3 — program allowlist
+      if (!ALLOWED_SWAP_PROGRAMS.has(pid)) {
+        throw new Error(
+          `[SECURITY] Swap transaction contains instruction from unknown program ${pid}. Refusing to sign.`
+        );
+      }
+
+      // Check 4 — accumulate account keys to verify mints appear
+      for (const { pubkey } of ix.keys) {
+        const keyStr = pubkey.toBase58();
+        if (keyStr === expectedInputMint)  sawInputMint  = true;
+        if (keyStr === expectedOutputMint) sawOutputMint = true;
+      }
+    }
+
+    // Check 4 — both quoted mints must appear somewhere in the transaction.
+    // If a mint is swapped for WSOL (SOL), it may appear only as an ATA owner, so
+    // we skip the check for the native SOL mint since it is implicitly the wallet address.
+    const WSOL = 'So11111111111111111111111111111111111111112';
+    if (!sawInputMint && expectedInputMint !== WSOL) {
+      throw new Error(
+        `[SECURITY] Swap transaction does not reference quoted input mint ${expectedInputMint}. ` +
+        `Possible mint substitution. Refusing to sign.`
+      );
+    }
+    if (!sawOutputMint && expectedOutputMint !== WSOL) {
+      throw new Error(
+        `[SECURITY] Swap transaction does not reference quoted output mint ${expectedOutputMint}. ` +
+        `Possible mint substitution. Refusing to sign.`
+      );
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const handleSwap = useCallback(async () => {
     if (swapping) return;
     if (!publicKey || !connected || !quote) return;
@@ -434,6 +567,16 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
       const base64Tx = await buildSwapTransaction(quote, publicKey.toBase58());
       const buf      = Buffer.from(base64Tx, 'base64');
       const vTx      = VersionedTransaction.deserialize(buf);
+
+      // Instruction-level integrity check — runs before simulation and signing.
+      // Verifies fee payer, blocks dangerous opcodes, enforces DEX program allowlist,
+      // and confirms the quoted mints appear in the transaction.
+      verifySwapTransaction(
+        vTx,
+        quote.inputMint,
+        quote.outputMint,
+        publicKey
+      );
 
       // Pre-flight simulation
       const sim = await connection.simulateTransaction(vTx);
