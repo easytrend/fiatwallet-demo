@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, SystemProgram, Connection, VersionedTransaction, TransactionMessage, TransactionInstruction } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, SystemInstruction, Connection, VersionedTransaction, TransactionMessage, TransactionInstruction } from '@solana/web3.js';
 import { createCloseAccountInstruction } from '@solana/spl-token';
 import { logTransaction } from '../services/supabase';
 
@@ -447,39 +447,83 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
         ? SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: PROTOCOL_WALLET, lamports: feeLamports })
         : null;
 
-      // Whitelist allowed program IDs before signing external cashback transaction.
-      // This prevents a compromised pumpdev.io API from injecting malicious instructions.
+      // Allowlist of program IDs permitted in the external cashback transaction.
+      // System Program is included because Pump.fun uses it to transfer SOL rewards.
+      // However, System Program instructions are individually decoded and validated below
+      // to prevent a malicious API from injecting arbitrary SOL transfers to attacker wallets.
       const ALLOWED_CASHBACK_PROGRAMS = new Set([
         '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', // Pump.fun bonding curve
         'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA', // Pump.fun AMM
         'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', // Memo program
-        '11111111111111111111111111111111',               // System Program
+        '11111111111111111111111111111111',               // System Program (validated per-instruction below)
         'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',  // SPL Token (legacy)
         'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',  // Token-2022
         'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
         'ComputeBudget111111111111111111111111111111',    // Compute budget
       ]);
 
-      if (deserializedTx instanceof Transaction) {
-        // Check API-supplied instructions BEFORE appending our own
-        for (const ix of deserializedTx.instructions) {
-          const pid = ix.programId.toBase58();
-          if (!ALLOWED_CASHBACK_PROGRAMS.has(pid)) {
-            throw new Error(`[SECURITY] Unexpected program in cashback claim transaction: ${pid}. Refusing to sign.`);
+      // Safe destinations for any System Program transfer inside the external cashback tx.
+      // Only the user's own wallet (receiving cashback) and the protocol fee wallet are permitted.
+      // Any SOL transfer to any other address — including attacker wallets — is rejected.
+      const SAFE_SOL_DESTINATIONS = new Set([
+        publicKey.toBase58(),          // user receives cashback SOL
+        PROTOCOL_WALLET.toBase58(),    // known protocol fee wallet
+      ]);
+
+      // Max lamports the external API may transfer in a single System Program instruction.
+      // We allow the full gross cashback (before our 10% fee) + a small 1% tolerance for
+      // on-chain rounding, but never more than that.
+      const MAX_ALLOWED_LAMPORTS = BigInt(Math.ceil(cashbackSOL * 1e9 * 1.01));
+
+      // Validates a single instruction from the externally received cashback transaction.
+      // Program ID must be in the allowlist; System Program transfers are further decoded
+      // to ensure destination and amount are within safe bounds.
+      function validateCashbackInstruction(ix) {
+        const pid = ix.programId.toBase58();
+        if (!ALLOWED_CASHBACK_PROGRAMS.has(pid)) {
+          throw new Error(`[SECURITY] Unexpected program in cashback claim transaction: ${pid}. Refusing to sign.`);
+        }
+        if (pid === '11111111111111111111111111111111') {
+          // Decode the System Program instruction to inspect destination and amount.
+          // This is the critical guard against drain attacks: a compromised pumpdev.io API
+          // could craft a SystemProgram.transfer to an attacker wallet — the program ID
+          // would pass the allowlist, but destination validation catches it here.
+          let decoded;
+          try {
+            decoded = SystemInstruction.decodeTransfer(ix);
+          } catch {
+            // Not a Transfer instruction (could be CreateAccount etc.) — reject to be safe.
+            throw new Error('[SECURITY] External cashback transaction contains an unrecognised System Program instruction. Refusing to sign.');
+          }
+          const dest = decoded.toPubkey.toBase58();
+          if (!SAFE_SOL_DESTINATIONS.has(dest)) {
+            throw new Error(
+              `[SECURITY] External cashback transaction attempts SOL transfer to unknown address ${dest}. Refusing to sign.`
+            );
+          }
+          const lamportsBI = BigInt(decoded.lamports);
+          if (lamportsBI > MAX_ALLOWED_LAMPORTS) {
+            throw new Error(
+              `[SECURITY] External cashback transaction SOL transfer amount (${lamportsBI} lamports) exceeds expected cashback. Refusing to sign.`
+            );
           }
         }
-        // Append our memo + fee now that the base tx is verified
+      }
+
+      if (deserializedTx instanceof Transaction) {
+        // Validate every API-supplied instruction BEFORE appending our own
+        for (const ix of deserializedTx.instructions) {
+          validateCashbackInstruction(ix);
+        }
+        // Append our memo + fee now that the base tx is fully verified
         deserializedTx.add(memoIx);
         if (feeIx) deserializedTx.add(feeIx);
       } else {
-        // VersionedTransaction: decompile, whitelist-check, append fee, recompile
+        // VersionedTransaction: decompile, validate, append fee, recompile
         try {
           const decompiled = TransactionMessage.decompile(deserializedTx.message, { addressLookupTableAccounts: [] });
           for (const ix of decompiled.instructions) {
-            const pid = ix.programId.toBase58();
-            if (!ALLOWED_CASHBACK_PROGRAMS.has(pid)) {
-              throw new Error(`[SECURITY] Unexpected program in cashback claim transaction: ${pid}. Refusing to sign.`);
-            }
+            validateCashbackInstruction(ix);
           }
           decompiled.instructions.push(memoIx);
           if (feeIx) decompiled.instructions.push(feeIx);
