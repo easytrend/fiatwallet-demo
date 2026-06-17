@@ -89,37 +89,12 @@ function verifyTransactionIntegrity(transaction, expectedTransfers) {
         }
 
         transferCheckedCount++;
-      } else if (ixType === 3) { // Transfer (legacy)
-        if (ix.data.length < 9) {
-          throw new Error('Transaction integrity violation: Invalid Transfer instruction data size.');
-        }
-        const destinationATA = ix.keys[1].pubkey.toBase58();
-
-        let amount = 0n;
-        for (let idx = 0; idx < 8; idx++) {
-          amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
-        }
-
-        const match = expectedTransfers.find(expected =>
-          expected.amountBaseUnits === amount
-        );
-
-        if (!match) {
-          throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units.`);
-        }
-
-        const expectedATA = getAssociatedTokenAddressSync(
-          new PublicKey(match.mint),
-          new PublicKey(match.recipient),
-          false,
-          ix.programId
-        ).toBase58();
-
-        if (destinationATA !== expectedATA) {
-          throw new Error(`Transaction integrity violation: Token destination ATA mismatch. Expected ${expectedATA}, got ${destinationATA}.`);
-        }
-
-        transferCheckedCount++;
+      } else {
+        // Reject all other token opcodes — including legacy Transfer (opcode 3).
+        // Legacy Transfer does not encode the mint in its data, making it impossible
+        // to verify which token is being transferred (mint substitution attack surface).
+        // Only TransferChecked (opcode 12) is accepted.
+        throw new Error(`Transaction integrity violation: Disallowed token instruction opcode ${ixType}. Only TransferChecked (12) is permitted.`);
       }
     }
   }
@@ -466,7 +441,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
             '11111111111111111111111111111111',             // System Program
             'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',  // Token Program (legacy)
             'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',  // Token-2022 Program
-            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs', // Associated Token Program
           ];
           if (!allowed.includes(pid)) throw new Error(`Transaction ${i + 1} contains unexpected program: ${pid}`);
         }
