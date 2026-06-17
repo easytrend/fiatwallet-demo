@@ -530,7 +530,9 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
           deserializedTx = new VersionedTransaction(decompiled.compileToV0Message());
         } catch (decompileErr) {
           if (decompileErr.message.startsWith('[SECURITY]')) throw decompileErr;
-          
+          // Any other decompile failure (e.g. unresolved Address Lookup Tables) also means
+          // we cannot run instruction-level validation — refuse to sign rather than fall through.
+          throw new Error('[SECURITY] Cannot verify external cashback transaction integrity. Refusing to sign.');
         }
       }
 
