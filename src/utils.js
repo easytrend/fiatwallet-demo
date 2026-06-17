@@ -84,30 +84,35 @@ export async function rpcFetch(method, params) {
 }
 
 // robustResolve accepts an optional wallet-adapter `connection` and tries it
-// first before falling back to the internal RPC list. This keeps domain resolution inside the
-// trusted wallet context when called from the send UI, and only falls back to public nodes when
-// the connection object is unavailable (e.g. during bulk import preview).
+// first before falling back to the internal RPC list. The fallback to public
+// RPCs is ONLY used when no connection object is passed (e.g. during bulk CSV
+// import preview before a wallet is connected). If a connection IS provided
+// but fails, we throw immediately — silently routing the query through Ankr or
+// PublicNode would leak domain lookups for users who configured a private RPC.
 export async function robustResolve(domain, walletConnection) {
-  const RESOLVE_RPCS = [
-    'https://api.mainnet-beta.solana.com',
-    'https://rpc.ankr.com/solana',
-    'https://solana-rpc.publicnode.com'
-  ];
-
   // Try the wallet-adapter connection first (trusted, user-configured endpoint)
   if (walletConnection) {
     try {
       const addr = await Promise.race([
         resolve(walletConnection, domain),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 4000))
+        new Promise((_, rej) => setTimeout(() => rej(new Error('Timeout')), 6000))
       ]);
       if (addr) return addr;
     } catch (e) {
-      
+      // A walletConnection was provided but failed — do NOT fall back to public
+      // RPCs. Doing so would expose the domain query to third-party infrastructure
+      // for users who deliberately configured a private endpoint.
+      throw new Error(`Failed to resolve domain: ${domain}`);
     }
   }
 
-  // Fall back to public RPCs if wallet connection is unavailable or failed
+  // No walletConnection available — fall back to public RPCs.
+  // This path is taken during bulk CSV import preview only.
+  const RESOLVE_RPCS = [
+    'https://api.mainnet-beta.solana.com',
+    'https://rpc.ankr.com/solana',
+    'https://solana-rpc.publicnode.com'
+  ];
   for (const rpcUrl of RESOLVE_RPCS) {
     try {
       const conn = new Connection(rpcUrl);
@@ -124,7 +129,9 @@ export async function robustResolve(domain, walletConnection) {
 }
 
 export async function robustReverseLookup(connection, publicKeyObj) {
-  // First try the primary connection
+  // Use only the provided connection. Do not fall back to public RPC endpoints
+  // for reverse lookups — the wallet address being looked up is sensitive; leaking
+  // it to Ankr/PublicNode undermines users who configured a private RPC for privacy.
   try {
     const primary = await getPrimaryDomain(connection, publicKeyObj).catch(() => null);
     if (primary && primary.reverse) return primary.reverse + '.sol';
@@ -132,24 +139,6 @@ export async function robustReverseLookup(connection, publicKeyObj) {
     if (reverse) return reverse + '.sol';
   } catch (e) {
     
-  }
-
-  // Fallback to other RPCs if primary fails
-  const RESOLVE_RPCS = [
-    'https://solana-rpc.publicnode.com',
-    'https://rpc.ankr.com/solana',
-    'https://api.mainnet-beta.solana.com'
-  ];
-  for (const rpcUrl of RESOLVE_RPCS) {
-    try {
-      const conn = new Connection(rpcUrl);
-      const primary = await getPrimaryDomain(conn, publicKeyObj).catch(() => null);
-      if (primary && primary.reverse) return primary.reverse + '.sol';
-      const reverse = await performReverseLookup(conn, publicKeyObj).catch(() => null);
-      if (reverse) return reverse + '.sol';
-    } catch (e) {
-      
-    }
   }
   return null;
 }

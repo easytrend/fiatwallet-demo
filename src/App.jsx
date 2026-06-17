@@ -266,6 +266,11 @@ export default function App() {
 
 
   const [inputMode, setInputMode] = useState('fiat'); // fiat or crypto
+  // Detect if no private RPC endpoint is configured — user is on the default
+  // rate-limited public endpoint. Show a UI warning in this case.
+  const isUsingPublicRpc = !import.meta.env.VITE_RPC_URL;
+  const [rpcWarnDismissed, setRpcWarnDismissed] = useState(false);
+
   const [bulkMode, setBulkMode] = useState(false);
   const [showModal, setShowModal] = useState(false);
   // walletPubkey string state removed — use `publicKey` from useWallet() directly to
@@ -568,8 +573,23 @@ export default function App() {
   useEffect(() => {
     if (connected && publicKey) {
       const pubkeyStr = publicKey.toString();
-      const cached = localStorage.getItem(`sns_${pubkeyStr}`);
-      if (cached) setWalletDomain(cached);
+      // Use sessionStorage (tab-scoped) with a 1-hour TTL to limit persistence.
+      // localStorage is writable by extensions/XSS; sessionStorage reduces the attack
+      // surface and the TTL ensures stale domain mappings are re-verified.
+      const TTL_MS = 60 * 60 * 1000; // 1 hour
+      try {
+        const raw = sessionStorage.getItem(`sns_${pubkeyStr}`);
+        if (raw) {
+          const { domain, ts } = JSON.parse(raw);
+          if (Date.now() - ts < TTL_MS) {
+            setWalletDomain(domain); // show cached value immediately while re-verifying
+          } else {
+            sessionStorage.removeItem(`sns_${pubkeyStr}`); // expired — discard
+          }
+        }
+      } catch {
+        sessionStorage.removeItem(`sns_${pubkeyStr}`);
+      }
 
       const lookupDomain = async () => {
         try {
@@ -587,7 +607,8 @@ export default function App() {
           const winner = await Promise.any([apiPromise, rpcPromise]).catch(() => null);
           if (winner) {
             setWalletDomain(winner);
-            localStorage.setItem(`sns_${pubkeyStr}`, winner);
+            // Persist with timestamp so TTL can be enforced on next reconnect
+            sessionStorage.setItem(`sns_${pubkeyStr}`, JSON.stringify({ domain: winner, ts: Date.now() }));
           }
         } catch (e) {
           
@@ -941,6 +962,29 @@ export default function App() {
       <div className="main">
         <div className="app-card">
           <div className="card-body">
+
+            {/* RPC warning banner — shown when no custom VITE_RPC_URL is set */}
+            {isUsingPublicRpc && !rpcWarnDismissed && (
+              <div style={{
+                display: 'flex', alignItems: 'flex-start', gap: 10,
+                background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.35)',
+                borderRadius: 10, padding: '10px 14px', marginBottom: 14, fontSize: 12,
+                color: '#fde68a', lineHeight: 1.5
+              }}>
+                <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+                <span style={{ flex: 1 }}>
+                  <strong>Public RPC active.</strong> No <code>VITE_RPC_URL</code> is configured.
+                  The default endpoint (<code>api.mainnet-beta.solana.com</code>) is rate-limited
+                  and may cause simulation failures or stale balance reads.
+                  Set a private RPC (e.g. Helius) in your <code>.env</code> file for reliable operation.
+                </span>
+                <button
+                  onClick={() => setRpcWarnDismissed(true)}
+                  style={{ background: 'none', border: 'none', color: '#fde68a', cursor: 'pointer', fontSize: 16, padding: 0, flexShrink: 0 }}
+                  aria-label="Dismiss RPC warning"
+                >✕</button>
+              </div>
+            )}
             <div className="title-row">
               <div className="card-title">{bulkMode ? 'Bulk Send' : 'Send Crypto'}</div>
               <div className={`bulk-pill ${bulkMode ? 'on' : ''}`} onClick={() => setBulkMode(b => !b)}>

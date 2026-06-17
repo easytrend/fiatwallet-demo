@@ -8,6 +8,62 @@ const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF
 const PUMP_AMM_PROGRAM_ID = new PublicKey("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
 const WSOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 
+/**
+ * Pre-sign integrity check for rent-claim transactions.
+ * The app builds these transactions itself, but a malicious wallet adapter or
+ * prototype-pollution attack could inject extra instructions between construction
+ * and signing. This guard verifies every instruction before the user is asked to sign.
+ *
+ * Checks:
+ *   1. feePayer is the connected wallet.
+ *   2. Every instruction's programId is in a strict allowlist.
+ *   3. Token-program instructions are only CloseAccount (opcode 9).
+ *   4. Any System Program transfer goes exclusively to the protocol fee wallet
+ *      for exactly the expected lamport amount.
+ */
+function verifyRentClaimTransaction(tx, expectedFeeLamports, protocolFeeWallet, connectedPubkey) {
+  const ALLOWED_PROGRAMS = new Set([
+    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // Token Program
+    'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022
+    '11111111111111111111111111111111',              // System Program
+    'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', // Memo
+  ]);
+
+  if (!tx.feePayer || !tx.feePayer.equals(connectedPubkey)) {
+    throw new Error('Rent claim integrity violation: fee payer is not the connected wallet.');
+  }
+
+  for (const ix of tx.instructions) {
+    const pid = ix.programId.toBase58();
+    if (!ALLOWED_PROGRAMS.has(pid)) {
+      throw new Error(`Rent claim integrity violation: unexpected program ${pid}.`);
+    }
+
+    // Token programs: only CloseAccount (opcode 9) is permitted.
+    if (pid === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' ||
+        pid === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb') {
+      const ixType = ix.data[0];
+      if (ixType !== 9) {
+        throw new Error(`Rent claim integrity violation: disallowed token opcode ${ixType}. Only CloseAccount (9) is permitted.`);
+      }
+    }
+
+    // System Program: the only permitted transfer is the protocol fee, to the exact wallet, for the exact amount.
+    if (pid === '11111111111111111111111111111111') {
+      let decoded;
+      try { decoded = SystemInstruction.decodeTransfer(ix); } catch (e) {
+        throw new Error('Rent claim integrity violation: unrecognised System Program instruction.');
+      }
+      if (decoded.toPubkey.toBase58() !== protocolFeeWallet) {
+        throw new Error(`Rent claim integrity violation: SOL transfer to unexpected destination ${decoded.toPubkey.toBase58()}.`);
+      }
+      if (BigInt(decoded.lamports) !== BigInt(expectedFeeLamports)) {
+        throw new Error(`Rent claim integrity violation: fee lamport mismatch (expected ${expectedFeeLamports}, got ${decoded.lamports}).`);
+      }
+    }
+  }
+}
+
 // Premium inline SVG icon matching the Moby "hand-with-coin" / claim icon
 const ClaimIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '6px', display: 'inline-block', verticalAlign: 'middle' }}>
@@ -298,6 +354,12 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
         tx.recentBlockhash = latestBlockhash.blockhash;
         tx.feePayer = publicKey;
+
+        // Integrity check before simulation/signing: verify fee payer, program allowlist,
+        // token opcodes, and that any SOL transfer goes only to the protocol fee wallet.
+        // The fee transfer only exists on the first batch (idx === 0).
+        verifyRentClaimTransaction(tx, idx === 0 ? feeLamports : 0, PROTOCOL_FEE_WALLET.toBase58(), publicKey);
+
         transactions.push(tx);
       });
 

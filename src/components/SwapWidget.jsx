@@ -424,10 +424,29 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
   //   2. No Token Approve/SetAuthority/ApproveChecked opcodes (blocks delegation attacks)
   //   3. Every instruction's program is in a known DEX allowlist (blocks unknown programs)
   //   4. Quoted input and output mints appear in transaction account keys (blocks mint substitution)
-  function verifySwapTransaction(vTx, expectedInputMint, expectedOutputMint, connectedPubkey) {
+  async function verifySwapTransaction(vTx, expectedInputMint, expectedOutputMint, connectedPubkey) {
+    // Resolve every Address Lookup Table (ALT) the transaction references.
+    // Jupiter V6 transactions routinely use ALTs to compress account lists. Without
+    // fetching them, decompile() returns an incomplete account key list and the
+    // mint-presence check (step 4) becomes blind to ALT-referenced accounts.
+    const altKeys = vTx.message.addressTableLookups?.map(l => l.accountKey) ?? [];
+    const altAccounts = [];
+    for (const key of altKeys) {
+      let resp;
+      try {
+        resp = await connection.getAddressLookupTable(key);
+      } catch (e) {
+        throw new Error('[SECURITY] Failed to fetch Address Lookup Table for swap transaction — refusing to sign without full account resolution.');
+      }
+      if (!resp?.value) {
+        throw new Error(`[SECURITY] Address Lookup Table ${key.toBase58()} returned empty — refusing to sign.`);
+      }
+      altAccounts.push(resp.value);
+    }
+
     let decompiled;
     try {
-      decompiled = TransactionMessage.decompile(vTx.message, { addressLookupTableAccounts: [] });
+      decompiled = TransactionMessage.decompile(vTx.message, { addressLookupTableAccounts: altAccounts });
     } catch (e) {
       throw new Error('[SECURITY] Could not decompile swap transaction for verification. Refusing to sign.');
     }
@@ -570,8 +589,8 @@ export default function SwapWidget({ walletTokenList, onSwapSuccess }) {
 
       // Instruction-level integrity check — runs before simulation and signing.
       // Verifies fee payer, blocks dangerous opcodes, enforces DEX program allowlist,
-      // and confirms the quoted mints appear in the transaction.
-      verifySwapTransaction(
+      // and confirms the quoted mints appear in the transaction (with full ALT resolution).
+      await verifySwapTransaction(
         vTx,
         quote.inputMint,
         quote.outputMint,
