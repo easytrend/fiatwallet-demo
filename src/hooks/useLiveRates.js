@@ -19,9 +19,9 @@ async function fetchLiveRates() {
       if (!rates || typeof rates !== "object") throw new Error("Bad response");
       result.fiat = { USD:1, ...rates };
       result.fiatSource = api.url.split("/")[2];
-      console.log("✅ Fiat rates loaded from", result.fiatSource, "| NGN =", rates.NGN);
+      
       break;
-    } catch(e) { console.warn("Fiat API failed (" + api.url + "):", e.message); }
+    } catch(e) {  }
   }
 
   try {
@@ -31,8 +31,53 @@ async function fetchLiveRates() {
     Object.entries(COINGECKO_IDS).forEach(([sym, id]) => {
       if (j[id]?.usd) result.crypto[sym] = j[id].usd;
     });
-    console.log("✅ Crypto prices loaded | SOL=$" + result.crypto.SOL);
-  } catch(e) { console.warn("CoinGecko failed:", e.message); }
+    
+  } catch(e) {  }
+
+  // Fallback 1: Coinbase
+  if (!result.crypto.SOL) {
+    try {
+      const r = await fetch("https://api.coinbase.com/v2/prices/SOL-USD/spot");
+      const j = await r.json();
+      const solPrice = parseFloat(j?.data?.amount);
+      if (solPrice > 0) {
+        result.crypto.SOL = solPrice;
+        
+      }
+    } catch (e) {
+      
+    }
+  }
+
+  // Fallback 2: Binance
+  if (!result.crypto.SOL) {
+    try {
+      const r = await fetch("https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT");
+      const j = await r.json();
+      const solPrice = parseFloat(j?.price);
+      if (solPrice > 0) {
+        result.crypto.SOL = solPrice;
+        
+      }
+    } catch (e) {
+      
+    }
+  }
+
+  // Fallback 3: Jupiter Price API
+  if (!result.crypto.SOL) {
+    try {
+      const r = await fetch("https://api.jup.ag/price/v2?ids=So11111111111111111111111111111111111111112");
+      const j = await r.json();
+      const solPrice = parseFloat(j?.data?.["So11111111111111111111111111111111111111112"]?.price);
+      if (solPrice > 0) {
+        result.crypto.SOL = solPrice;
+        
+      }
+    } catch (e) {
+      
+    }
+  }
 
   result.updatedAt = new Date().toLocaleTimeString();
   return result;

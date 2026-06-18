@@ -7,11 +7,30 @@ import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate, isValidEntry, robustRes
 import CurrDrop from './CurrDrop';
 import Toast from './Toast';
 
-// [AUDIT FIX HIGH] Frozen constants prevent re-instantiation per render
+
+// Frozen constants prevent re-instantiation per render
 const TOKEN_PROGRAM_ID = Object.freeze(new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'));
 const TOKEN_2022_PROGRAM_ID = Object.freeze(new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'));
-// [AUDIT FIX HIGH] Hard cap on bulk batches to prevent unbounded transaction injection
+// Hard cap on bulk batches to prevent unbounded transaction injection
 const MAX_BULK_BATCHES = 10; // 10 batches × 5 recipients = 50 max per bulk send
+
+/**
+ * Converts a floating-point token amount to integer base units without IEEE 754 precision loss.
+ * e.g. toBaseUnits(0.1, 6) → 100000n   (not 99999n or 100001n)
+ *
+ * Strategy: use toFixed(decimals) to get an exact decimal string, then parse the
+ * integer and fractional parts as separate BigInts — no floating-point multiplication.
+ *
+ * @param {number} amount   - float token amount (e.g. 1.23456)
+ * @param {number} decimals - token decimals (e.g. 6 for USDC)
+ * @returns {bigint}
+ */
+function toBaseUnits(amount, decimals) {
+  const fixed = amount.toFixed(decimals); // '1.234560'
+  const [intStr, fracStr = ''] = fixed.split('.');
+  const fracPadded = fracStr.padEnd(decimals, '0').slice(0, decimals);
+  return BigInt(intStr + fracPadded);
+}
 
 /**
  * Verifies that the built transaction has not been tampered with before signing/sending.
@@ -88,37 +107,12 @@ function verifyTransactionIntegrity(transaction, expectedTransfers) {
         }
 
         transferCheckedCount++;
-      } else if (ixType === 3) { // Transfer (legacy)
-        if (ix.data.length < 9) {
-          throw new Error('Transaction integrity violation: Invalid Transfer instruction data size.');
-        }
-        const destinationATA = ix.keys[1].pubkey.toBase58();
-
-        let amount = 0n;
-        for (let idx = 0; idx < 8; idx++) {
-          amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
-        }
-
-        const match = expectedTransfers.find(expected =>
-          expected.amountBaseUnits === amount
-        );
-
-        if (!match) {
-          throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units.`);
-        }
-
-        const expectedATA = getAssociatedTokenAddressSync(
-          new PublicKey(match.mint),
-          new PublicKey(match.recipient),
-          false,
-          ix.programId
-        ).toBase58();
-
-        if (destinationATA !== expectedATA) {
-          throw new Error(`Transaction integrity violation: Token destination ATA mismatch. Expected ${expectedATA}, got ${destinationATA}.`);
-        }
-
-        transferCheckedCount++;
+      } else {
+        // Reject all other token opcodes — including legacy Transfer (opcode 3).
+        // Legacy Transfer does not encode the mint in its data, making it impossible
+        // to verify which token is being transferred (mint substitution attack surface).
+        // Only TransferChecked (opcode 12) is accepted.
+        throw new Error(`Transaction integrity violation: Disallowed token instruction opcode ${ixType}. Only TransferChecked (12) is permitted.`);
       }
     }
   }
@@ -255,22 +249,24 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           try {
             const address = await robustResolve(addressStr, connection);
             addressStr = address.toBase58();
-            // [AUDIT FIX MEDIUM] Secondary on-chain ownership verification for bulk .sol domains
+            // Secondary on-chain ownership verification: abort if domain has been
+            // transferred to a different address since the initial resolution (TOCTOU guard).
             try {
               const { pubkey: domainKey } = getDomainKeySync(addressStr.slice(0, -4)); // strip .sol before lookup
               const registry = await NameRegistryState.retrieve(connection, domainKey);
               if (registry.owner.toBase58() !== addressStr) {
-                console.warn(`SNS ownership mismatch for ${row.domain}, proceeding with resolved address`);
+                throw new Error(`Domain ownership mismatch for "${row.domain}" — the domain may have been transferred. Aborting to prevent sending to the wrong wallet.`);
               }
             } catch (verifyErr) {
-              console.warn('SNS ownership verification unavailable for', row.domain);
+              // Re-throw our own security errors; ignore RPC unavailability
+              if (verifyErr.message.includes('ownership mismatch')) throw verifyErr;
             }
           } catch (err) {
             throw new Error(`Failed to resolve domain: ${row.domain}`);
           }
         }
 
-        // [AUDIT FIX HIGH] Validate base58 parse + on-curve check — rejects program addresses
+        // Validate base58 parse + on-curve check — rejects program addresses
         // and garbage strings before any on-chain instructions are built.
         let recipientPubkey;
         try {
@@ -284,7 +280,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
         const pubkeyStr = recipientPubkey.toBase58();
 
-        // [AUDIT FIX] Self-send guard for bulk send
+        // Self-send guard for bulk send
         if (recipientPubkey.equals(publicKey)) {
           throw new Error(`Cannot send to your own wallet address: "${row.domain}" resolves to your connected wallet.`);
         }
@@ -310,7 +306,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
         if (!mintInfo.value) throw new Error('Invalid token mint');
         decimals = mintInfo.value.data.parsed.info.decimals;
-        // [AUDIT FIX MEDIUM] Detect Token-2022 mints to compute correct ATAs
+        // Detect Token-2022 mints to compute correct ATAs
         try {
           const mintAcct = await connection.getAccountInfo(mintPubkey);
           if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
@@ -351,7 +347,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
               const est = await tx.getEstimatedFee(connection);
               if (est !== null && est !== undefined) txFee = est;
             } catch (e) {
-              console.warn("Failed to estimate bulk tx chunk fee:", e);
+              
             }
             totalEstimatedFee += txFee;
           }
@@ -387,7 +383,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           try {
             accountsInfo = await connection.getMultipleAccountsInfo(receiverATAs);
           } catch (e) {
-            console.warn('Failed to fetch receiver ATA info:', e);
+            
             accountsInfo = new Array(receiverATAs.length).fill(null);
           }
         }
@@ -432,7 +428,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         } else {
           const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
           for (const rec of chunk) {
-            const amountUnits = BigInt(Math.round(rec.tokAmt * Math.pow(10, decimals)));
+            const amountUnits = toBaseUnits(rec.tokAmt, decimals);
             const receiverATA = getAssociatedTokenAddressSync(mintPubkey, rec.pubkey, false, tokenProgramId);
             tx.add(createAssociatedTokenAccountIdempotentInstruction(publicKey, receiverATA, rec.pubkey, mintPubkey, tokenProgramId));
             tx.add(createTransferCheckedInstruction(senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals));
@@ -441,15 +437,15 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         const chunkExpectedTransfers = chunk.map(rec => ({
           recipient: rec.pubkey.toBase58(),
           amountBaseUnits: tok.symbol === 'SOL'
-            ? BigInt(Math.round(rec.tokAmt * 1e9))
-            : BigInt(Math.round(rec.tokAmt * Math.pow(10, decimals))),
+            ? toBaseUnits(rec.tokAmt, 9)
+            : toBaseUnits(rec.tokAmt, decimals),
           mint: tok.symbol === 'SOL' ? null : tok.mint
         }));
         verifyTransactionIntegrity(tx, chunkExpectedTransfers);
         transactions.push(tx);
       }
 
-      // [AUDIT FIX HIGH] Enforce max batch cap to prevent unbounded transaction injection
+      // Enforce max batch cap to prevent unbounded transaction injection
       if (transactions.length > MAX_BULK_BATCHES) {
         throw new Error(`Too many batches (${transactions.length}). Maximum is ${MAX_BULK_BATCHES} batches (${MAX_BULK_BATCHES * 5} recipients). Split into multiple sends.`);
       }
@@ -465,7 +461,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
             '11111111111111111111111111111111',             // System Program
             'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',  // Token Program (legacy)
             'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',  // Token-2022 Program
-            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs', // Associated Token Program
           ];
           if (!allowed.includes(pid)) throw new Error(`Transaction ${i + 1} contains unexpected program: ${pid}`);
         }
@@ -521,6 +517,9 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
 
       // Build Solscan link: single tx or first batch tx
       const firstSig = signatures[0];
+
+
+
       setToast({
         type: 'success',
         title: `✓ Sent to ${validRows.length} recipient${validRows.length !== 1 ? 's' : ''}`,
@@ -537,7 +536,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       }, 2000);
 
     } catch (err) {
-      console.error(err);
+      
       const msg = err.message || 'An error occurred';
       setErrorMsg(msg);
       setSendingState('error');
