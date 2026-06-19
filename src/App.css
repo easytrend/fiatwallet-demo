@@ -1579,7 +1579,9 @@ footer a { color:var(--lime); text-decoration:none; }
 
   /* Swap card mobile positioning when tab-swap is active */
   .main.tab-swap .swp-modal-overlay {
-    display: block !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
     position: static !important;
     background: none !important;
     backdrop-filter: none !important;
