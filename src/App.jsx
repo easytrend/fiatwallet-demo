@@ -280,7 +280,6 @@ export default function App() {
   const [walletError, setWalletError] = useState(null);
   const [solBalance, setSolBalance] = useState(null);
   const [splTokens, setSplTokens] = useState([]);
-  const [accOpen, setAccOpen] = useState(0); // 0=How it works, 1=Fiat<>Crypto
   const [recipient, setRecipient] = useState('');
   const [resolvedAddress, setResolvedAddress] = useState(null);
   const [resolving, setResolving] = useState(false);
@@ -1101,32 +1100,6 @@ export default function App() {
           </div>
         </div>
 
-        <div className="info-cards">
-          <div className="info-card" onClick={() => setAccOpen(accOpen === 0 ? -1 : 0)} style={{cursor:'pointer', paddingBottom: accOpen===0 ? 20 : 16}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <h3 style={{margin:0}}>HOW IT WORKS</h3>
-              <span style={{color:'var(--text2)', transition:'transform 0.2s', transform: accOpen===0?'rotate(180deg)':'none'}}>▼</span>
-            </div>
-            {accOpen === 0 && (
-              <ul className="info-steps" style={{marginTop: 16}}>
-                <li className="info-step"><span className="step-num">1</span><span>Connect any Solana wallet — Phantom, Solflare, Backpack, Ledger & more</span></li>
-                <li className="info-step"><span className="step-num">2</span><span>Enter a .sol domain — SNS resolves it to a wallet address</span></li>
-                <li className="info-step"><span className="step-num">3</span><span>Enter fiat or crypto amount. Live CoinGecko rate auto-converts</span></li>
-                <li className="info-step"><span className="step-num">4</span><span>Confirm and send — settles on Solana instantly</span></li>
-              </ul>
-            )}
-          </div>
-          <div className="info-card" onClick={() => setAccOpen(accOpen === 1 ? -1 : 1)} style={{cursor:'pointer', paddingBottom: accOpen===1 ? 20 : 16}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <h3 style={{margin:0}}>FIAT ↔ CRYPTO INPUT</h3>
-              <span style={{color:'var(--text2)', transition:'transform 0.2s', transform: accOpen===1?'rotate(180deg)':'none'}}>▼</span>
-            </div>
-            {accOpen === 1 && (
-              <p style={{marginTop: 12}}>Toggle between entering amounts in your local currency or directly in crypto. The other value updates live using CoinGecko rates.</p>
-            )}
-          </div>
-
-        </div>
       </div>
 
 
