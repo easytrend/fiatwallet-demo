@@ -272,6 +272,7 @@ export default function App() {
   const [rpcWarnDismissed, setRpcWarnDismissed] = useState(false);
 
   const [bulkMode, setBulkMode] = useState(false);
+  const [activeTab, setActiveTab] = useState('send');
   const [showModal, setShowModal] = useState(false);
   // walletPubkey string state removed — use `publicKey` from useWallet() directly to
   // avoid exposing a redundant plaintext string that malicious extensions can enumerate via React fiber.
@@ -935,6 +936,10 @@ export default function App() {
       <nav>
         <div className="nav-logo-wrap">
           <img src={logoImg} alt="Fiatwallet Logo" className="nav-logo" />
+          <div className="nav-links">
+            <button className={`nav-link-btn ${activeTab === 'send' ? 'active' : ''}`} onClick={() => setActiveTab('send')}>Send</button>
+            <button className={`nav-link-btn ${activeTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveTab('p2p')}>P2P</button>
+          </div>
         </div>
 
         <div className="nav-actions">
@@ -950,8 +955,8 @@ export default function App() {
 
       <FloatClaimWidget liveSolPrice={liveSolPrice} onClaimSuccess={fetchBalances} />
 
-      <div className="main">
-        <div className="app-card">
+      <div className={`main tab-${activeTab}`}>
+        <div className="app-card send-card">
           <div className="card-body">
 
             {/* RPC warning banner — shown when no custom VITE_RPC_URL is set */}
@@ -1093,6 +1098,37 @@ export default function App() {
           </div>
         </div>
 
+        <div className="app-card p2p-card">
+          <div className="card-body">
+            <div className="title-row">
+              <h2 className="card-title">P2P Trade</h2>
+            </div>
+            <p className="card-sub">Peer-to-peer token trading platform.</p>
+            
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              justifyContent: 'center', padding: '3rem 1.5rem', textAlign: 'center'
+            }}>
+              <span style={{ fontSize: '3rem', marginBottom: '1.25rem', filter: 'drop-shadow(0 0 12px rgba(163,230,53,0.35))' }}>🤝</span>
+              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text)', marginBottom: '8px' }}>P2P Trading Coming Soon</h3>
+              <p style={{ fontSize: '13px', color: 'var(--text2)', lineHeight: 1.6, maxWidth: '280px', margin: '0 auto 1.5rem' }}>
+                We are building a secure peer-to-peer escrow system. Soon you will be able to buy and sell Solana tokens directly with local payment methods.
+              </p>
+              <div style={{
+                width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)',
+                borderRadius: '3px', overflow: 'hidden', position: 'relative'
+              }}>
+                <div style={{
+                  position: 'absolute', left: 0, top: 0, bottom: 0, width: '70%',
+                  background: 'linear-gradient(90deg, var(--cyan), var(--lime))',
+                  borderRadius: '3px', boxShadow: '0 0 8px var(--cyan)'
+                }} />
+              </div>
+              <span style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '8px', fontFamily: 'var(--mono)' }}>Development Progress: 70%</span>
+            </div>
+          </div>
+        </div>
+
         <SwapWidget
           walletTokenList={walletTokenList}
           onSwapSuccess={fetchBalances}
@@ -1125,6 +1161,35 @@ export default function App() {
           duration={5000}
         />
       )}
+
+      {/* Bottom Navigation for mobile view */}
+      <div className="bottom-nav">
+        <button className={`bnav-item ${activeTab === 'send' ? 'active' : ''}`} onClick={() => setActiveTab('send')}>
+          <svg className="bnav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+          <span className="bnav-label">Send</span>
+        </button>
+        <button className={`bnav-item ${activeTab === 'swap' ? 'active' : ''}`} onClick={() => setActiveTab('swap')}>
+          <svg className="bnav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="17 1 21 5 17 9"></polyline>
+            <path d="M3 11V9a4 4 0 0 1 4-4h14"></path>
+            <polyline points="7 23 3 19 7 15"></polyline>
+            <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
+          </svg>
+          <span className="bnav-label">Swap</span>
+        </button>
+        <button className={`bnav-item ${activeTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveTab('p2p')}>
+          <svg className="bnav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+          <span className="bnav-label">P2P</span>
+        </button>
+      </div>
     </div>
   );
 }
