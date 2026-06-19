@@ -67,18 +67,8 @@ nav {
 }
 @media (min-width: 1100px) {
   .main {
-    display: grid;
-    grid-template-columns: 290px 1fr 290px;
-    gap: 0;
-  }
-  .app-card {
-    grid-column: 2;
-    justify-self: center;
-  }
-  .info-cards {
-    grid-column: 3;
-    justify-self: end;
-    margin-top: 0;
+    flex-wrap: nowrap;
+    gap: 2.5rem;
   }
 }
 .app-card {
@@ -1397,10 +1387,8 @@ footer a { color:var(--lime); text-decoration:none; }
     backdrop-filter: none !important;
     z-index: auto !important;
     animation: none !important;
-    grid-column: 3;
-    justify-self: end;
     width: 100%;
-    max-width: 290px;
+    max-width: 420px;
     margin-top: 0;
   }
   .swp-modal-sheet {
@@ -1408,8 +1396,8 @@ footer a { color:var(--lime); text-decoration:none; }
     border: 1px solid var(--border) !important;
     border-radius: 22px !important;
     width: 100% !important;
-    max-width: 290px !important;
-    padding: 1.2rem !important;
+    max-width: 420px !important;
+    padding: 1.4rem !important;
     box-shadow: none !important;
     max-height: none !important;
     overflow-y: visible !important;
