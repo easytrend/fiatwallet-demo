@@ -280,7 +280,7 @@ export default function App() {
   const [walletError, setWalletError] = useState(null);
   const [solBalance, setSolBalance] = useState(null);
   const [splTokens, setSplTokens] = useState([]);
-  const [accOpen, setAccOpen] = useState(0); // 0=How it works, 1=Fiat<>Crypto, 2=Bulk Send
+  const [accOpen, setAccOpen] = useState(0); // 0=How it works, 1=Fiat<>Crypto
   const [recipient, setRecipient] = useState('');
   const [resolvedAddress, setResolvedAddress] = useState(null);
   const [resolving, setResolving] = useState(false);
@@ -1125,15 +1125,7 @@ export default function App() {
               <p style={{marginTop: 12}}>Toggle between entering amounts in your local currency or directly in crypto. The other value updates live using CoinGecko rates.</p>
             )}
           </div>
-          <div className="info-card" onClick={() => setAccOpen(accOpen === 2 ? -1 : 2)} style={{cursor:'pointer', paddingBottom: accOpen===2 ? 20 : 16}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <h3 style={{margin:0}}>BULK SEND</h3>
-              <span style={{color:'var(--text2)', transition:'transform 0.2s', transform: accOpen===2?'rotate(180deg)':'none'}}>▼</span>
-            </div>
-            {accOpen === 2 && (
-              <p style={{marginTop: 12}}>Toggle Bulk Send to pay up to 1,000 wallets in one go. Upload CSV or XLSX, set amounts in fiat or crypto, and fire one transaction.</p>
-            )}
-          </div>
+
         </div>
       </div>
 
