@@ -752,9 +752,8 @@ export default function SwapWidget({
       </div>
 
       {/* ── 2. Modal ── */}
-      {isOpen && (
-        <div className="swp-modal-overlay" onClick={() => setIsOpen(false)}>
-          <div className="swp-modal-sheet" onClick={e => e.stopPropagation()}>
+      <div className={`swp-modal-overlay ${isOpen ? 'is-open' : ''}`} onClick={() => setIsOpen(false)}>
+        <div className="swp-modal-sheet" onClick={e => e.stopPropagation()}>
 
             {/* Modal Header */}
             <div className="swp-modal-header">
@@ -980,7 +979,6 @@ export default function SwapWidget({
 
           </div>
         </div>
-      )}
     </>
   );
 }

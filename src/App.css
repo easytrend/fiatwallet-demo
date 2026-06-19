@@ -1377,6 +1377,54 @@ footer a { color:var(--lime); text-decoration:none; }
 .swp-footer-titan:hover { color: var(--cyan); }
 
 /* ── Responsive ── */
+@media (max-width: 1099px) {
+  .swp-modal-overlay {
+    display: none;
+  }
+  .swp-modal-overlay.is-open {
+    display: flex;
+  }
+}
+
+@media (min-width: 1100px) {
+  .swp-float-pill {
+    display: none !important;
+  }
+  .swp-modal-overlay {
+    display: block !important;
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    z-index: auto !important;
+    animation: none !important;
+    grid-column: 3;
+    justify-self: end;
+    width: 100%;
+    max-width: 290px;
+    margin-top: 0;
+  }
+  .swp-modal-sheet {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 22px !important;
+    width: 100% !important;
+    max-width: 290px !important;
+    padding: 1.2rem !important;
+    box-shadow: none !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    animation: none !important;
+    transform: none !important;
+    position: relative;
+  }
+  .swp-modal-close {
+    display: none !important;
+  }
+  .swp-back-btn {
+    display: none !important;
+  }
+}
+
 @media (max-width: 768px) {
   .swp-float-pill {
     bottom: 12px;
