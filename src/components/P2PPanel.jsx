@@ -23,10 +23,14 @@ const DEFAULT_TOKENS = [
 export default function P2PPanel({ connected, walletTokenList }) {
   const [mode, setMode] = useState('sell'); // 'sell' or 'buy'
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
-  const [accountNumber, setAccountNumber] = useState('0000000000');
+  const [accountNumber, setAccountNumber] = useState('');
   const [selectedBank, setSelectedBank] = useState('Choose Bank');
   const [amount, setAmount] = useState('');
   const [selectedToken, setSelectedToken] = useState(DEFAULT_TOKENS[0]);
+
+  // Success Pop-up state
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successDetails, setSuccessDetails] = useState(null);
 
   // Dropdown states
   const [countryOpen, setCountryOpen] = useState(false);
@@ -255,11 +259,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
         <div className="p2p-country-selector">
           <div className="curr-selector" onClick={() => setCountryOpen(!countryOpen)}>
-            <svg className="p2p-map-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: '4px', opacity: 0.7 }}>
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-            </svg>
             <span className="curr-flag">{selectedCountry.flag}</span>
             <span style={{ marginLeft: '4px' }}>{selectedCountry.code}</span>
             <span className="curr-chevron" style={{ marginLeft: '6px' }}>▼</span>
@@ -290,9 +289,21 @@ export default function P2PPanel({ connected, walletTokenList }) {
           <div className="field">
             <div className="field-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
               <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
-              <div className="p2p-action-links" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <button className="p2p-link-action" onClick={handleScan}>
-                  {scanStatus || 'Scan'}
+              <div className="p2p-action-links" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <button className="p2p-link-action" onClick={handleScan} title="Scan QR Code">
+                  {scanStatus ? (
+                    <span style={{ fontSize: '10px', color: 'var(--lime)', fontWeight: 'bold' }}>{scanStatus}</span>
+                  ) : (
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                      <rect x="3" y="3" width="7" height="7" />
+                      <rect x="14" y="3" width="7" height="7" />
+                      <rect x="14" y="14" width="7" height="7" />
+                      <rect x="3" y="14" width="7" height="7" />
+                      <rect x="9" y="9" width="2" height="2" fill="currentColor" stroke="none" />
+                      <rect x="14" y="9" width="2" height="2" fill="currentColor" stroke="none" />
+                      <rect x="9" y="14" width="2" height="2" fill="currentColor" stroke="none" />
+                    </svg>
+                  )}
                 </button>
                 <button className="p2p-btn-badge" onClick={handlePaste}>
                   Paste
@@ -309,13 +320,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
               />
             </div>
 
-            <div className="p2p-account-name-resolved" style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--text3)' }}>
-              {resolvingName ? (
-                <span style={{ fontStyle: 'italic' }}>
-                  <span className="p2p-mini-spinner" /> Resolving account name...
-                </span>
-              ) : (
-                accountName && <span>Account Name: <strong style={{ color: 'var(--lime)' }}>{accountName}</strong></span>
+            <div className="p2p-account-name-resolved" style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--lime)', fontWeight: 'bold' }}>
+              {accountNumber && accountNumber.trim().length > 0 && selectedBank !== 'Choose Bank' && (
+                resolvingName ? (
+                  <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}>
+                    <span className="p2p-mini-spinner" /> Resolving...
+                  </span>
+                ) : (
+                  accountName && <span className="animated-fade-in">{accountName}</span>
+                )
               )}
             </div>
           </div>
@@ -541,10 +554,62 @@ export default function P2PPanel({ connected, walletTokenList }) {
       {/* ── Submit Action Button (Reusing Send Button Class) ── */}
       <button 
         className="send-btn" 
-        onClick={() => alert(`P2P Trade of ${selectedCountry.symbol}${fiatAmountText} via ${displayBank} Escrow initiated!`)}
+        onClick={() => {
+          setSuccessDetails({
+            action: mode === 'sell' ? 'Sell' : 'Buy',
+            amount: `${amount || '0'} ${selectedToken.symbol}`,
+            fiat: `${selectedCountry.symbol}${fiatAmountText}`,
+            bank: displayBank,
+            account: mode === 'sell' ? (accountNumber || '0000000000') : '9012847592',
+            name: mode === 'sell' ? (accountName || 'David Miller') : 'Fiatwallet Escrow Ltd'
+          });
+          setShowSuccess(true);
+        }}
       >
         {mode === 'sell' ? 'Send' : 'Buy'}
       </button>
+
+      {/* Success Modal Popup */}
+      {showSuccess && successDetails && (
+        <div className="p2p-success-overlay">
+          <div className="p2p-success-card">
+            <div className="p2p-success-icon-wrap">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </div>
+            <h3 className="p2p-success-title">Trade Successful</h3>
+            <p className="p2p-success-sub">Demo Mode — No real funds were sent or received.</p>
+            
+            <div className="p2p-success-fields">
+              <div className="p2p-success-field">
+                <span>Action:</span>
+                <strong>{successDetails.action} {successDetails.amount}</strong>
+              </div>
+              <div className="p2p-success-field">
+                <span>Fiat Value:</span>
+                <strong>{successDetails.fiat}</strong>
+              </div>
+              <div className="p2p-success-field">
+                <span>Bank:</span>
+                <strong>{successDetails.bank}</strong>
+              </div>
+              <div className="p2p-success-field">
+                <span>Account Number:</span>
+                <strong>{successDetails.account}</strong>
+              </div>
+              <div className="p2p-success-field">
+                <span>Recipient/Sender:</span>
+                <strong>{successDetails.name}</strong>
+              </div>
+            </div>
+            
+            <button className="send-btn" onClick={() => { setShowSuccess(false); setAmount(''); }} style={{ marginTop: '1rem' }}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -913,6 +913,108 @@ footer a { color:var(--lime); text-decoration:none; }
   to { opacity: 1; transform: translateY(0); }
 }
 
+.p2p-action-links {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.p2p-link-action {
+  background: none !important;
+  border: none !important;
+  color: var(--text2) !important;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+.p2p-link-action:hover {
+  color: var(--lime) !important;
+}
+.p2p-btn-badge {
+  background: none !important;
+  border: none !important;
+  color: var(--text2) !important;
+  cursor: pointer;
+  font-family: var(--ff);
+  font-weight: 600;
+  font-size: 11px;
+  padding: 0;
+  transition: color 0.15s;
+}
+.p2p-btn-badge:hover {
+  color: var(--lime) !important;
+}
+
+/* Success Modal */
+.p2p-success-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 22, 40, 0.96);
+  backdrop-filter: blur(12px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  border-radius: 22px;
+  animation: fadeIn 0.25s ease-out;
+}
+.p2p-success-card {
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.p2p-success-icon-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(163, 230, 53, 0.15);
+  border: 2px solid rgba(163, 230, 53, 0.4);
+  color: var(--lime);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  box-shadow: 0 0 16px rgba(163,230,53,0.2);
+}
+.p2p-success-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.p2p-success-sub {
+  font-size: 11.5px;
+  color: var(--text3);
+  margin-bottom: 16px;
+}
+.p2p-success-fields {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.p2p-success-field {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+}
+.p2p-success-field span {
+  color: var(--text3);
+}
+.p2p-success-field strong {
+  color: var(--text);
+}
+
 .swp-float-pill {
   position: fixed;
   bottom: 12px;
