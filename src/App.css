@@ -1775,11 +1775,28 @@ footer a { color:var(--lime); text-decoration:none; }
 .p2p-input-val::placeholder {
   color: var(--text3);
 }
-.p2p-input-underline {
-  height: 1.5px;
-  background: rgba(255, 255, 255, 0.9);
-  margin-top: -2px;
+.p2p-account-name-resolved {
+  font-size: 13px;
+  color: var(--text3);
+  font-weight: 600;
+  margin-top: 4px;
   margin-bottom: 0.8rem;
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+}
+.p2p-name-resolving {
+  color: var(--text3);
+  font-style: italic;
+  display: flex;
+  align-items: center;
+}
+.p2p-name-text {
+  color: var(--text2);
+}
+.p2p-name-text strong {
+  color: var(--lime);
+  margin-left: 4px;
 }
 
 /* Choose Bank Bar (Full width of box card) */

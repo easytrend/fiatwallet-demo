@@ -44,6 +44,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // Routing & Loading states
   const [routingState, setRoutingState] = useState('idle'); // 'routing' | 'loading_market' | 'resolved'
 
+  // Account Name resolution states
+  const [accountName, setAccountName] = useState('David Miller');
+  const [resolvingName, setResolvingName] = useState(false);
+
   // Fetch token list from props or defaults
   const getSelectableTokens = () => {
     let list = [];
@@ -81,6 +85,33 @@ export default function P2PPanel({ connected, walletTokenList }) {
   useEffect(() => {
     setSelectedBank('Choose Bank');
   }, [selectedCountry]);
+
+  // Resolve account name dynamically matching the country's localized naming style
+  useEffect(() => {
+    if (!accountNumber) {
+      setAccountName('');
+      return;
+    }
+    
+    setResolvingName(true);
+    const t = setTimeout(() => {
+      setResolvingName(false);
+      const namesByCountry = {
+        USA: 'David Miller',
+        NGA: 'Chinedu Okeke',
+        GBR: 'Alastair Campbell',
+        EUR: 'Hans Meier',
+        CAN: 'Jean-Pierre Tremblay',
+        AUS: 'Lachlan Murdoch',
+        KEN: 'Mwangi Kamau',
+        GHA: 'Kofi Mensah',
+        IND: 'Aarav Patel'
+      };
+      setAccountName(namesByCountry[selectedCountry.code] || 'John Doe');
+    }, 600);
+
+    return () => clearTimeout(t);
+  }, [accountNumber, selectedCountry]);
 
   // Handle Paste from Clipboard
   const handlePaste = async () => {
@@ -293,7 +324,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
                 placeholder="0000000000"
               />
-              <div className="p2p-input-underline" />
+              <div className="p2p-account-name-resolved">
+                {resolvingName ? (
+                  <span className="p2p-name-resolving"><span className="p2p-mini-spinner" /> Resolving account name...</span>
+                ) : (
+                  accountName && <span className="p2p-name-text">Account Name: <strong>{accountName}</strong></span>
+                )}
+              </div>
             </div>
 
             {/* Choose Bank Bar (Spans full width of card) */}
