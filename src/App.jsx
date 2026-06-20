@@ -16,6 +16,7 @@ import TokenModal from './components/TokenModal';
 import Toast from './components/Toast';
 import FloatClaimWidget from './components/FloatClaimWidget';
 import SwapWidget from './components/SwapWidget';
+import P2PPanel from './components/P2PPanel';
 
 
 // SNS_LINK must not embed referral/tracking parameters.
@@ -1104,28 +1105,7 @@ export default function App() {
               <h2 className="card-title">P2P Trade</h2>
             </div>
             <p className="card-sub">Peer-to-peer token trading platform.</p>
-            
-            <div style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              justifyContent: 'center', padding: '3rem 1.5rem', textAlign: 'center'
-            }}>
-              <span style={{ fontSize: '3rem', marginBottom: '1.25rem', filter: 'drop-shadow(0 0 12px rgba(163,230,53,0.35))' }}>🤝</span>
-              <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text)', marginBottom: '8px' }}>P2P Trading Coming Soon</h3>
-              <p style={{ fontSize: '13px', color: 'var(--text2)', lineHeight: 1.6, maxWidth: '280px', margin: '0 auto 1.5rem' }}>
-                We are building a secure peer-to-peer escrow system. Soon you will be able to buy and sell Solana tokens directly with local payment methods.
-              </p>
-              <div style={{
-                width: '100%', height: '6px', background: 'rgba(255,255,255,0.06)',
-                borderRadius: '3px', overflow: 'hidden', position: 'relative'
-              }}>
-                <div style={{
-                  position: 'absolute', left: 0, top: 0, bottom: 0, width: '70%',
-                  background: 'linear-gradient(90deg, var(--cyan), var(--lime))',
-                  borderRadius: '3px', boxShadow: '0 0 8px var(--cyan)'
-                }} />
-              </div>
-              <span style={{ fontSize: '11px', color: 'var(--text3)', marginTop: '8px', fontFamily: 'var(--mono)' }}>Development Progress: 70%</span>
-            </div>
+            <P2PPanel connected={connected} walletTokenList={walletTokenList} />
           </div>
         </div>
 
