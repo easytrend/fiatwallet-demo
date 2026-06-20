@@ -912,3 +912,207 @@ footer a { color:var(--lime); text-decoration:none; }
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ================================================================
+   NAVIGATION & TABS — Desktop Header Nav & Mobile Bottom Nav
+   ================================================================ */
+
+/* Desktop Header Navigation Links */
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-left: 2rem;
+}
+.nav-link-btn {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 6px 4px;
+  transition: all 0.2s;
+  position: relative;
+  font-family: var(--ff);
+}
+.nav-link-btn:hover {
+  color: var(--text);
+}
+.nav-link-btn.active {
+  color: var(--lime);
+}
+.nav-link-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--lime);
+  border-radius: 2px;
+  box-shadow: 0 0 8px var(--lime);
+}
+
+/* Mobile Bottom Navigation Bar */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: rgba(10, 22, 40, 0.85);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 999;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.bnav-item {
+  background: none;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text3);
+  cursor: pointer;
+  flex: 1;
+  height: 100%;
+  gap: 4px;
+  transition: all 0.2s;
+  font-family: var(--ff);
+}
+.bnav-icon {
+  transition: transform 0.2s;
+}
+.bnav-label {
+  font-size: 11px;
+  font-weight: 600;
+}
+.bnav-item:hover {
+  color: var(--text);
+}
+.bnav-item.active {
+  color: var(--lime);
+}
+.bnav-item.active .bnav-icon {
+  transform: translateY(-2px);
+  filter: drop-shadow(0 0 6px var(--lime));
+}
+
+/* Desktop Card Switching & Layout Logic (>= 1100px) */
+@media (min-width: 1100px) {
+  .bottom-nav {
+    display: none !important;
+  }
+  .send-card {
+    display: block;
+  }
+  .p2p-card {
+    display: none;
+  }
+  .main.tab-p2p .send-card {
+    display: none;
+  }
+  .main.tab-p2p .p2p-card {
+    display: block;
+  }
+  
+  /* Swap widget desktop layout */
+  .swp-float-pill {
+    display: none !important;
+  }
+  .swp-modal-overlay {
+    display: block !important;
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    z-index: auto !important;
+    animation: none !important;
+    width: 100%;
+    max-width: 420px;
+    margin-top: 0;
+  }
+  .swp-modal-sheet {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 22px !important;
+    width: 100% !important;
+    max-width: 420px !important;
+    padding: 1.4rem !important;
+    box-shadow: none !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    animation: none !important;
+    transform: none !important;
+    position: relative;
+  }
+  .swp-modal-close {
+    display: none !important;
+  }
+  .swp-back-btn {
+    display: none !important;
+  }
+}
+
+/* Mobile Card Switching & Layout Logic (< 1100px) */
+@media (max-width: 1099px) {
+  .nav-links {
+    display: none !important;
+  }
+  .send-card, .p2p-card {
+    display: none;
+  }
+  .main.tab-send .send-card {
+    display: block;
+  }
+  .main.tab-p2p .p2p-card {
+    display: block;
+  }
+  .swp-float-pill {
+    display: none !important;
+  }
+  
+  /* Increase padding at bottom so bottom-nav doesn't overlap cards */
+  .main {
+    padding-bottom: 7rem !important;
+  }
+
+  /* Swap card mobile positioning when tab-swap is active */
+  .main.tab-swap .swp-modal-overlay {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    z-index: auto !important;
+    animation: none !important;
+    width: 100%;
+    max-width: 420px;
+    margin-top: 0;
+  }
+  .main.tab-swap .swp-modal-sheet {
+    background: var(--card) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 22px !important;
+    width: 100% !important;
+    max-width: 420px !important;
+    padding: 1.4rem !important;
+    box-shadow: none !important;
+    max-height: none !important;
+    overflow-y: visible !important;
+    animation: none !important;
+    transform: none !important;
+    position: relative;
+  }
+  .main.tab-swap .swp-modal-close {
+    display: none !important;
+  }
+  .main.tab-swap .swp-back-btn {
+    display: none !important;
+  }
+}
