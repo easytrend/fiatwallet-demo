@@ -26,14 +26,14 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [accountNumber, setAccountNumber] = useState('0000000000');
   const [selectedBank, setSelectedBank] = useState('Choose Bank');
   const [amount, setAmount] = useState('');
-  const [selectedToken, setSelectedToken] = useState(DEFAULT_TOKENS[0]); // Object instead of string
+  const [selectedToken, setSelectedToken] = useState(DEFAULT_TOKENS[0]);
 
   // Dropdown states
   const [countryOpen, setCountryOpen] = useState(false);
   const [bankOpen, setBankOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
 
-  // Search in Buy Mode
+  // Search & dynamic token imports in Buy Mode
   const [searchTerm, setSearchTerm] = useState('');
   const [customToken, setCustomToken] = useState(null);
   const [customTokenLoading, setCustomTokenLoading] = useState(false);
@@ -58,14 +58,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }
 
     if (mode === 'sell') {
-      // Sell Mode: show only available tokens in user's wallet
       if (connected) {
-        // SOL always exists/visible, others if balance > 0
         return list.filter(t => t.balance > 0 || t.symbol === 'SOL');
       }
       return list;
     } else {
-      // Buy Mode: show all
       return list;
     }
   };
@@ -86,33 +83,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
     setSelectedBank('Choose Bank');
   }, [selectedCountry]);
 
-  // Resolve account name dynamically matching the country's localized naming style
-  useEffect(() => {
-    if (!accountNumber) {
-      setAccountName('');
-      return;
-    }
-    
-    setResolvingName(true);
-    const t = setTimeout(() => {
-      setResolvingName(false);
-      const namesByCountry = {
-        USA: 'David Miller',
-        NGA: 'Chinedu Okeke',
-        GBR: 'Alastair Campbell',
-        EUR: 'Hans Meier',
-        CAN: 'Jean-Pierre Tremblay',
-        AUS: 'Lachlan Murdoch',
-        KEN: 'Mwangi Kamau',
-        GHA: 'Kofi Mensah',
-        IND: 'Aarav Patel'
-      };
-      setAccountName(namesByCountry[selectedCountry.code] || 'John Doe');
-    }, 600);
-
-    return () => clearTimeout(t);
-  }, [accountNumber, selectedCountry]);
-
   // Handle Paste from Clipboard
   const handlePaste = async () => {
     try {
@@ -123,7 +93,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
         alert("Clipboard content is not a valid account number.");
       }
     } catch (err) {
-      // Fallback prompt if clipboard permissions are blocked
       const fallback = prompt("Paste your account number here:");
       if (fallback && /^\d+$/.test(fallback.trim())) {
         setAccountNumber(fallback.trim());
@@ -158,6 +127,33 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
     return () => clearTimeout(t1);
   }, [selectedToken, mode, selectedCountry, selectedBank]);
+
+  // Resolve account name dynamically matching the country's localized naming style
+  useEffect(() => {
+    if (!accountNumber) {
+      setAccountName('');
+      return;
+    }
+    
+    setResolvingName(true);
+    const t = setTimeout(() => {
+      setResolvingName(false);
+      const namesByCountry = {
+        USA: 'David Miller',
+        NGA: 'Chinedu Okeke',
+        GBR: 'Alastair Campbell',
+        EUR: 'Hans Meier',
+        CAN: 'Jean-Pierre Tremblay',
+        AUS: 'Lachlan Murdoch',
+        KEN: 'Mwangi Kamau',
+        GHA: 'Kofi Mensah',
+        IND: 'Aarav Patel'
+      };
+      setAccountName(namesByCountry[selectedCountry.code] || 'John Doe');
+    }, 600);
+
+    return () => clearTimeout(t);
+  }, [accountNumber, selectedCountry]);
 
   // Search by contract address API query (Buy Mode only)
   useEffect(() => {
@@ -194,7 +190,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
         })
         .catch(() => {
           if (cancelled) return;
-          // Fallback mock token if registry lookup fails
           setCustomToken({
             symbol: address.slice(0, 4).toUpperCase(),
             name: 'Imported Contract',
@@ -247,52 +242,40 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   return (
     <div className="p2p-panel-wrap">
-      {/* ── Header Navigation Row ── */}
-      <div className="p2p-header-row">
-        {/* Toggle Switch */}
-        <div className="p2p-mode-toggle" onClick={() => {
+      {/* ── Toggle Switch & Country Selector ── */}
+      <div className="p2p-header-row" style={{ marginBottom: '1.25rem' }}>
+        <div className={`bulk-pill ${mode === 'buy' ? 'on' : ''}`} onClick={() => {
           setMode(mode === 'sell' ? 'buy' : 'sell');
           setAmount('');
           setSearchTerm('');
-        }}>
-          <div className={`p2p-toggle-track ${mode === 'buy' ? 'mode-buy' : 'mode-sell'}`}>
-            {mode === 'sell' ? (
-              <>
-                <div className="p2p-toggle-knob" />
-                <span className="p2p-toggle-text">Sell</span>
-              </>
-            ) : (
-              <>
-                <span className="p2p-toggle-text">Buy</span>
-                <div className="p2p-toggle-knob" />
-              </>
-            )}
-          </div>
+        }} style={{ padding: '6px 12px' }}>
+          <span className="pill-txt" style={{ fontSize: '11px', fontWeight: 700 }}>{mode === 'sell' ? 'SELL' : 'BUY'}</span>
+          <div className={`tsw ${mode === 'buy' ? 'on' : ''}`}><div className="tknob" /></div>
         </div>
 
-        {/* Country Selector Dropdown with World Map Icon */}
         <div className="p2p-country-selector">
-          <button className="p2p-country-btn" onClick={() => setCountryOpen(!countryOpen)}>
-            <svg className="p2p-map-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <div className="curr-selector" onClick={() => setCountryOpen(!countryOpen)}>
+            <svg className="p2p-map-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: '4px', opacity: 0.7 }}>
               <circle cx="12" cy="12" r="10"></circle>
               <line x1="2" y1="12" x2="22" y2="12"></line>
               <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
             </svg>
-            <span style={{ fontSize: '13px', fontWeight: 600 }}>{selectedCountry.flag} {selectedCountry.code}</span>
-            <span className="p2p-dropdown-arrow">▼</span>
-          </button>
+            <span className="curr-flag">{selectedCountry.flag}</span>
+            <span style={{ marginLeft: '4px' }}>{selectedCountry.code}</span>
+            <span className="curr-chevron" style={{ marginLeft: '6px' }}>▼</span>
+          </div>
 
           {countryOpen && (
-            <div className="p2p-dropdown-list">
+            <div className="drop-menu" style={{ right: 0, zIndex: 100 }}>
               {COUNTRIES.map(c => (
                 <div 
                   key={c.code} 
-                  className={`p2p-dropdown-item ${selectedCountry.code === c.code ? 'selected' : ''}`}
+                  className={`drop-item ${selectedCountry.code === c.code ? 'sel' : ''}`}
                   onClick={() => { setSelectedCountry(c); setCountryOpen(false); }}
                 >
-                  <span className="p2p-di-flag">{c.flag}</span>
-                  <span className="p2p-di-code">{c.code}</span>
-                  <span className="p2p-di-name">{c.name}</span>
+                  <span className="curr-flag">{c.flag}</span>
+                  <span className="di-code" style={{ marginLeft: '8px' }}>{c.code}</span>
+                  <span className="di-name">{c.name}</span>
                 </div>
               ))}
             </div>
@@ -300,256 +283,264 @@ export default function P2PPanel({ connected, walletTokenList }) {
         </div>
       </div>
 
-      {/* ── Main P2P Box Card ── */}
-      <div className="p2p-box-card">
-        {mode === 'sell' ? (
-          /* ==================== SELL MODE ==================== */
-          <>
-            {/* Account Number Row */}
-            <div className="p2p-field-group">
-              <div className="p2p-field-header">
-                <span className="p2p-field-title">Account Number</span>
-                <div className="p2p-action-links">
-                  <button className="p2p-link-action" onClick={handleScan}>
-                    {scanStatus || 'Scan'}
-                  </button>
-                  <button className="p2p-btn-badge" onClick={handlePaste}>Paste</button>
-                </div>
+      {mode === 'sell' ? (
+        /* ==================== SELL MODE (NATIVE FIELD STYLING) ==================== */
+        <>
+          {/* Account Number Field */}
+          <div className="field">
+            <div className="field-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
+              <div className="p2p-action-links" style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <button className="p2p-link-action" onClick={handleScan}>
+                  {scanStatus || 'Scan'}
+                </button>
+                <button className="p2p-btn-badge" onClick={handlePaste}>
+                  Paste
+                </button>
               </div>
-              
+            </div>
+            
+            <div className="input-wrap">
               <input 
                 type="text" 
-                className="p2p-input-val" 
                 value={accountNumber}
                 onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
                 placeholder="0000000000"
               />
-              <div className="p2p-account-name-resolved">
-                {resolvingName ? (
-                  <span className="p2p-name-resolving"><span className="p2p-mini-spinner" /> Resolving account name...</span>
+            </div>
+
+            <div className="p2p-account-name-resolved" style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--text3)' }}>
+              {resolvingName ? (
+                <span style={{ fontStyle: 'italic' }}>
+                  <span className="p2p-mini-spinner" /> Resolving account name...
+                </span>
+              ) : (
+                accountName && <span>Account Name: <strong style={{ color: 'var(--lime)' }}>{accountName}</strong></span>
+              )}
+            </div>
+          </div>
+
+          {/* Choose Bank Field */}
+          <div className="field" style={{ position: 'relative' }}>
+            <div className="field-label">Bank</div>
+            <div className="input-wrap" onClick={() => setBankOpen(!bankOpen)} style={{ cursor: 'pointer', justifyContent: 'space-between' }}>
+              <span style={{ color: selectedBank === 'Choose Bank' ? 'var(--text3)' : 'var(--text)' }}>{selectedBank}</span>
+              <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
+            </div>
+
+            {bankOpen && (
+              <div className="drop-menu" style={{ left: 0, right: 0, width: '100%' }}>
+                {selectedCountry.banks.map(b => (
+                  <div 
+                    key={b} 
+                    className={`drop-item ${selectedBank === b ? 'sel' : ''}`}
+                    onClick={() => { setSelectedBank(b); setBankOpen(false); }}
+                  >
+                    {b}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Amount & Token Selection Row */}
+          <div className="p2p-amount-row" style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
+            <div style={{ flex: 1.4 }}>
+              <div className="field-label">Amount</div>
+              <div className="input-wrap">
+                <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '15px' }}>{selectedCountry.symbol}</span>
+                <input 
+                  type="number" 
+                  placeholder="0"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'white' }}
+                />
+              </div>
+              
+              <div style={{ marginTop: '6px', fontSize: '12px', minHeight: '16px' }}>
+                {routingState === 'routing' ? (
+                  <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}>
+                    <span className="p2p-mini-spinner" /> Routing...
+                  </span>
                 ) : (
-                  accountName && <span className="p2p-name-text">Account Name: <strong>{accountName}</strong></span>
+                  <span style={{ color: 'var(--text2)' }}>
+                    ✓ Route: {displayBank} Escrow
+                  </span>
                 )}
               </div>
             </div>
 
-            {/* Choose Bank Bar (Spans full width of card) */}
-            <div className="p2p-bank-selector-row-wrap">
-              <div className="p2p-bank-selector-bar" onClick={() => setBankOpen(!bankOpen)}>
-                <span>{selectedBank}</span>
-                <span className="p2p-bank-dropdown-arrow-txt">▼</span>
-              </div>
-              {bankOpen && (
-                <div className="p2p-bank-dropdown-container">
-                  <div className="p2p-dropdown-list bank-dropdown-list">
-                    {selectedCountry.banks.map(b => (
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Token</div>
+              <div className="drop-wrap">
+                <div className="input-wrap" onClick={() => setTokenOpen(!tokenOpen)} style={{ cursor: 'pointer', justifyContent: 'space-between' }}>
+                  <strong style={{ color: 'white' }}>{selectedToken.symbol}</strong>
+                  <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
+                </div>
+
+                {tokenOpen && (
+                  <div className="drop-menu" style={{ right: 0, minWidth: '260px' }}>
+                    {selectableTokens.map(t => (
                       <div 
-                        key={b} 
-                        className={`p2p-dropdown-item ${selectedBank === b ? 'selected' : ''}`}
-                        onClick={() => { setSelectedBank(b); setBankOpen(false); }}
+                        key={t.mint || t.symbol} 
+                        className={`drop-item ${selectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                        onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
                       >
-                        {b}
+                        {t.logoURI ? (
+                          <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                        ) : (
+                          <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
+                        )}
+                        <span className="di-code" style={{ marginLeft: '8px' }}>{t.symbol}</span>
+                        {t.balance > 0 && <span className="di-name">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>}
                       </div>
                     ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Est. Receive Receipt Banner */}
+          <div className="p2p-receipt-banner" style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px', textAlign: 'center', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Est. Receive</span>
+            {routingState === 'routing' || routingState === 'loading_market' ? (
+              <div style={{ fontSize: '16px', fontWeight: 700, color: 'white' }}>
+                <span className="p2p-mini-spinner" /> Loading...
+              </div>
+            ) : (
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--lime)' }}>
+                {selectedCountry.symbol}{fiatAmountText}
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        /* ==================== BUY MODE (NATIVE FIELD STYLING) ==================== */
+        <>
+          {/* Amount & Token Selection Row */}
+          <div className="p2p-amount-row" style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
+            <div style={{ flex: 1.4 }}>
+              <div className="field-label">Amount</div>
+              <div className="input-wrap">
+                <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '15px' }}>{selectedCountry.symbol}</span>
+                <input 
+                  type="number" 
+                  placeholder="0"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'white' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Token</div>
+              <div className="drop-wrap">
+                <div className="input-wrap" onClick={() => setTokenOpen(!tokenOpen)} style={{ cursor: 'pointer', justifyContent: 'space-between' }}>
+                  <strong style={{ color: 'white' }}>{selectedToken.symbol}</strong>
+                  <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
+                </div>
+
+                {tokenOpen && (
+                  <div className="drop-menu" style={{ right: 0, minWidth: '280px' }}>
+                    <div className="drop-search">
+                      <input 
+                        type="text" 
+                        placeholder="Search symbol or contract..."
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                        onClick={e => e.stopPropagation()}
+                        autoFocus
+                      />
+                    </div>
+                    
+                    {customTokenLoading && (
+                      <div className="drop-item" style={{ fontStyle: 'italic', justifyContent: 'center' }}>
+                        <span className="p2p-mini-spinner" /> Finding contract...
+                      </div>
+                    )}
+
+                    {displayList.length === 0 && !customTokenLoading && (
+                      <div className="drop-item" style={{ fontStyle: 'italic', justifyContent: 'center' }}>No tokens found</div>
+                    )}
+
+                    {displayList.map(t => (
+                      <div 
+                        key={t.mint || t.symbol} 
+                        className={`drop-item ${selectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                        onClick={() => {
+                          setSelectedToken(t);
+                          setTokenOpen(false);
+                          setSearchTerm('');
+                        }}
+                      >
+                        {t.logoURI ? (
+                          <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                        ) : (
+                          <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
+                        )}
+                        <span className="di-code" style={{ marginLeft: '8px' }}>{t.symbol}</span>
+                        {t.balance > 0 && <span className="di-name">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Account Detail Box */}
+          <div className="field">
+            <div className="field-label" style={{ textAlign: 'center' }}>Account Detail</div>
+            <div className="p2p-account-detail-box" style={{ background: 'rgba(0, 0, 0, 0.15)', border: '1.5px solid var(--border)', borderRadius: '13px', padding: '14px', minHeight: '120px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+              {routingState === 'routing' ? (
+                <div style={{ textAlign: 'center', color: 'var(--text3)', fontSize: '13px', fontStyle: 'italic' }}>
+                  <span className="p2p-mini-spinner" /> Routing...
+                </div>
+              ) : (
+                <div className="animated-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: 'var(--text2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Bank Name:</span>
+                    <strong style={{ color: 'white' }}>{displayBank}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Account Number:</span>
+                    <strong style={{ color: 'white', fontFamily: 'var(--mono)' }}>9012847592</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Beneficiary:</span>
+                    <strong style={{ color: 'white' }}>Fiatwallet Escrow Ltd</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Ref Code:</span>
+                    <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)' }}>FW-7739</strong>
                   </div>
                 </div>
               )}
             </div>
+          </div>
 
-            {/* Amount & Token Selection */}
-            <div className="p2p-amount-row" style={{ marginTop: '0.8rem' }}>
-              <div className="p2p-amount-col">
-                <span className="p2p-field-title">Amount</span>
-                <div className="p2p-amount-input-wrap">
-                  <span className="p2p-currency-symbol">{selectedCountry.symbol}</span>
-                  <input 
-                    type="number" 
-                    className="p2p-amount-input" 
-                    placeholder="0"
-                    value={amount}
-                    onChange={e => setAmount(e.target.value)}
-                  />
-                </div>
-                {/* Routing Status Box */}
-                <div className="p2p-routing-status-line">
-                  {routingState === 'routing' ? (
-                    <span className="p2p-routing-text loading">
-                      <span className="p2p-mini-spinner" /> Routing...
-                    </span>
-                  ) : (
-                    <span className="p2p-routing-text resolved">
-                      ✓ Route: {displayBank} Escrow
-                    </span>
-                  )}
-                </div>
+          {/* Est. Crypto to Receive Receipt Banner */}
+          <div className="p2p-receipt-banner" style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px', textAlign: 'center', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Est. Crypto to Receive</span>
+            {routingState === 'routing' || routingState === 'loading_market' ? (
+              <div style={{ fontSize: '16px', fontWeight: 700, color: 'white' }}>
+                <span className="p2p-mini-spinner" /> Loading...
               </div>
-
-              {/* Token Selector */}
-              <div className="p2p-token-col">
-                <span className="p2p-field-title">Token</span>
-                <div className="p2p-token-selector">
-                  <button className="p2p-token-btn" onClick={() => setTokenOpen(!tokenOpen)}>
-                    <strong>{selectedToken.symbol}</strong>
-                    <span className="p2p-dropdown-arrow">▼</span>
-                  </button>
-                  {tokenOpen && (
-                    <div className="p2p-dropdown-list tokens-list">
-                      {selectableTokens.map(t => (
-                        <div 
-                          key={t.mint || t.symbol} 
-                          className={`p2p-dropdown-item ${selectedToken.symbol === t.symbol ? 'selected' : ''}`}
-                          onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
-                        >
-                          {t.logoURI ? (
-                            <img src={t.logoURI} alt={t.symbol} className="p2p-di-logo" />
-                          ) : (
-                            <div className="p2p-di-logo-fallback">{t.symbol.slice(0, 2)}</div>
-                          )}
-                          <div className="p2p-di-token-info">
-                            <span className="p2p-di-code">{t.symbol}</span>
-                            <span className="p2p-di-name-small">{t.name || 'Token'}</span>
-                          </div>
-                          {t.balance > 0 && (
-                            <span className="p2p-di-balance">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+            ) : (
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--lime)' }}>
+                {cryptoAmount} {selectedToken.symbol}
               </div>
-            </div>
-            
-            {/* Bottom Gray Bar (Spans full width of card) */}
-            <div className="p2p-bottom-status-row">
-              {routingState === 'routing' || routingState === 'loading_market' ? (
-                <div className="p2p-status-bar loading">
-                  <span className="p2p-mini-spinner" /> Loading...
-                </div>
-              ) : (
-                <div className="p2p-status-bar resolved">
-                  Est. Receive: {selectedCountry.symbol}{fiatAmountText}
-                </div>
-              )}
-            </div>
-          </>
-        ) : (
-          /* ==================== BUY MODE ==================== */
-          <>
-            {/* Amount & Token Input */}
-            <div className="p2p-amount-row">
-              <div className="p2p-amount-col">
-                <span className="p2p-field-title">Amount</span>
-                <div className="p2p-amount-input-wrap">
-                  <span className="p2p-currency-symbol">{selectedCountry.symbol}</span>
-                  <input 
-                    type="number" 
-                    className="p2p-amount-input" 
-                    placeholder="0"
-                    value={amount}
-                    onChange={e => setAmount(e.target.value)}
-                  />
-                </div>
-              </div>
+            )}
+          </div>
+        </>
+      )}
 
-              {/* Token Selector with Contract Search */}
-              <div className="p2p-token-col">
-                <span className="p2p-field-title">Token</span>
-                <div className="p2p-token-selector">
-                  <button className="p2p-token-btn" onClick={() => setTokenOpen(!tokenOpen)}>
-                    <strong>{selectedToken.symbol}</strong>
-                    <span className="p2p-dropdown-arrow">▼</span>
-                  </button>
-                  {tokenOpen && (
-                    <div className="p2p-dropdown-list tokens-list">
-                      <div className="p2p-search-box-wrap">
-                        <input 
-                          type="text" 
-                          className="p2p-token-search-input"
-                          placeholder="Search symbol or contract..."
-                          value={searchTerm}
-                          onChange={e => setSearchTerm(e.target.value)}
-                          onClick={e => e.stopPropagation()}
-                          autoFocus
-                        />
-                      </div>
-                      
-                      {customTokenLoading && (
-                        <div className="p2p-dropdown-item loading">
-                          <span className="p2p-mini-spinner" /> Finding contract...
-                        </div>
-                      )}
-
-                      {displayList.length === 0 && !customTokenLoading && (
-                        <div className="p2p-dropdown-item placeholder">No tokens found</div>
-                      )}
-
-                      {displayList.map(t => (
-                        <div 
-                          key={t.mint || t.symbol} 
-                          className={`p2p-dropdown-item ${selectedToken.symbol === t.symbol ? 'selected' : ''}`}
-                          onClick={() => {
-                            setSelectedToken(t);
-                            setTokenOpen(false);
-                            setSearchTerm('');
-                          }}
-                        >
-                          {t.logoURI ? (
-                            <img src={t.logoURI} alt={t.symbol} className="p2p-di-logo" />
-                          ) : (
-                            <div className="p2p-di-logo-fallback">{t.symbol.slice(0, 2)}</div>
-                          )}
-                          <div className="p2p-di-token-info">
-                            <span className="p2p-di-code">{t.symbol}</span>
-                            <span className="p2p-di-name-small">{t.name || 'Token'}</span>
-                          </div>
-                          {t.balance > 0 && (
-                            <span className="p2p-di-balance">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Account Detail Box */}
-            <div className="p2p-account-details-middle">
-              <div className="p2p-ad-title-centered">Account Detail</div>
-              {routingState === 'routing' ? (
-                <div className="p2p-routing-text-centered loading">
-                  <span className="p2p-mini-spinner" /> Routing...
-                </div>
-              ) : (
-                <div className="p2p-ad-content-centered animated-fade-in">
-                  <div>Bank Name: <strong>{displayBank}</strong></div>
-                  <div>Account Number: <strong style={{ fontFamily: 'var(--mono)' }}>9012847592</strong></div>
-                  <div>Beneficiary: <strong>Fiatwallet Escrow Ltd</strong></div>
-                  <div>Ref: <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)' }}>FW-7739</strong></div>
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Gray Bar showing Crypto to Receive */}
-            <div className="p2p-bottom-status-row">
-              {routingState === 'routing' || routingState === 'loading_market' ? (
-                <div className="p2p-status-bar loading">
-                  <span className="p2p-mini-spinner" /> Loading...
-                </div>
-              ) : (
-                <div className="p2p-status-bar resolved">
-                  {cryptoAmount}   {selectedToken.symbol}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* ── Main Action CTA Button ── */}
+      {/* ── Submit Action Button (Reusing Send Button Class) ── */}
       <button 
-        className="p2p-submit-btn" 
+        className="send-btn" 
         onClick={() => alert(`P2P Trade of ${selectedCountry.symbol}${fiatAmountText} via ${displayBank} Escrow initiated!`)}
       >
         {mode === 'sell' ? 'Send' : 'Buy'}
