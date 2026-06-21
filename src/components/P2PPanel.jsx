@@ -581,9 +581,18 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   className="p2p-btn-badge" 
                   onClick={() => setScannerActive(true)}
                   disabled={!isPajcashLive || !!apiError}
-                  style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
+                  style={{ 
+                    opacity: (isPajcashLive && !apiError) ? 1 : 0.6,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  title="Scan QR Code"
                 >
-                  Scan QR
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" strokeWidth="2.5" fill="none" />
+                    <rect x="1" y="10" width="22" height="4" fill="currentColor" />
+                  </svg>
                 </button>
               </div>
             </div>
