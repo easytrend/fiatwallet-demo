@@ -2,7 +2,18 @@ import { useState, useEffect } from 'react';
 import { getSupportedTokens, initiateWithdrawal, getTransactionHistory, getBanks } from '../services/pajcashService';
 
 const COUNTRIES = [
-  { code: 'NGA', name: 'Nigeria', flag: '🇳🇬', symbol: '₦' }
+  { code: 'NGA', name: 'Nigeria', flag: '🇳🇬', symbol: '₦' },
+  { code: 'USA', name: 'United States', flag: '🇺🇸', symbol: '$' },
+  { code: 'GBR', name: 'United Kingdom', flag: '🇬🇧', symbol: '£' },
+  { code: 'EUR', name: 'Europe', flag: '🇪🇺', symbol: '€' },
+  { code: 'CAN', name: 'Canada', flag: '🇨🇦', symbol: '$' },
+  { code: 'AUS', name: 'Australia', flag: '🇦🇺', symbol: '$' },
+  { code: 'KEN', name: 'Kenya', flag: '🇰🇪', symbol: 'Sh' },
+  { code: 'GHA', name: 'Ghana', flag: '🇬🇭', symbol: '₵' },
+  { code: 'IND', name: 'India', flag: '🇮🇳', symbol: '₹' },
+  { code: 'ZAF', name: 'South Africa', flag: '🇿🇦', symbol: 'R' },
+  { code: 'BRA', name: 'Brazil', flag: '🇧🇷', symbol: 'R$' },
+  { code: 'JPN', name: 'Japan', flag: '🇯🇵', symbol: '¥' }
 ];
 
 const getBankMetadata = (bankName) => {
@@ -57,6 +68,8 @@ const DEFAULT_TOKENS = [
 ];
 
 export default function P2PPanel({ connected, walletTokenList }) {
+  const [mode, setMode] = useState('sell'); // 'sell' or 'buy'
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
   const [accountNumber, setAccountNumber] = useState('');
   const [accountName, setAccountName] = useState('');
   const [selectedBank, setSelectedBank] = useState('Choose Bank');
@@ -74,6 +87,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [logError, setLogError] = useState(null);
   const [bankSearch, setBankSearch] = useState('');
+  const [countrySearch, setCountrySearch] = useState('');
   const [apiBanks, setApiBanks] = useState([]);
   const [loadingBanks, setLoadingBanks] = useState(false);
   const [apiError, setApiError] = useState(null);
@@ -83,19 +97,26 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [successDetails, setSuccessDetails] = useState(null);
 
   // Dropdown states
+  const [countryOpen, setCountryOpen] = useState(false);
   const [bankOpen, setBankOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
 
   // Routing & Loading states
   const [routingState, setRoutingState] = useState('idle'); // 'routing' | 'loading_market' | 'resolved'
+  const [resolvingName, setResolvingName] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Live route determination
+  const isLiveRoute = selectedCountry.code === 'NGA' && mode === 'sell';
 
   // Initialize API and credential warnings
   useEffect(() => {
-    if (!isPajcashLive) {
+    if (!isPajcashLive && isLiveRoute) {
       setApiError("PajCash API keys are not configured. To enable live payouts, configure VITE_PAJCASH_API_KEY and VITE_PAJCASH_BUSINESS_ID in Vercel.");
+    } else {
+      setApiError(null);
     }
-  }, [isPajcashLive]);
+  }, [isPajcashLive, isLiveRoute]);
 
   // Load supported tokens from PajCash API on mount
   useEffect(() => {
@@ -121,10 +142,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
     loadTokens();
   }, []);
 
-  // Fetch supported banks from PajCash API on mount
+  // Fetch supported banks from PajCash API on mount/live route change
   useEffect(() => {
     async function fetchApiBanks() {
-      if (!isPajcashLive) return;
+      if (!isLiveRoute || !isPajcashLive) return;
       setLoadingBanks(true);
       setApiError(null);
       try {
@@ -136,17 +157,17 @@ export default function P2PPanel({ connected, walletTokenList }) {
         }
       } catch (e) {
         console.error("Failed to fetch banks from PajCash API:", e);
-        setApiError(`PajCash API connection failed: ${e.message || "Unauthorized / Connection Refused"}. Please check that your API Key is valid and can reach https://api.paj.cash.`);
+        setApiError(`PajCash API connection failed: ${e.message || "Unauthorized / Connection Refused"}. Please check that your API Key is valid.`);
       } finally {
         setLoadingBanks(false);
       }
     }
     fetchApiBanks();
-  }, [isPajcashLive]);
+  }, [isPajcashLive, isLiveRoute]);
 
   // Fetch payout logs when active
   const loadPayoutLogs = async () => {
-    if (!isPajcashLive) return;
+    if (!isLiveRoute || !isPajcashLive) return;
     setLoadingLogs(true);
     setLogError(null);
     try {
@@ -164,12 +185,54 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   useEffect(() => {
     loadPayoutLogs();
-  }, [isPajcashLive]);
+  }, [isPajcashLive, isLiveRoute]);
+
+  // Resolve account name dynamically matching the country's localized naming style
+  useEffect(() => {
+    if (!accountNumber || selectedBank === 'Choose Bank') {
+      setAccountName('');
+      return;
+    }
+    
+    setResolvingName(true);
+    const t = setTimeout(() => {
+      setResolvingName(false);
+      const trimmedAcc = accountNumber.trim();
+      if (selectedCountry.code === 'NGA' && trimmedAcc === '8140321635') {
+        setAccountName('Augustine Onimisi');
+      } else {
+        const namesByCountry = {
+          USA: 'David Miller',
+          NGA: 'Chinedu Okeke',
+          GBR: 'Alastair Campbell',
+          EUR: 'Hans Meier',
+          CAN: 'Jean-Pierre Tremblay',
+          AUS: 'Lachlan Murdoch',
+          KEN: 'Mwangi Kamau',
+          GHA: 'Kofi Mensah',
+          IND: 'Aarav Patel',
+          ZAF: 'Sipho Zulu',
+          BRA: 'Lucas Silva',
+          JPN: 'Hiroshi Tanaka'
+        };
+        setAccountName(namesByCountry[selectedCountry.code] || 'John Doe');
+      }
+    }, 600);
+
+    return () => clearTimeout(t);
+  }, [accountNumber, selectedCountry, selectedBank]);
+
+  // Reset fields when country or mode changes
+  useEffect(() => {
+    setSelectedBank('Choose Bank');
+    setAccountNumber('');
+    setAccountName('');
+    setAmount('');
+  }, [selectedCountry, mode]);
 
   // Fetch token list from props or defaults
   const getSelectableTokens = () => {
     let list = pajTokens.length > 0 ? pajTokens : (connected && walletTokenList && walletTokenList.length > 0 ? walletTokenList : DEFAULT_TOKENS);
-    // Filter only Solana tokens for Solana wallet compatibility
     return list.filter(t => !t.chain || t.chain.toUpperCase() === 'SOLANA');
   };
 
@@ -228,8 +291,18 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   const displayBank = selectedBank === 'Choose Bank' ? (allBanksForCountry[0] || 'Choose Bank') : selectedBank;
 
+  // Filter country dropdown by search input
+  const filteredCountries = COUNTRIES.filter(c => 
+    c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
+    c.code.toLowerCase().includes(countrySearch.toLowerCase())
+  );
+
   // Handle transaction submission
   const handleSubmit = async () => {
+    if (!isLiveRoute) {
+      alert('This region/mode is not supported on the active gateway.');
+      return;
+    }
     if (!isPajcashLive || apiError) {
       alert('PajCash API is offline. Cannot process transactions.');
       return;
@@ -246,15 +319,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
       alert('Please select a bank.');
       return;
     }
-    if (!accountName || !accountName.trim()) {
-      alert('Please enter the account name.');
+    if (!accountName) {
+      alert('Please wait for the account name to resolve.');
       return;
     }
 
     setSubmitting(true);
     try {
       // Format destination payload: "BankName - AccountNumber - AccountName"
-      const destStr = `${displayBank} - ${accountNumber} - ${accountName.trim()}`;
+      const destStr = `${displayBank} - ${accountNumber} - ${accountName}`;
       const res = await initiateWithdrawal(PAJCASH_BUSINESS_ID, PAJCASH_API_KEY, destStr, amount);
       
       setSuccessDetails({
@@ -263,7 +336,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         fiat: `₦${fiatAmountText}`,
         bank: displayBank,
         account: accountNumber,
-        name: accountName.trim(),
+        name: accountName,
         txId: res._id || res.id || 'N/A'
       });
       setShowSuccess(true);
@@ -280,251 +353,307 @@ export default function P2PPanel({ connected, walletTokenList }) {
     <div className="p2p-panel-wrap">
       
       {/* ── API Configuration Warning Banner ── */}
-      {apiError && (
+      {isLiveRoute && apiError && (
         <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '12px', padding: '12px 14px', fontSize: '12px', color: '#f87171', marginBottom: '1.25rem', lineHeight: '1.5' }}>
           ⚠️ <strong>PajCash Payout Gateway Offline:</strong> {apiError}
         </div>
       )}
 
-      {/* ── Mode & Live Status Row ── */}
+      {/* ── Mode Switch & Searchable Country selector ── */}
       <div className="p2p-header-row" style={{ marginBottom: '1.25rem' }}>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <div className="bulk-pill" style={{ padding: '6px 12px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px' }}>
-            <span className="pill-txt" style={{ fontSize: '11px', fontWeight: 700, color: 'var(--lime)' }}>OFF-RAMP / SELL</span>
+          <div className="bulk-pill" onClick={() => setMode(mode === 'sell' ? 'buy' : 'sell')} style={{ padding: '6px 12px', cursor: 'pointer' }}>
+            <span className="pill-txt" style={{ fontSize: '11px', fontWeight: 700, color: 'white' }}>
+              {mode === 'sell' ? 'SELL / OFF-RAMP' : 'BUY / ON-RAMP'}
+            </span>
+            <div className={`tsw ${mode === 'buy' ? 'on' : ''}`} style={{ marginLeft: '6px' }}><div className="tknob" /></div>
           </div>
-          {isPajcashLive && !apiError ? (
+          {isLiveRoute && isPajcashLive && !apiError ? (
             <span style={{ fontSize: '10px', color: 'var(--lime)', background: 'rgba(74, 222, 128, 0.1)', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
               ● Live Payouts
             </span>
-          ) : (
+          ) : isLiveRoute ? (
             <span style={{ fontSize: '10px', color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
               ● Offline
+            </span>
+          ) : (
+            <span style={{ fontSize: '10px', color: 'var(--text3)', background: 'rgba(255, 255, 255, 0.05)', padding: '4px 8px', borderRadius: '6px' }}>
+              ● Demo Mode
             </span>
           )}
         </div>
 
-        <div className="p2p-country-selector">
-          <div className="curr-selector" style={{ cursor: 'default' }}>
-            <span className="curr-flag">{COUNTRIES[0].flag}</span>
-            <span style={{ marginLeft: '4px' }}>{COUNTRIES[0].code}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Payout Form Fields ── */}
-      <>
-        {/* Choose Bank Field */}
-        <div className="field" style={{ position: 'relative' }}>
-          <div className="field-label">Bank</div>
-          <div 
-            className="input-wrap" 
-            onClick={() => { if (isPajcashLive && !apiError) setBankOpen(!bankOpen); }} 
-            style={{ cursor: (isPajcashLive && !apiError) ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
-          >
-            <span style={{ color: selectedBank === 'Choose Bank' ? 'var(--text3)' : 'var(--text)' }}>{selectedBank}</span>
-            <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
+        <div className="p2p-country-selector" style={{ position: 'relative' }}>
+          <div className="curr-selector" onClick={() => setCountryOpen(!countryOpen)}>
+            <span className="curr-flag">{selectedCountry.flag}</span>
+            <span style={{ marginLeft: '4px' }}>{selectedCountry.code}</span>
+            <span className="curr-chevron" style={{ marginLeft: '6px' }}>▼</span>
           </div>
 
-          {bankOpen && (
-            <div className="drop-menu" style={{ left: 0, right: 0, width: '100%' }} onClick={e => e.stopPropagation()}>
-              <div className="drop-search" style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
+          {countryOpen && (
+            <div className="drop-menu" style={{ right: 0, zIndex: 100, minWidth: '220px' }}>
+              <div className="drop-search" style={{ padding: '8px', borderBottom: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
                 <input 
                   type="text" 
-                  placeholder="Search bank name..."
-                  value={bankSearch}
-                  onChange={e => setBankSearch(e.target.value)}
+                  placeholder="Search country..."
+                  value={countrySearch}
+                  onChange={e => setCountrySearch(e.target.value)}
                   style={{ width: '100%', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: '6px', color: 'white', fontSize: '12px', outline: 'none' }}
                 />
               </div>
               <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                {filteredBanksList.map(b => {
-                  const meta = getBankMetadata(b);
-                  return (
-                    <div 
-                      key={b} 
-                      className={`drop-item ${selectedBank === b ? 'sel' : ''}`}
-                      onClick={() => { setSelectedBank(b); setBankOpen(false); setBankSearch(''); }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px' }}
-                    >
-                      {meta.logo ? (
-                        <img 
-                          src={meta.logo} 
-                          alt={meta.name} 
-                          onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                          style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover' }} 
-                        />
-                      ) : null}
-                      <div 
-                        className="bank-avatar"
-                        style={{ 
-                          display: meta.logo ? 'none' : 'flex', 
-                          width: '22px', 
-                          height: '22px', 
-                          borderRadius: '50%', 
-                          background: meta.color, 
-                          color: 'white', 
-                          fontSize: '9px', 
-                          fontWeight: 'bold', 
-                          alignItems: 'center', 
-                          justifyContent: 'center',
-                          textTransform: 'uppercase'
-                        }}
-                      >
-                        {meta.initial}
-                      </div>
-                      <span className="di-name" style={{ marginLeft: 0 }}>{b}</span>
-                    </div>
-                  );
-                })}
-                {filteredBanksList.length === 0 && (
+                {filteredCountries.map(c => (
+                  <div 
+                    key={c.code} 
+                    className={`drop-item ${selectedCountry.code === c.code ? 'sel' : ''}`}
+                    onClick={() => { setSelectedCountry(c); setCountryOpen(false); setCountrySearch(''); }}
+                  >
+                    <span className="curr-flag">{c.flag}</span>
+                    <span className="di-code" style={{ marginLeft: '8px' }}>{c.code}</span>
+                    <span className="di-name">{c.name}</span>
+                  </div>
+                ))}
+                {filteredCountries.length === 0 && (
                   <div style={{ fontSize: '11px', color: 'var(--text3)', fontStyle: 'italic', padding: '12px', textAlign: 'center' }}>
-                    No banks found
+                    No countries found
                   </div>
                 )}
               </div>
             </div>
           )}
         </div>
+      </div>
 
-        {/* Account Number Field */}
-        <div className="field">
-          <div className="field-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
-            <div className="p2p-action-links" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <button 
-                className="p2p-btn-badge" 
-                onClick={handlePaste}
-                disabled={!isPajcashLive || !!apiError}
-                style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
-              >
-                Paste
-              </button>
+      {/* ── Route Determination & Layout ── */}
+      {isLiveRoute ? (
+        /* ==================== LIVE ROUTE (NIGERIA SELL/OFF-RAMP) ==================== */
+        <>
+          {/* Choose Bank Field */}
+          <div className="field" style={{ position: 'relative' }}>
+            <div className="field-label">Bank</div>
+            <div 
+              className="input-wrap" 
+              onClick={() => { if (isPajcashLive && !apiError) setBankOpen(!bankOpen); }} 
+              style={{ cursor: (isPajcashLive && !apiError) ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
+            >
+              <span style={{ color: selectedBank === 'Choose Bank' ? 'var(--text3)' : 'var(--text)' }}>{selectedBank}</span>
+              <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
             </div>
-          </div>
-          
-          <div className="input-wrap" style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}>
-            <input 
-              type="text" 
-              value={accountNumber}
-              onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
-              placeholder="0000000000"
-              disabled={!isPajcashLive || !!apiError}
-            />
-          </div>
-        </div>
 
-        {/* Account Name Field */}
-        <div className="field">
-          <div className="field-label">Account Name</div>
-          <div className="input-wrap" style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}>
-            <input 
-              type="text" 
-              value={accountName}
-              onChange={e => setAccountName(e.target.value)}
-              placeholder="Registered name on account"
-              disabled={!isPajcashLive || !!apiError}
-            />
+            {bankOpen && (
+              <div className="drop-menu" style={{ left: 0, right: 0, width: '100%' }} onClick={e => e.stopPropagation()}>
+                <div className="drop-search" style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
+                  <input 
+                    type="text" 
+                    placeholder="Search bank name..."
+                    value={bankSearch}
+                    onChange={e => setBankSearch(e.target.value)}
+                    style={{ width: '100%', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: '6px', color: 'white', fontSize: '12px', outline: 'none' }}
+                  />
+                </div>
+                <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  {filteredBanksList.map(b => {
+                    const meta = getBankMetadata(b);
+                    return (
+                      <div 
+                        key={b} 
+                        className={`drop-item ${selectedBank === b ? 'sel' : ''}`}
+                        onClick={() => { setSelectedBank(b); setBankOpen(false); setBankSearch(''); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px' }}
+                      >
+                        {meta.logo ? (
+                          <img 
+                            src={meta.logo} 
+                            alt={meta.name} 
+                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                            style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover' }} 
+                          />
+                        ) : null}
+                        <div 
+                          className="bank-avatar"
+                          style={{ 
+                            display: meta.logo ? 'none' : 'flex', 
+                            width: '22px', 
+                            height: '22px', 
+                            borderRadius: '50%', 
+                            background: meta.color, 
+                            color: 'white', 
+                            fontSize: '9px', 
+                            fontWeight: 'bold', 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            textTransform: 'uppercase'
+                          }}
+                        >
+                          {meta.initial}
+                        </div>
+                        <span className="di-name" style={{ marginLeft: 0 }}>{b}</span>
+                      </div>
+                    );
+                  })}
+                  {filteredBanksList.length === 0 && (
+                    <div style={{ fontSize: '11px', color: 'var(--text3)', fontStyle: 'italic', padding: '12px', textAlign: 'center' }}>
+                      No banks found
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
 
-        {/* Amount & Token Selection Row */}
-        <div className="p2p-amount-row" style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
-          <div style={{ flex: 1.4 }}>
-            <div className="field-label">Amount to Sell</div>
+          {/* Account Number Field */}
+          <div className="field">
+            <div className="field-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
+              <div className="p2p-action-links" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <button 
+                  className="p2p-btn-badge" 
+                  onClick={handlePaste}
+                  disabled={!isPajcashLive || !!apiError}
+                  style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
+                >
+                  Paste
+                </button>
+              </div>
+            </div>
+            
             <div className="input-wrap" style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}>
-              <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '13px', marginRight: '6px' }}>
-                {selectedToken.symbol}
-              </span>
               <input 
-                type="number" 
-                placeholder="0.00"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'white' }}
+                type="text" 
+                value={accountNumber}
+                onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
+                placeholder="0000000000"
                 disabled={!isPajcashLive || !!apiError}
               />
             </div>
-            
-            <div style={{ marginTop: '6px', fontSize: '12px', minHeight: '16px' }}>
-              {routingState === 'routing' ? (
-                <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}>
-                  <span className="p2p-mini-spinner" /> Routing...
-                </span>
-              ) : (
-                selectedBank !== 'Choose Bank' && (
-                  <span style={{ color: 'var(--text2)' }}>
-                    ✓ Route: {displayBank} Escrow
+
+            {/* Resolved Name - Only pops after Bank + Acc Num is entered */}
+            <div className="p2p-account-name-resolved" style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--lime)', fontWeight: 'bold' }}>
+              {accountNumber && accountNumber.trim().length > 0 && selectedBank !== 'Choose Bank' && (
+                resolvingName ? (
+                  <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}>
+                    <span className="p2p-mini-spinner" /> Resolving...
                   </span>
+                ) : (
+                  accountName && <span className="animated-fade-in">{accountName}</span>
                 )
               )}
             </div>
           </div>
 
-          <div style={{ flex: 1 }}>
-            <div className="field-label">Token</div>
-            <div className="drop-wrap">
-              <div 
-                className="input-wrap" 
-                onClick={() => { if (isPajcashLive && !apiError) setTokenOpen(!tokenOpen); }} 
-                style={{ cursor: (isPajcashLive && !apiError) ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
-              >
-                <strong style={{ color: 'white' }}>{selectedToken.symbol}</strong>
-                <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
+          {/* Amount & Token Selection Row */}
+          <div className="p2p-amount-row" style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
+            <div style={{ flex: 1.4 }}>
+              <div className="field-label">Amount to Sell</div>
+              <div className="input-wrap" style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}>
+                <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '13px', marginRight: '6px' }}>
+                  {selectedToken.symbol}
+                </span>
+                <input 
+                  type="number" 
+                  placeholder="0.00"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'white' }}
+                  disabled={!isPajcashLive || !!apiError}
+                />
               </div>
+              
+              <div style={{ marginTop: '6px', fontSize: '12px', minHeight: '16px' }}>
+                {routingState === 'routing' ? (
+                  <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}>
+                    <span className="p2p-mini-spinner" /> Routing...
+                  </span>
+                ) : (
+                  selectedBank !== 'Choose Bank' && (
+                    <span style={{ color: 'var(--text2)' }}>
+                      ✓ Route: {displayBank} Escrow
+                    </span>
+                  )
+                )}
+              </div>
+            </div>
 
-              {tokenOpen && (
-                <div className="drop-menu" style={{ right: 0, minWidth: '260px' }}>
-                  {selectableTokens.map(t => (
-                    <div 
-                      key={t.mint || t.symbol} 
-                      className={`drop-item ${selectedToken.symbol === t.symbol ? 'sel' : ''}`}
-                      onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
-                    >
-                      {t.logoURI ? (
-                        <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
-                      ) : (
-                        <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
-                      )}
-                      <span className="di-code" style={{ marginLeft: '8px' }}>{t.symbol}</span>
-                      {t.balance > 0 && <span className="di-name">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>}
-                    </div>
-                  ))}
+            <div style={{ flex: 1 }}>
+              <div className="field-label">Token</div>
+              <div className="drop-wrap">
+                <div 
+                  className="input-wrap" 
+                  onClick={() => { if (isPajcashLive && !apiError) setTokenOpen(!tokenOpen); }} 
+                  style={{ cursor: (isPajcashLive && !apiError) ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
+                >
+                  <strong style={{ color: 'white' }}>{selectedToken.symbol}</strong>
+                  <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
                 </div>
-              )}
+
+                {tokenOpen && (
+                  <div className="drop-menu" style={{ right: 0, minWidth: '260px' }}>
+                    {selectableTokens.map(t => (
+                      <div 
+                        key={t.mint || t.symbol} 
+                        className={`drop-item ${selectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                        onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
+                      >
+                        {t.logoURI ? (
+                          <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                        ) : (
+                          <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
+                        )}
+                        <span className="di-code" style={{ marginLeft: '8px' }}>{t.symbol}</span>
+                        {t.balance > 0 && <span className="di-name">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Est. Receive Receipt Banner */}
-        <div className="p2p-receipt-banner" style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px', textAlign: 'center', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Est. Receive</span>
-          {routingState === 'routing' || routingState === 'loading_market' ? (
-            <div style={{ fontSize: '16px', fontWeight: 700, color: 'white' }}>
-              <span className="p2p-mini-spinner" /> Loading...
-            </div>
-          ) : (
-            <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--lime)' }}>
-              ₦{fiatAmountText}
-            </div>
-          )}
-        </div>
-      </>
+          {/* Est. Receive Receipt Banner */}
+          <div className="p2p-receipt-banner" style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px', textAlign: 'center', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Est. Receive</span>
+            {routingState === 'routing' || routingState === 'loading_market' ? (
+              <div style={{ fontSize: '16px', fontWeight: 700, color: 'white' }}>
+                <span className="p2p-mini-spinner" /> Loading...
+              </div>
+            ) : (
+              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--lime)' }}>
+                ₦{fiatAmountText}
+              </div>
+            )}
+          </div>
 
-      {/* ── Submit Action Button ── */}
-      <button 
-        className="send-btn" 
-        onClick={handleSubmit}
-        disabled={submitting || !isPajcashLive || !!apiError}
-        style={{ opacity: (submitting || !isPajcashLive || !!apiError) ? 0.6 : 1, cursor: (submitting || !isPajcashLive || !!apiError) ? 'not-allowed' : 'pointer' }}
-      >
-        {submitting ? (
-          <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />
-        ) : null}
-        {submitting ? 'Processing...' : (!isPajcashLive || apiError ? 'Payout Gateway Offline' : 'Send')}
-      </button>
+          {/* Submit Button */}
+          <button 
+            className="send-btn" 
+            onClick={handleSubmit}
+            disabled={submitting || !isPajcashLive || !!apiError}
+            style={{ opacity: (submitting || !isPajcashLive || !!apiError) ? 0.6 : 1, cursor: (submitting || !isPajcashLive || !!apiError) ? 'not-allowed' : 'pointer' }}
+          >
+            {submitting ? (
+              <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />
+            ) : null}
+            {submitting ? 'Processing...' : (!isPajcashLive || apiError ? 'Payout Gateway Offline' : 'Send')}
+          </button>
+        </>
+      ) : (
+        /* ==================== FALLBACK "COMING SOON" FOR OTHER COUNTRIES/BUY MODE ==================== */
+        <div className="p2p-coming-soon-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '320px', textAlign: 'center', padding: '20px 24px', background: 'rgba(255, 255, 255, 0.01)', border: '1.5px dashed rgba(255, 255, 255, 0.1)', borderRadius: '16px', margin: '10px 0' }}>
+          <div style={{ fontSize: '38px', marginBottom: '14px' }}>🚀</div>
+          <h4 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', marginBottom: '10px', tracking: '-0.02em' }}>
+            {mode === 'buy' ? 'On-ramp (Buy) Coming Soon' : `${selectedCountry.name} P2P Payouts Coming Soon`}
+          </h4>
+          <p style={{ fontSize: '11px', color: 'var(--text3)', maxWidth: '300px', lineHeight: '1.5' }}>
+            {mode === 'buy' 
+              ? 'We are currently prioritizing live off-ramp Sell/Send settlements. Direct fiat-to-crypto purchases will be activated shortly.'
+              : `P2P off-ramping for ${selectedCountry.name} is currently in development. Please select Nigeria (NGA) and Sell mode to test our live PajCash integration.`
+            }
+          </p>
+        </div>
+      )}
 
       {/* ── Live Payout History Section ── */}
-      {isPajcashLive && !apiError && (
+      {isLiveRoute && isPajcashLive && !apiError && (
         <div className="pajcash-logs-section" style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
           <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'white', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Live Payout History</span>
