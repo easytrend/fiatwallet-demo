@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import jsQR from 'jsqr';
 import { getSupportedTokens, initiateWithdrawal, getTransactionHistory, getBanks } from '../services/pajcashService';
 
 const COUNTRIES = [
@@ -71,6 +72,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [mode, setMode] = useState('sell'); // 'sell' or 'buy'
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
   const [accountNumber, setAccountNumber] = useState('');
+
+  // QR Code Scanner State & Refs
+  const [scannerActive, setScannerActive] = useState(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
   const [accountName, setAccountName] = useState('');
   const [selectedBank, setSelectedBank] = useState('Choose Bank');
   const [amount, setAmount] = useState('');
@@ -232,6 +239,84 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setSelectedToken(list[0]);
     }
   }, [connected, walletTokenList, pajTokens]);
+
+  // Handle QR code scanning using camera and jsQR
+  const stopScanner = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setScannerActive(false);
+  };
+
+  useEffect(() => {
+    if (!scannerActive) return;
+
+    let active = true;
+    let animationFrameId;
+
+    async function initCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' }
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.setAttribute('playsinline', 'true');
+          videoRef.current.play().catch(e => console.error("Play error:", e));
+        }
+        animationFrameId = requestAnimationFrame(tick);
+      } catch (err) {
+        console.error("Camera access failed:", err);
+        alert("Could not access camera. Please ensure permissions are granted.");
+        setScannerActive(false);
+      }
+    }
+
+    function tick() {
+      if (!active) return;
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
+        const ctx = canvas.getContext('2d');
+        canvas.height = video.videoHeight;
+        canvas.width = video.videoWidth;
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: 'dontInvert',
+        });
+
+        if (code && code.data) {
+          const matched = code.data.trim();
+          // Detect a 10 digit account number
+          if (/^\d{10}$/.test(matched)) {
+            setAccountNumber(matched);
+            stopScanner();
+            return;
+          }
+        }
+      }
+
+      animationFrameId = requestAnimationFrame(tick);
+    }
+
+    initCamera();
+
+    return () => {
+      active = false;
+      cancelAnimationFrame(animationFrameId);
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [scannerActive]);
 
   // Handle Paste from Clipboard
   const handlePaste = async () => {
@@ -483,7 +568,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           <div className="field">
             <div className="field-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
               <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
-              <div className="p2p-action-links" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <div className="p2p-action-links" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <button 
                   className="p2p-btn-badge" 
                   onClick={handlePaste}
@@ -491,6 +576,14 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
                 >
                   Paste
+                </button>
+                <button 
+                  className="p2p-btn-badge" 
+                  onClick={() => setScannerActive(true)}
+                  disabled={!isPajcashLive || !!apiError}
+                  style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
+                >
+                  Scan QR
                 </button>
               </div>
             </div>
@@ -726,6 +819,47 @@ export default function P2PPanel({ connected, walletTokenList }) {
             <button className="send-btn" onClick={() => { setShowSuccess(false); setAmount(''); }} style={{ marginTop: '1rem' }}>
               Done
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* QR Code Scanner Overlay */}
+      {scannerActive && (
+        <div className="p2p-success-overlay" style={{ zIndex: 1100 }}>
+          <div className="p2p-success-card" style={{ maxWidth: '360px', width: '90%', padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <h3 className="p2p-success-title" style={{ fontSize: '15px', color: 'white', marginBottom: '12px', fontWeight: 'bold' }}>Scan QR Code</h3>
+            <p className="p2p-success-sub" style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '16px', textAlign: 'center', fontWeight: 'normal' }}>
+              Position the account number QR code inside the box to scan automatically.
+            </p>
+            
+            <div style={{ position: 'relative', width: '260px', height: '260px', background: '#000', borderRadius: '12px', overflow: 'hidden', border: '2px solid var(--border)' }}>
+              <video 
+                ref={videoRef} 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+              />
+              <canvas 
+                ref={canvasRef} 
+                style={{ display: 'none' }} 
+              />
+              
+              {/* Guidelines scan overlay */}
+              <div style={{ position: 'absolute', top: '20px', left: '20px', right: '20px', bottom: '20px', border: '2px dashed var(--lime)', opacity: 0.7, pointerEvents: 'none', borderRadius: '8px' }}>
+                {/* Scanning line animation */}
+                <div style={{ position: 'absolute', left: 0, right: 0, height: '2px', background: 'var(--lime)', boxShadow: '0 0 8px var(--lime)', animation: 'p2pScanLine 2s linear infinite' }} />
+              </div>
+            </div>
+            
+            <button className="send-btn" onClick={stopScanner} style={{ marginTop: '1.25rem', background: 'rgba(255,255,255,0.08)', color: 'white' }}>
+              Cancel
+            </button>
+            
+            <style>{`
+              @keyframes p2pScanLine {
+                0% { top: 0%; }
+                50% { top: 100%; }
+                100% { top: 0%; }
+              }
+            `}</style>
           </div>
         </div>
       )}
