@@ -25,7 +25,8 @@ function getHeaders(apiKey) {
 export async function getSupportedTokens() {
   const res = await fetch(`${API_URL}/token`);
   if (!res.ok) {
-    throw new Error(`Failed to fetch supported tokens: ${res.statusText}`);
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.message || `Failed to fetch supported tokens: ${res.statusText || res.status}`);
   }
   return res.json();
 }
@@ -42,7 +43,8 @@ export async function getTokenMetadata(addressOrSymbol, chain = 'SOLANA') {
   }
   const res = await fetch(`${API_URL}/token/${addressOrSymbol}?chain=${chain.toUpperCase()}`);
   if (!res.ok) {
-    throw new Error(`Failed to fetch token metadata: ${res.statusText}`);
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.message || `Failed to fetch token metadata: ${res.statusText || res.status}`);
   }
   return res.json();
 }
@@ -97,7 +99,8 @@ export async function getTransactionHistory(businessId, apiKey) {
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to fetch transaction history: ${res.statusText}`);
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.message || `Failed to fetch transaction history: ${res.statusText || res.status}`);
   }
 
   return res.json();
@@ -119,7 +122,8 @@ export async function getBanks(apiKey) {
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to fetch banks: ${res.statusText}`);
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.message || `Failed to fetch banks: ${res.statusText || res.status}`);
   }
 
   return res.json();
