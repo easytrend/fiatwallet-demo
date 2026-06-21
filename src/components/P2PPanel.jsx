@@ -198,24 +198,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
     const t = setTimeout(() => {
       setResolvingName(false);
       const trimmedAcc = accountNumber.trim();
-      if (selectedCountry.code === 'NGA' && trimmedAcc === '8140321635') {
-        setAccountName('Augustine Onimisi');
+      if (selectedCountry.code === 'NGA' && trimmedAcc.length === 10) {
+        setAccountName('Beneficiary Account');
       } else {
-        const namesByCountry = {
-          USA: 'David Miller',
-          NGA: 'Chinedu Okeke',
-          GBR: 'Alastair Campbell',
-          EUR: 'Hans Meier',
-          CAN: 'Jean-Pierre Tremblay',
-          AUS: 'Lachlan Murdoch',
-          KEN: 'Mwangi Kamau',
-          GHA: 'Kofi Mensah',
-          IND: 'Aarav Patel',
-          ZAF: 'Sipho Zulu',
-          BRA: 'Lucas Silva',
-          JPN: 'Hiroshi Tanaka'
-        };
-        setAccountName(namesByCountry[selectedCountry.code] || 'John Doe');
+        setAccountName('');
       }
     }, 600);
 
@@ -364,21 +350,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <div className="bulk-pill" onClick={() => setMode(mode === 'sell' ? 'buy' : 'sell')} style={{ padding: '6px 12px', cursor: 'pointer' }}>
             <span className="pill-txt" style={{ fontSize: '11px', fontWeight: 700, color: 'white' }}>
-              {mode === 'sell' ? 'SELL / OFF-RAMP' : 'BUY / ON-RAMP'}
+              {mode === 'sell' ? 'Sell' : 'Buy'}
             </span>
             <div className={`tsw ${mode === 'buy' ? 'on' : ''}`} style={{ marginLeft: '6px' }}><div className="tknob" /></div>
           </div>
-          {isLiveRoute && isPajcashLive && !apiError ? (
+          {isLiveRoute && isPajcashLive && !apiError && (
             <span style={{ fontSize: '10px', color: 'var(--lime)', background: 'rgba(74, 222, 128, 0.1)', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
               ● Live Payouts
-            </span>
-          ) : isLiveRoute ? (
-            <span style={{ fontSize: '10px', color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
-              ● Offline
-            </span>
-          ) : (
-            <span style={{ fontSize: '10px', color: 'var(--text3)', background: 'rgba(255, 255, 255, 0.05)', padding: '4px 8px', borderRadius: '6px' }}>
-              ● Demo Mode
             </span>
           )}
         </div>
@@ -641,12 +619,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
         <div className="p2p-coming-soon-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '320px', textAlign: 'center', padding: '20px 24px', background: 'rgba(255, 255, 255, 0.01)', border: '1.5px dashed rgba(255, 255, 255, 0.1)', borderRadius: '16px', margin: '10px 0' }}>
           <div style={{ fontSize: '38px', marginBottom: '14px' }}>🚀</div>
           <h4 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', marginBottom: '10px', tracking: '-0.02em' }}>
-            {mode === 'buy' ? 'On-ramp (Buy) Coming Soon' : `${selectedCountry.name} P2P Payouts Coming Soon`}
+            {mode === 'buy' ? 'Buy Coming Soon' : `${selectedCountry.name} P2P Payouts Coming Soon`}
           </h4>
           <p style={{ fontSize: '11px', color: 'var(--text3)', maxWidth: '300px', lineHeight: '1.5' }}>
             {mode === 'buy' 
-              ? 'We are currently prioritizing live off-ramp Sell/Send settlements. Direct fiat-to-crypto purchases will be activated shortly.'
-              : `P2P off-ramping for ${selectedCountry.name} is currently in development. Please select Nigeria (NGA) and Sell mode to test our live PajCash integration.`
+              ? 'We are currently prioritizing live Sell settlements. Direct purchases will be activated shortly.'
+              : `P2P off-ramping for ${selectedCountry.name} is currently in development. Please select Nigeria (NGA) and Sell mode to access our live PajCash integration.`
             }
           </p>
         </div>
