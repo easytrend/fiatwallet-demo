@@ -14,23 +14,23 @@ const COUNTRIES = [
 ];
 
 const NIGERIAN_BANKS = [
-  { name: 'Guaranty Trust Bank (GTBank)', code: '058', logo: 'https://logo.moralis.io/solana-mainnet_EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v_809d0dcb3d691dcff4b688115e11652c.webp', color: '#ff6600', initial: 'GT' },
-  { name: 'Zenith Bank', code: '057', logo: '', color: '#cc0000', initial: 'ZE' },
-  { name: 'Access Bank', code: '044', logo: '', color: '#0033aa', initial: 'AC' },
-  { name: 'United Bank for Africa (UBA)', code: '033', logo: '', color: '#dd1111', initial: 'UB' },
-  { name: 'First Bank of Nigeria', code: '011', logo: '', color: '#0b2b5c', initial: 'FB' },
-  { name: 'Union Bank of Nigeria', code: '032', logo: '', color: '#0099ff', initial: 'UN' },
-  { name: 'Fidelity Bank', code: '070', logo: '', color: '#002a54', initial: 'FI' },
-  { name: 'First City Monument Bank (FCMB)', code: '214', logo: '', color: '#5c1f87', initial: 'FC' },
-  { name: 'Wema Bank', code: '035', logo: '', color: '#990066', initial: 'WE' },
-  { name: 'Stanbic IBTC Bank', code: '039', logo: '', color: '#0033aa', initial: 'ST' },
-  { name: 'Sterling Bank', code: '232', logo: '', color: '#cc0000', initial: 'SL' },
-  { name: 'Polaris Bank', code: '076', logo: '', color: '#7a2048', initial: 'PL' },
-  { name: 'Keystone Bank', code: '082', logo: '', color: '#003366', initial: 'KB' },
-  { name: 'Opay (Paycom)', code: '999992', logo: '', color: '#00b050', initial: 'OP' },
-  { name: 'PalmPay', code: '999991', logo: '', color: '#0066ff', initial: 'PP' },
-  { name: 'Kuda Bank', code: '090267', logo: '', color: '#40196d', initial: 'KU' },
-  { name: 'Moniepoint MFB', code: '50515', logo: '', color: '#0055ff', initial: 'MP' }
+  { name: 'Guaranty Trust Bank (GTBank)', code: '058', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/guaranty_trust_bank/guaranty_trust_bank.svg', color: '#ff6600', initial: 'GT' },
+  { name: 'Zenith Bank', code: '057', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/zenith_bank/zenith_bank.svg', color: '#cc0000', initial: 'ZE' },
+  { name: 'Access Bank', code: '044', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/access_bank/access_bank.svg', color: '#0033aa', initial: 'AC' },
+  { name: 'United Bank for Africa (UBA)', code: '033', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/united_bank_for_africa/united_bank_for_africa.svg', color: '#dd1111', initial: 'UB' },
+  { name: 'First Bank of Nigeria', code: '011', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/first_bank/first_bank.svg', color: '#0b2b5c', initial: 'FB' },
+  { name: 'Union Bank of Nigeria', code: '032', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/union_bank/union_bank.svg', color: '#0099ff', initial: 'UN' },
+  { name: 'Fidelity Bank', code: '070', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/fidelity_bank/fidelity_bank.svg', color: '#002a54', initial: 'FI' },
+  { name: 'First City Monument Bank (FCMB)', code: '214', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/fcmb/fcmb.svg', color: '#5c1f87', initial: 'FC' },
+  { name: 'Wema Bank', code: '035', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/wema_bank/wema_bank.svg', color: '#990066', initial: 'WE' },
+  { name: 'Stanbic IBTC Bank', code: '039', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/stanbic_ibtc/stanbic_ibtc.svg', color: '#0033aa', initial: 'ST' },
+  { name: 'Sterling Bank', code: '232', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/sterling_bank/sterling_bank.svg', color: '#cc0000', initial: 'SL' },
+  { name: 'Polaris Bank', code: '076', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/polaris_bank/polaris_bank.svg', color: '#7a2048', initial: 'PL' },
+  { name: 'Keystone Bank', code: '082', logo: 'https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/keystone_bank/keystone_bank.svg', color: '#003366', initial: 'KB' },
+  { name: 'Opay (Paycom)', code: '999992', logo: 'https://play-lh.googleusercontent.com/PFMB9Xeg8vVhnvuiu_jY9ZGXNq6HIuEdz4xlyIOcbdVRccgHa9o8LOJKTyzDUtbL9BphaXvOEhieOQOpW0lgMQ=w240-h240', color: '#00b050', initial: 'OP' },
+  { name: 'PalmPay', code: '999991', logo: 'https://play-lh.googleusercontent.com/pT-RdPoKxq_JRizBJsS99SgrtF9qeQ4Oq3gyhl4TSmK6w7GI_7x2OC9pQOSGo52b1yWBOugQv4w27QDA8mhzZg=w240-h240', color: '#0066ff', initial: 'PP' },
+  { name: 'Kuda Bank', code: '090267', logo: 'https://play-lh.googleusercontent.com/VfzEWy41G5L17_m23EYdsipfzjel_XizWwoHPFb4Armz5tkhQwW9-W9EWi3PJnWVp4H5aOjDgd-FtB5cTNKmIvs=w240-h240', color: '#40196d', initial: 'KU' },
+  { name: 'Moniepoint MFB', code: '50515', logo: 'https://play-lh.googleusercontent.com/vd1kyHDKAvbjA4zqUXr6UIVX4bzXQPpNQrwJh_FmJPm2qWJJl0FP45Ad7cGUgyDOc-3Cdme1TwO21wzspL_80A=w240-h240', color: '#0055ff', initial: 'MP' }
 ];
 
 const getBankMetadata = (bankName) => {
@@ -76,6 +76,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [pajTokens, setPajTokens] = useState([]);
   const [payoutLogs, setPayoutLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [logError, setLogError] = useState(null);
   const [bankSearch, setBankSearch] = useState('');
   const [apiBanks, setApiBanks] = useState([]);
   const [loadingBanks, setLoadingBanks] = useState(false);
@@ -135,6 +136,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const loadPayoutLogs = async () => {
     if (!isPajcashLive) return;
     setLoadingLogs(true);
+    setLogError(null);
     try {
       const txs = await getTransactionHistory(PAJCASH_BUSINESS_ID, PAJCASH_API_KEY);
       if (txs) {
@@ -142,6 +144,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       }
     } catch (e) {
       console.error("Failed to load PajCash payouts logs:", e);
+      setLogError(e.message || "Failed to connect to PajCash API. Please verify your credentials.");
     } finally {
       setLoadingLogs(false);
     }
@@ -266,18 +269,23 @@ export default function P2PPanel({ connected, walletTokenList }) {
     setResolvingName(true);
     const t = setTimeout(() => {
       setResolvingName(false);
-      const namesByCountry = {
-        USA: 'David Miller',
-        NGA: 'Chinedu Okeke',
-        GBR: 'Alastair Campbell',
-        EUR: 'Hans Meier',
-        CAN: 'Jean-Pierre Tremblay',
-        AUS: 'Lachlan Murdoch',
-        KEN: 'Mwangi Kamau',
-        GHA: 'Kofi Mensah',
-        IND: 'Aarav Patel'
-      };
-      setAccountName(namesByCountry[selectedCountry.code] || 'John Doe');
+      const trimmedAcc = accountNumber.trim();
+      if (selectedCountry.code === 'NGA' && trimmedAcc === '8140321635') {
+        setAccountName('Augustine Onimisi');
+      } else {
+        const namesByCountry = {
+          USA: 'David Miller',
+          NGA: 'Chinedu Okeke',
+          GBR: 'Alastair Campbell',
+          EUR: 'Hans Meier',
+          CAN: 'Jean-Pierre Tremblay',
+          AUS: 'Lachlan Murdoch',
+          KEN: 'Mwangi Kamau',
+          GHA: 'Kofi Mensah',
+          IND: 'Aarav Patel'
+        };
+        setAccountName(namesByCountry[selectedCountry.code] || 'John Doe');
+      }
     }, 600);
 
     return () => clearTimeout(t);
@@ -842,6 +850,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
           {loadingLogs ? (
             <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
               <span className="p2p-mini-spinner" /> Loading payouts...
+            </div>
+          ) : logError ? (
+            <div style={{ fontSize: '11px', color: '#f87171', background: 'rgba(239, 68, 68, 0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)', marginBottom: '8px', lineHeight: '1.4' }}>
+              ⚠️ API connection failed: {logError}. Check that your Vercel VITE_PAJCASH_API_KEY and VITE_PAJCASH_BUSINESS_ID environment variables are set and not identical.
             </div>
           ) : payoutLogs.length === 0 ? (
             <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
