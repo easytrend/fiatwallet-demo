@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
-import { getSupportedTokens, initiateWithdrawal, getTransactionHistory, getBanks } from '../services/pajcashService';
+import { getSupportedTokens, initiateWithdrawal, getTransactionHistory, getBanks, resolveBankAccount } from '../services/pajcashService';
 
 const COUNTRIES = [
   { code: 'NGA', name: 'Nigeria', flag: '🇳🇬', symbol: '₦' },
@@ -196,24 +196,43 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // Resolve account name dynamically matching the country's localized naming style
   useEffect(() => {
-    if (!accountNumber || selectedBank === 'Choose Bank') {
+    if (!accountNumber || selectedBank === 'Choose Bank' || !isPajcashLive) {
       setAccountName('');
       return;
     }
     
-    setResolvingName(true);
-    const t = setTimeout(() => {
-      setResolvingName(false);
-      const trimmedAcc = accountNumber.trim();
-      if (selectedCountry.code === 'NGA' && trimmedAcc.length === 10) {
-        setAccountName('Beneficiary Account');
-      } else {
-        setAccountName('');
-      }
-    }, 600);
+    const trimmedAcc = accountNumber.trim();
+    if (selectedCountry.code === 'NGA' && trimmedAcc.length === 10) {
+      setResolvingName(true);
+      
+      const bankObj = apiBanks.find(b => 
+        (typeof b === 'string' ? b : b.name || b.bank_name) === selectedBank
+      );
+      const bankIdParam = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
 
-    return () => clearTimeout(t);
-  }, [accountNumber, selectedCountry, selectedBank]);
+      const t = setTimeout(async () => {
+        try {
+          const res = await resolveBankAccount(PAJCASH_API_KEY, bankIdParam, trimmedAcc);
+          if (res && res.accountName) {
+            setAccountName(res.accountName);
+          } else if (res && typeof res === 'object' && (res.name || res.account_name)) {
+            setAccountName(res.name || res.account_name);
+          } else {
+            setAccountName('Beneficiary Account');
+          }
+        } catch (e) {
+          console.error("Failed to resolve bank account name:", e);
+          setAccountName('Beneficiary Account');
+        } finally {
+          setResolvingName(false);
+        }
+      }, 800);
+
+      return () => clearTimeout(t);
+    } else {
+      setAccountName('');
+    }
+  }, [accountNumber, selectedCountry, selectedBank, apiBanks, isPajcashLive, PAJCASH_API_KEY]);
 
   // Reset fields when country or mode changes
   useEffect(() => {

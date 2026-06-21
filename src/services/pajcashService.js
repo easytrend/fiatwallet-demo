@@ -125,3 +125,35 @@ export async function getBanks(apiKey) {
   return res.json();
 }
 
+/**
+ * Resolve a bank account number to its registered name using PajCash API
+ * @param {string} apiKey - PajCash API Key
+ * @param {string} bankId - Bank identifier (ID, code, or name)
+ * @param {string} accountNumber - 10-digit account number
+ * @returns {Promise<Object>}
+ */
+export async function resolveBankAccount(apiKey, bankId, accountNumber) {
+  if (!apiKey) {
+    throw new Error('PajCash API Key is required to resolve bank accounts');
+  }
+  if (!bankId || !accountNumber) {
+    throw new Error('Bank ID and account number are required');
+  }
+
+  // Use the public bank account confirm endpoint
+  const res = await fetch(`${API_URL}/pub/bank-account/confirm/?bankId=${encodeURIComponent(bankId)}&accountNumber=${encodeURIComponent(accountNumber)}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    }
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.message || `Failed to resolve bank account name: ${res.statusText}`);
+  }
+
+  return res.json();
+}
+
