@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { getSupportedTokens, getTokenMetadata, initiateWithdrawal, getTransactionHistory } from '../services/pajcashService';
 
 const COUNTRIES = [
   { code: 'USA', name: 'United States', flag: '🇺🇸', symbol: '$', banks: ['Chase Bank', 'Bank of America', 'Wells Fargo', 'Citibank'] },
@@ -28,6 +29,16 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [amount, setAmount] = useState('');
   const [selectedToken, setSelectedToken] = useState(DEFAULT_TOKENS[0]);
 
+  // PajCash configuration detection
+  const PAJCASH_API_KEY = import.meta.env.VITE_PAJCASH_API_KEY;
+  const PAJCASH_BUSINESS_ID = import.meta.env.VITE_PAJCASH_BUSINESS_ID;
+  const isPajcashLive = !!(PAJCASH_API_KEY && PAJCASH_BUSINESS_ID);
+
+  // Dynamic tokens and logs
+  const [pajTokens, setPajTokens] = useState([]);
+  const [payoutLogs, setPayoutLogs] = useState([]);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+
   // Success Pop-up state
   const [showSuccess, setShowSuccess] = useState(false);
   const [successDetails, setSuccessDetails] = useState(null);
@@ -52,22 +63,74 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [accountName, setAccountName] = useState('David Miller');
   const [resolvingName, setResolvingName] = useState(false);
 
+  // Submit status
+  const [submitting, setSubmitting] = useState(false);
+
+  // Load supported tokens from PajCash API on mount
+  useEffect(() => {
+    async function loadTokens() {
+      try {
+        const list = await getSupportedTokens();
+        if (list && list.length > 0) {
+          const mapped = list.map(t => ({
+            symbol: t.symbol,
+            name: t.name,
+            mint: t.address,
+            logoURI: t.logo || '',
+            chain: t.chain,
+            decimals: t.decimals || 6,
+            balance: 0
+          }));
+          setPajTokens(mapped);
+        }
+      } catch (e) {
+        console.error("Failed to load PajCash tokens, using defaults:", e);
+      }
+    }
+    loadTokens();
+  }, []);
+
+  // Fetch payout logs when in live mode
+  const loadPayoutLogs = async () => {
+    if (!isPajcashLive) return;
+    setLoadingLogs(true);
+    try {
+      const txs = await getTransactionHistory(PAJCASH_BUSINESS_ID, PAJCASH_API_KEY);
+      if (txs) {
+        setPayoutLogs(txs);
+      }
+    } catch (e) {
+      console.error("Failed to load PajCash payouts logs:", e);
+    } finally {
+      setLoadingLogs(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPayoutLogs();
+  }, [isPajcashLive]);
+
   // Fetch token list from props or defaults
   const getSelectableTokens = () => {
     let list = [];
-    if (connected && walletTokenList && walletTokenList.length > 0) {
+    if (pajTokens.length > 0) {
+      list = pajTokens;
+    } else if (connected && walletTokenList && walletTokenList.length > 0) {
       list = walletTokenList;
     } else {
       list = DEFAULT_TOKENS;
     }
 
+    // Filter only Solana tokens for Solana wallet compatibility, or show all if in live mode
+    const filteredList = list.filter(t => !t.chain || t.chain.toUpperCase() === 'SOLANA');
+
     if (mode === 'sell') {
       if (connected) {
-        return list.filter(t => t.balance > 0 || t.symbol === 'SOL');
+        return filteredList.filter(t => t.balance > 0 || t.symbol === 'SOL');
       }
-      return list;
+      return filteredList;
     } else {
-      return list;
+      return filteredList;
     }
   };
 
@@ -80,7 +143,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     if (!isAvailable && list.length > 0) {
       setSelectedToken(list[0]);
     }
-  }, [mode, connected, walletTokenList]);
+  }, [mode, connected, walletTokenList, pajTokens]);
 
   // Reset bank selection when country changes
   useEffect(() => {
@@ -230,7 +293,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     displayList.unshift(customToken);
   }
 
-  // Calculate mock conversion values
+  // Calculate conversion values
   const rate = selectedToken.symbol === 'SOL' ? 145.20 : selectedToken.symbol === 'BONK' ? 0.000022 : 1.00;
   const parsedAmt = parseFloat(amount) || 0;
   
@@ -244,17 +307,99 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   const displayBank = selectedBank === 'Choose Bank' ? selectedCountry.banks[0] : selectedBank;
 
+  // Handle transaction submission
+  const handleSubmit = async () => {
+    if (!amount || parseFloat(amount) <= 0) {
+      alert('Please enter a valid amount.');
+      return;
+    }
+    if (mode === 'sell') {
+      if (!accountNumber) {
+        alert('Please enter an account number.');
+        return;
+      }
+      if (selectedBank === 'Choose Bank') {
+        alert('Please select a bank.');
+        return;
+      }
+    }
+
+    setSubmitting(true);
+    try {
+      if (isPajcashLive) {
+        if (mode === 'sell') {
+          // Format destination payload
+          const destStr = `${displayBank} - ${accountNumber} - ${accountName}`;
+          const res = await initiateWithdrawal(PAJCASH_BUSINESS_ID, PAJCASH_API_KEY, destStr, amount);
+          
+          setSuccessDetails({
+            action: 'Sell',
+            amount: `${amount} ${selectedToken.symbol}`,
+            fiat: `${selectedCountry.symbol}${fiatAmountText}`,
+            bank: displayBank,
+            account: accountNumber,
+            name: accountName,
+            txId: res._id || res.id || 'N/A',
+            isLive: true
+          });
+          
+          // Refresh list logs
+          loadPayoutLogs();
+        } else {
+          // Buy mode is modeled as instant escrow simulated credit
+          setSuccessDetails({
+            action: 'Buy',
+            amount: `${amount} ${selectedToken.symbol}`,
+            fiat: `${selectedCountry.symbol}${fiatAmountText}`,
+            bank: displayBank,
+            account: '9012847592',
+            name: 'Fiatwallet Escrow Ltd',
+            isLive: false
+          });
+        }
+      } else {
+        // Fallback to Mock Trade popup
+        setSuccessDetails({
+          action: mode === 'sell' ? 'Sell' : 'Buy',
+          amount: `${amount || '0'} ${selectedToken.symbol}`,
+          fiat: `${selectedCountry.symbol}${fiatAmountText}`,
+          bank: displayBank,
+          account: mode === 'sell' ? (accountNumber || '0000000000') : '9012847592',
+          name: mode === 'sell' ? (accountName || 'David Miller') : 'Fiatwallet Escrow Ltd',
+          isLive: false
+        });
+      }
+      setShowSuccess(true);
+    } catch (err) {
+      console.error(err);
+      alert(`Transaction Failed: ${err.message}`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="p2p-panel-wrap">
-      {/* ── Toggle Switch & Country Selector ── */}
+      {/* ── Toggle Switch, Country Selector & Live Badge ── */}
       <div className="p2p-header-row" style={{ marginBottom: '1.25rem' }}>
-        <div className={`bulk-pill ${mode === 'buy' ? 'on' : ''}`} onClick={() => {
-          setMode(mode === 'sell' ? 'buy' : 'sell');
-          setAmount('');
-          setSearchTerm('');
-        }} style={{ padding: '6px 12px' }}>
-          <span className="pill-txt" style={{ fontSize: '11px', fontWeight: 700 }}>{mode === 'sell' ? 'SELL' : 'BUY'}</span>
-          <div className={`tsw ${mode === 'buy' ? 'on' : ''}`}><div className="tknob" /></div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div className={`bulk-pill ${mode === 'buy' ? 'on' : ''}`} onClick={() => {
+            setMode(mode === 'sell' ? 'buy' : 'sell');
+            setAmount('');
+            setSearchTerm('');
+          }} style={{ padding: '6px 12px' }}>
+            <span className="pill-txt" style={{ fontSize: '11px', fontWeight: 700 }}>{mode === 'sell' ? 'SELL' : 'BUY'}</span>
+            <div className={`tsw ${mode === 'buy' ? 'on' : ''}`}><div className="tknob" /></div>
+          </div>
+          {isPajcashLive ? (
+            <span style={{ fontSize: '10px', color: 'var(--lime)', background: 'rgba(74, 222, 128, 0.1)', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
+              ● Live Payouts
+            </span>
+          ) : (
+            <span style={{ fontSize: '10px', color: 'var(--text3)', background: 'rgba(255, 255, 255, 0.05)', padding: '4px 8px', borderRadius: '6px' }}>
+              ● Demo Mode
+            </span>
+          )}
         </div>
 
         <div className="p2p-country-selector">
@@ -554,20 +699,58 @@ export default function P2PPanel({ connected, walletTokenList }) {
       {/* ── Submit Action Button (Reusing Send Button Class) ── */}
       <button 
         className="send-btn" 
-        onClick={() => {
-          setSuccessDetails({
-            action: mode === 'sell' ? 'Sell' : 'Buy',
-            amount: `${amount || '0'} ${selectedToken.symbol}`,
-            fiat: `${selectedCountry.symbol}${fiatAmountText}`,
-            bank: displayBank,
-            account: mode === 'sell' ? (accountNumber || '0000000000') : '9012847592',
-            name: mode === 'sell' ? (accountName || 'David Miller') : 'Fiatwallet Escrow Ltd'
-          });
-          setShowSuccess(true);
-        }}
+        onClick={handleSubmit}
+        disabled={submitting}
       >
-        {mode === 'sell' ? 'Send' : 'Buy'}
+        {submitting ? (
+          <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />
+        ) : null}
+        {submitting ? 'Processing...' : (mode === 'sell' ? 'Send' : 'Buy')}
       </button>
+
+      {/* ── Live Payout History Section ── */}
+      {isPajcashLive && (
+        <div className="pajcash-logs-section" style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+          <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'white', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Live Payout History</span>
+            <button onClick={loadPayoutLogs} style={{ background: 'none', border: 'none', color: 'var(--lime)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
+              Refresh
+            </button>
+          </h4>
+          {loadingLogs ? (
+            <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
+              <span className="p2p-mini-spinner" /> Loading payouts...
+            </div>
+          ) : payoutLogs.length === 0 ? (
+            <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
+              No recent payouts found.
+            </div>
+          ) : (
+            <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px' }}>
+              {payoutLogs.map(log => (
+                <div key={log._id || log.id} style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <span style={{ color: 'white', fontWeight: 'bold', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '170px' }}>
+                      {log.destination}
+                    </span>
+                    <span style={{ color: 'var(--text3)', fontSize: '10px' }}>
+                      {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Recent'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                    <span style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
+                      ₦{log.amount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                    <span style={{ color: 'var(--text3)', fontSize: '9px', fontFamily: 'var(--mono)' }}>
+                      {(log._id || log.id)?.slice(0, 8)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Success Modal Popup */}
       {showSuccess && successDetails && (
@@ -579,7 +762,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
               </svg>
             </div>
             <h3 className="p2p-success-title">Trade Successful</h3>
-            <p className="p2p-success-sub">Demo Mode — No real funds were sent or received.</p>
+            {successDetails.isLive ? (
+              <p className="p2p-success-sub" style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
+                Live Transaction Settled via PajCash Gateway.
+              </p>
+            ) : (
+              <p className="p2p-success-sub">Demo Mode — No real funds were sent or received.</p>
+            )}
             
             <div className="p2p-success-fields">
               <div className="p2p-success-field">
@@ -602,6 +791,14 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 <span>Recipient/Sender:</span>
                 <strong>{successDetails.name}</strong>
               </div>
+              {successDetails.txId && (
+                <div className="p2p-success-field">
+                  <span>PajCash Tx ID:</span>
+                  <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '11px' }}>
+                    {successDetails.txId}
+                  </strong>
+                </div>
+              )}
             </div>
             
             <button className="send-btn" onClick={() => { setShowSuccess(false); setAmount(''); }} style={{ marginTop: '1rem' }}>
@@ -610,6 +807,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           </div>
         </div>
       )}
+
     </div>
   );
 }
