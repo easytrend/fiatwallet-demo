@@ -102,3 +102,26 @@ export async function getTransactionHistory(businessId, apiKey) {
 
   return res.json();
 }
+
+/**
+ * Fetch supported banks list from PajCash API
+ * @param {string} apiKey - PajCash API Key
+ * @returns {Promise<Array>}
+ */
+export async function getBanks(apiKey) {
+  if (!apiKey) {
+    throw new Error('PajCash API Key is required to fetch banks');
+  }
+
+  const res = await fetch(`${API_URL}/bank`, {
+    method: 'GET',
+    headers: getHeaders(apiKey)
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch banks: ${res.statusText}`);
+  }
+
+  return res.json();
+}
+

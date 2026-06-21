@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSupportedTokens, getTokenMetadata, initiateWithdrawal, getTransactionHistory } from '../services/pajcashService';
+import { getSupportedTokens, getTokenMetadata, initiateWithdrawal, getTransactionHistory, getBanks } from '../services/pajcashService';
 
 const COUNTRIES = [
   { code: 'USA', name: 'United States', flag: '🇺🇸', symbol: '$', banks: ['Chase Bank', 'Bank of America', 'Wells Fargo', 'Citibank'] },
@@ -12,6 +12,44 @@ const COUNTRIES = [
   { code: 'GHA', name: 'Ghana', flag: '🇬🇭', symbol: '₵', banks: ['GCB Bank', 'Ecobank', 'ABSA Bank', 'Zenith Bank Ghana'] },
   { code: 'IND', name: 'India', flag: '🇮🇳', symbol: '₹', banks: ['State Bank of India', 'HDFC Bank', 'ICICI Bank', 'Axis Bank'] }
 ];
+
+const NIGERIAN_BANKS = [
+  { name: 'Guaranty Trust Bank (GTBank)', code: '058', logo: 'https://logo.moralis.io/solana-mainnet_EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v_809d0dcb3d691dcff4b688115e11652c.webp', color: '#ff6600', initial: 'GT' },
+  { name: 'Zenith Bank', code: '057', logo: '', color: '#cc0000', initial: 'ZE' },
+  { name: 'Access Bank', code: '044', logo: '', color: '#0033aa', initial: 'AC' },
+  { name: 'United Bank for Africa (UBA)', code: '033', logo: '', color: '#dd1111', initial: 'UB' },
+  { name: 'First Bank of Nigeria', code: '011', logo: '', color: '#0b2b5c', initial: 'FB' },
+  { name: 'Union Bank of Nigeria', code: '032', logo: '', color: '#0099ff', initial: 'UN' },
+  { name: 'Fidelity Bank', code: '070', logo: '', color: '#002a54', initial: 'FI' },
+  { name: 'First City Monument Bank (FCMB)', code: '214', logo: '', color: '#5c1f87', initial: 'FC' },
+  { name: 'Wema Bank', code: '035', logo: '', color: '#990066', initial: 'WE' },
+  { name: 'Stanbic IBTC Bank', code: '039', logo: '', color: '#0033aa', initial: 'ST' },
+  { name: 'Sterling Bank', code: '232', logo: '', color: '#cc0000', initial: 'SL' },
+  { name: 'Polaris Bank', code: '076', logo: '', color: '#7a2048', initial: 'PL' },
+  { name: 'Keystone Bank', code: '082', logo: '', color: '#003366', initial: 'KB' },
+  { name: 'Opay (Paycom)', code: '999992', logo: '', color: '#00b050', initial: 'OP' },
+  { name: 'PalmPay', code: '999991', logo: '', color: '#0066ff', initial: 'PP' },
+  { name: 'Kuda Bank', code: '090267', logo: '', color: '#40196d', initial: 'KU' },
+  { name: 'Moniepoint MFB', code: '50515', logo: '', color: '#0055ff', initial: 'MP' }
+];
+
+const getBankMetadata = (bankName) => {
+  const cleanName = bankName.toLowerCase();
+  const known = NIGERIAN_BANKS.find(kb => 
+    cleanName.includes(kb.name.split(' ')[0].toLowerCase()) || 
+    cleanName.includes(kb.initial.toLowerCase())
+  );
+  if (known) return known;
+
+  const initials = bankName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  let hash = 0;
+  for (let i = 0; i < bankName.length; i++) {
+    hash = bankName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const color = `hsl(${Math.abs(hash % 360)}, 65%, 40%)`;
+  return { name: bankName, logo: '', color, initial: initials || 'BK' };
+};
+
 
 const DEFAULT_TOKENS = [
   { symbol: 'USDC', name: 'USD Coin', mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png', balance: 0 },
@@ -38,6 +76,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [pajTokens, setPajTokens] = useState([]);
   const [payoutLogs, setPayoutLogs] = useState([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [bankSearch, setBankSearch] = useState('');
+  const [apiBanks, setApiBanks] = useState([]);
+  const [loadingBanks, setLoadingBanks] = useState(false);
 
   // Success Pop-up state
   const [showSuccess, setShowSuccess] = useState(false);
@@ -109,6 +150,26 @@ export default function P2PPanel({ connected, walletTokenList }) {
   useEffect(() => {
     loadPayoutLogs();
   }, [isPajcashLive]);
+
+  // Fetch supported banks from PajCash API on mount/live detection
+  useEffect(() => {
+    async function fetchApiBanks() {
+      if (!isPajcashLive) return;
+      setLoadingBanks(true);
+      try {
+        const list = await getBanks(PAJCASH_API_KEY);
+        if (list && list.length > 0) {
+          setApiBanks(list);
+        }
+      } catch (e) {
+        console.error("Failed to fetch banks from PajCash API:", e);
+      } finally {
+        setLoadingBanks(false);
+      }
+    }
+    fetchApiBanks();
+  }, [isPajcashLive]);
+
 
   // Fetch token list from props or defaults
   const getSelectableTokens = () => {
@@ -197,7 +258,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // Resolve account name dynamically matching the country's localized naming style
   useEffect(() => {
-    if (!accountNumber) {
+    if (!accountNumber || selectedBank === 'Choose Bank') {
       setAccountName('');
       return;
     }
@@ -220,7 +281,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }, 600);
 
     return () => clearTimeout(t);
-  }, [accountNumber, selectedCountry]);
+  }, [accountNumber, selectedCountry, selectedBank]);
 
   // Search by contract address API query (Buy Mode only)
   useEffect(() => {
@@ -305,7 +366,22 @@ export default function P2PPanel({ connected, walletTokenList }) {
     ? (parsedAmt > 0 ? (parsedAmt * rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00')
     : (parsedAmt > 0 ? parsedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00');
 
-  const displayBank = selectedBank === 'Choose Bank' ? selectedCountry.banks[0] : selectedBank;
+  const getCountryBanks = () => {
+    if (selectedCountry.code === 'NGA') {
+      if (apiBanks.length > 0) {
+        return apiBanks.map(b => b.name);
+      }
+      return NIGERIAN_BANKS.map(b => b.name);
+    }
+    return selectedCountry.banks;
+  };
+
+  const allBanksForCountry = getCountryBanks();
+  const filteredBanksList = allBanksForCountry.filter(b => 
+    b.toLowerCase().includes(bankSearch.toLowerCase())
+  );
+
+  const displayBank = selectedBank === 'Choose Bank' ? allBanksForCountry[0] : selectedBank;
 
   // Handle transaction submission
   const handleSubmit = async () => {
@@ -487,16 +563,62 @@ export default function P2PPanel({ connected, walletTokenList }) {
             </div>
 
             {bankOpen && (
-              <div className="drop-menu" style={{ left: 0, right: 0, width: '100%' }}>
-                {selectedCountry.banks.map(b => (
-                  <div 
-                    key={b} 
-                    className={`drop-item ${selectedBank === b ? 'sel' : ''}`}
-                    onClick={() => { setSelectedBank(b); setBankOpen(false); }}
-                  >
-                    {b}
-                  </div>
-                ))}
+              <div className="drop-menu" style={{ left: 0, right: 0, width: '100%' }} onClick={e => e.stopPropagation()}>
+                <div className="drop-search" style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
+                  <input 
+                    type="text" 
+                    placeholder="Search bank name..."
+                    value={bankSearch}
+                    onChange={e => setBankSearch(e.target.value)}
+                    style={{ width: '100%', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: '6px', color: 'white', fontSize: '12px', outline: 'none' }}
+                  />
+                </div>
+                <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  {filteredBanksList.map(b => {
+                    const meta = getBankMetadata(b);
+                    return (
+                      <div 
+                        key={b} 
+                        className={`drop-item ${selectedBank === b ? 'sel' : ''}`}
+                        onClick={() => { setSelectedBank(b); setBankOpen(false); setBankSearch(''); }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px' }}
+                      >
+                        {meta.logo ? (
+                          <img 
+                            src={meta.logo} 
+                            alt={meta.name} 
+                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                            style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover' }} 
+                          />
+                        ) : null}
+                        <div 
+                          className="bank-avatar"
+                          style={{ 
+                            display: meta.logo ? 'none' : 'flex', 
+                            width: '22px', 
+                            height: '22px', 
+                            borderRadius: '50%', 
+                            background: meta.color, 
+                            color: 'white', 
+                            fontSize: '9px', 
+                            fontWeight: 'bold', 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            textTransform: 'uppercase'
+                          }}
+                        >
+                          {meta.initial}
+                        </div>
+                        <span className="di-name" style={{ marginLeft: 0 }}>{b}</span>
+                      </div>
+                    );
+                  })}
+                  {filteredBanksList.length === 0 && (
+                    <div style={{ fontSize: '11px', color: 'var(--text3)', fontStyle: 'italic', padding: '12px', textAlign: 'center' }}>
+                      No banks found
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
