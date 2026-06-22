@@ -1,6 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
-import { getSupportedTokens, initiateWithdrawal, getTransactionHistory, getBanks, resolveBankAccount, getBusinesses } from '../services/pajcashService';
+import { 
+  initPajSDK,
+  getSupportedTokens, 
+  getBanks, 
+  resolveBankAccount, 
+  createOfframpOrder, 
+  getAllRate, 
+  getTransactionHistory 
+} from '../services/pajcashService';
+import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { PublicKey, Transaction, TransactionInstruction, SystemProgram } from '@solana/web3.js';
+import { 
+  getAssociatedTokenAddressSync, 
+  createAssociatedTokenAccountIdempotentInstruction, 
+  createTransferCheckedInstruction,
+  TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID
+} from '@solana/spl-token';
 
 const COUNTRIES = [
   { code: 'NGA', name: 'Nigeria', flag: '🇳🇬', symbol: '₦' },
@@ -68,7 +85,125 @@ const DEFAULT_TOKENS = [
   { symbol: 'USDT', name: 'Tether', mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png', balance: 0 }
 ];
 
+const ALLOWED_PROGRAM_IDS = new Set([
+  '11111111111111111111111111111111',                         // System Program
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',           // SPL Token Program
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',           // Token-2022 Program
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',          // Associated Token Program
+  'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',           // SPL Memo Program
+]);
+
+const ALLOWED_TOKEN_OPCODES = new Set([12]); // TransferChecked only
+const ALLOWED_ATA_OPCODES = new Set([1]); // CreateAssociatedTokenAccountIdempotent only
+
+function verifyOfframpTransaction(transaction, expectedRecipient, expectedAmount, expectedToken, expectedSignerPublicKey) {
+  if (!transaction.instructions || transaction.instructions.length === 0) {
+    throw new Error('Transaction integrity violation: Transaction contains no instructions.');
+  }
+
+  if (!transaction.feePayer) {
+    throw new Error('Transaction integrity violation: Transaction has no fee payer set.');
+  }
+  if (!transaction.feePayer.equals(expectedSignerPublicKey)) {
+    throw new Error(
+      `Transaction integrity violation: Fee payer mismatch. ` +
+      `Expected ${expectedSignerPublicKey.toBase58()}, got ${transaction.feePayer.toBase58()}.`
+    );
+  }
+
+  let transferCheckedCount = 0;
+  let systemTransferCount = 0;
+
+  for (const ix of transaction.instructions) {
+    const programIdStr = ix.programId.toBase58();
+
+    if (!ALLOWED_PROGRAM_IDS.has(programIdStr)) {
+      throw new Error(`Transaction integrity violation: Instruction from disallowed program ${programIdStr}.`);
+    }
+
+    if (programIdStr === '11111111111111111111111111111111') {
+      const data = ix.data;
+      const type = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, true);
+      if (type !== 2) {
+        throw new Error('Transaction integrity violation: Unexpected System Program instruction type.');
+      }
+      
+      const toPubkeyStr = ix.keys[1].pubkey.toBase58();
+      const dataView = new DataView(data.buffer, data.byteOffset, data.byteLength);
+      const lamports = dataView.getBigUint64(4, true);
+
+      if (toPubkeyStr !== expectedRecipient) {
+        throw new Error(`Transaction integrity violation: Unexpected SOL transfer destination: ${toPubkeyStr}.`);
+      }
+      if (expectedToken.symbol !== 'SOL') {
+        throw new Error('Transaction integrity violation: Transferring SOL instead of the selected token.');
+      }
+      systemTransferCount++;
+    } else if (programIdStr === 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr') {
+      // Memo is safe
+    } else if (programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs') {
+      const ixType = ix.data[0];
+      if (!ALLOWED_ATA_OPCODES.has(ixType)) {
+        throw new Error(`Transaction integrity violation: Disallowed ATA instruction opcode ${ixType}.`);
+      }
+    } else if (
+      programIdStr === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' || 
+      programIdStr === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+    ) {
+      const ixType = ix.data[0];
+
+      if (!ALLOWED_TOKEN_OPCODES.has(ixType)) {
+        throw new Error(`Transaction integrity violation: Disallowed Token instruction opcode ${ixType}.`);
+      }
+
+      if (ix.data.length < 10) {
+        throw new Error('Transaction integrity violation: TransferChecked instruction data too short.');
+      }
+
+      const mint = ix.keys[1].pubkey.toBase58();
+      const destinationATA = ix.keys[2].pubkey.toBase58();
+      const ownerKey = ix.keys[3]?.pubkey.toBase58();
+
+      const dataView = new DataView(ix.data.buffer, ix.data.byteOffset, ix.data.byteLength);
+      const amount = dataView.getBigUint64(1, true);
+
+      if (mint !== expectedToken.mint) {
+        throw new Error(`Transaction integrity violation: Token mint mismatch. Expected ${expectedToken.mint}, got ${mint}.`);
+      }
+
+      const expectedATA = getAssociatedTokenAddressSync(
+        new PublicKey(mint),
+        new PublicKey(expectedRecipient),
+        false,
+        ix.programId
+      ).toBase58();
+
+      if (destinationATA !== expectedATA) {
+        throw new Error(`Transaction integrity violation: Destination ATA mismatch.`);
+      }
+
+      if (ownerKey && ownerKey !== expectedSignerPublicKey.toBase58()) {
+        throw new Error(`Transaction integrity violation: Owner authority mismatch.`);
+      }
+
+      if (amount === 0n) {
+        throw new Error('Transaction integrity violation: Zero amount transfer.');
+      }
+
+      transferCheckedCount++;
+    }
+  }
+
+  const expectedTotal = expectedToken.symbol === 'SOL' ? systemTransferCount : transferCheckedCount;
+  if (expectedTotal === 0) {
+    throw new Error('Transaction integrity violation: No valid transfer instruction found.');
+  }
+}
+
 export default function P2PPanel({ connected, walletTokenList }) {
+  const { connection } = useConnection();
+  const { publicKey, sendTransaction } = useWallet();
+
   const [mode, setMode] = useState('sell'); // 'sell' or 'buy'
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
   const [accountNumber, setAccountNumber] = useState('');
@@ -86,8 +221,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // PajCash configuration detection
   const PAJCASH_API_KEY = import.meta.env.VITE_PAJCASH_API_KEY;
   const isPajcashLive = !!PAJCASH_API_KEY;
-  const [resolvedBusinessId, setResolvedBusinessId] = useState(import.meta.env.VITE_PAJCASH_BUSINESS_ID || '');
-  const [resolvingBusiness, setResolvingBusiness] = useState(false);
 
   // Dynamic tokens, logs, and errors
   const [pajTokens, setPajTokens] = useState([]);
@@ -99,6 +232,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [apiBanks, setApiBanks] = useState([]);
   const [loadingBanks, setLoadingBanks] = useState(false);
   const [apiError, setApiError] = useState(null);
+
+  // Live exchange rate quote state
+  const [pajRates, setPajRates] = useState(null);
+  const [loadingRates, setLoadingRates] = useState(false);
 
   // Success Pop-up state
   const [showSuccess, setShowSuccess] = useState(false);
@@ -117,45 +254,36 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // Live route determination
   const isLiveRoute = selectedCountry.code === 'NGA' && mode === 'sell';
 
+  // Initialize SDK
+  useEffect(() => {
+    initPajSDK(import.meta.env.VITE_PAJCASH_ENV || 'production');
+  }, []);
+
   // Initialize API and credential warnings
   useEffect(() => {
     if (!isPajcashLive && isLiveRoute) {
       setApiError("PajCash API Key is not configured. To enable live payouts, configure VITE_PAJCASH_API_KEY in Vercel.");
-    } else if (isPajcashLive && !resolvedBusinessId && !resolvingBusiness) {
-      setApiError("Resolving PajCash Business ID...");
     } else {
       setApiError(null);
     }
-  }, [isPajcashLive, isLiveRoute, resolvedBusinessId, resolvingBusiness]);
+  }, [isPajcashLive, isLiveRoute]);
 
-  // Automatically fetch Business ID from API Key if not provided
+  // Load cached bank details from local storage on wallet connection
   useEffect(() => {
-    async function autoResolveBusiness() {
-      if (!isPajcashLive || resolvedBusinessId) return;
-      setResolvingBusiness(true);
-      try {
-        const list = await getBusinesses(PAJCASH_API_KEY);
-        if (list && list.length > 0) {
-          const firstBiz = list[0];
-          const bizId = firstBiz.id || firstBiz._id;
-          if (bizId) {
-            setResolvedBusinessId(bizId);
-            console.log("Dynamically resolved PajCash Business ID:", bizId);
-          } else {
-            setApiError("PajCash API returned businesses, but they lack an ID field.");
-          }
-        } else {
-          setApiError("No active business found for this PajCash API Key. Please create a business in your PajCash Dashboard.");
-        }
-      } catch (e) {
-        console.error("Failed to automatically resolve PajCash Business ID:", e);
-        setApiError(`Failed to resolve Business ID: ${e.message || "Unauthorized"}. Please check your API Key.`);
-      } finally {
-        setResolvingBusiness(false);
-      }
+    if (publicKey) {
+      const cachedBankName = localStorage.getItem(`paj_bank_name_${publicKey}`);
+      const cachedAccNum = localStorage.getItem(`paj_account_number_${publicKey}`);
+      const cachedAccName = localStorage.getItem(`paj_account_name_${publicKey}`);
+
+      if (cachedBankName) setSelectedBank(cachedBankName);
+      if (cachedAccNum) setAccountNumber(cachedAccNum);
+      if (cachedAccName) setAccountName(cachedAccName);
+    } else {
+      setSelectedBank('Choose Bank');
+      setAccountNumber('');
+      setAccountName('');
     }
-    autoResolveBusiness();
-  }, [PAJCASH_API_KEY, isPajcashLive, resolvedBusinessId]);
+  }, [publicKey]);
 
   // Load supported tokens from PajCash API on mount
   useEffect(() => {
@@ -202,15 +330,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
       }
     }
     fetchApiBanks();
-  }, [isPajcashLive, isLiveRoute]);
+  }, [isPajcashLive, isLiveRoute, PAJCASH_API_KEY]);
 
   // Fetch payout logs when active
   const loadPayoutLogs = async () => {
-    if (!isLiveRoute || !isPajcashLive || !resolvedBusinessId) return;
+    if (!isLiveRoute || !isPajcashLive) return;
     setLoadingLogs(true);
     setLogError(null);
     try {
-      const txs = await getTransactionHistory(resolvedBusinessId, PAJCASH_API_KEY);
+      const txs = await getTransactionHistory(PAJCASH_API_KEY);
       if (txs) {
         setPayoutLogs(txs);
       }
@@ -224,7 +352,28 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   useEffect(() => {
     loadPayoutLogs();
-  }, [isPajcashLive, isLiveRoute, resolvedBusinessId]);
+  }, [isPajcashLive, isLiveRoute, PAJCASH_API_KEY]);
+
+  // Fetch exchange rates from PajCash
+  useEffect(() => {
+    async function loadRates() {
+      if (!isLiveRoute) return;
+      setLoadingRates(true);
+      try {
+        const rates = await getAllRate();
+        if (rates) {
+          setPajRates(rates);
+        }
+      } catch (e) {
+        console.error("Failed to fetch rates:", e);
+      } finally {
+        setLoadingRates(false);
+      }
+    }
+    loadRates();
+    const interval = setInterval(loadRates, 30000);
+    return () => clearInterval(interval);
+  }, [isLiveRoute]);
 
   // Resolve account name dynamically matching the country's localized naming style
   useEffect(() => {
@@ -247,8 +396,21 @@ export default function P2PPanel({ connected, walletTokenList }) {
           const res = await resolveBankAccount(PAJCASH_API_KEY, bankIdParam, trimmedAcc);
           if (res && res.accountName) {
             setAccountName(res.accountName);
+            if (publicKey) {
+              localStorage.setItem(`paj_bank_id_${publicKey}`, bankIdParam);
+              localStorage.setItem(`paj_bank_name_${publicKey}`, selectedBank);
+              localStorage.setItem(`paj_account_number_${publicKey}`, trimmedAcc);
+              localStorage.setItem(`paj_account_name_${publicKey}`, res.accountName);
+            }
           } else if (res && typeof res === 'object' && (res.name || res.account_name)) {
-            setAccountName(res.name || res.account_name);
+            const resolvedName = res.name || res.account_name;
+            setAccountName(resolvedName);
+            if (publicKey) {
+              localStorage.setItem(`paj_bank_id_${publicKey}`, bankIdParam);
+              localStorage.setItem(`paj_bank_name_${publicKey}`, selectedBank);
+              localStorage.setItem(`paj_account_number_${publicKey}`, trimmedAcc);
+              localStorage.setItem(`paj_account_name_${publicKey}`, resolvedName);
+            }
           } else {
             setAccountName('Beneficiary Account');
           }
@@ -399,9 +561,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
     return () => clearTimeout(t1);
   }, [selectedToken, selectedBank]);
 
-  // Calculate NGN conversion values (Naira exchange rate of 1500 NGN/USD)
-  const usdRate = selectedToken.symbol === 'SOL' ? 145.20 : selectedToken.symbol === 'BONK' ? 0.000022 : 1.00;
-  const ngnRate = usdRate * 1500;
+  // Calculate NGN conversion values dynamically using live exchange rate quotes
+  const tokenPriceUsd = selectedToken.price || (selectedToken.symbol === 'SOL' ? 145.20 : selectedToken.symbol === 'BONK' ? 0.000022 : 1.00);
+  const activeNgnRate = pajRates?.offRampRate?.rate || 1500;
+  const ngnRate = tokenPriceUsd * activeNgnRate;
   const parsedAmt = parseFloat(amount) || 0;
   
   const fiatAmountText = parsedAmt > 0 ? (parsedAmt * ngnRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
@@ -429,6 +592,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
       alert('PajCash API is offline. Cannot process transactions.');
       return;
     }
+    if (!connected || !publicKey) {
+      alert('Please connect your Solana wallet first.');
+      return;
+    }
     if (!amount || parseFloat(amount) <= 0) {
       alert('Please enter a valid amount.');
       return;
@@ -448,21 +615,163 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
     setSubmitting(true);
     try {
-      // Format destination payload: "BankName - AccountNumber - AccountName"
-      const destStr = `${displayBank} - ${accountNumber} - ${accountName}`;
-      const res = await initiateWithdrawal(resolvedBusinessId, PAJCASH_API_KEY, destStr, amount);
-      
-      setSuccessDetails({
-        action: 'Sell',
-        amount: `${amount} ${selectedToken.symbol}`,
-        fiat: `₦${fiatAmountText}`,
-        bank: displayBank,
-        account: accountNumber,
-        name: accountName,
-        txId: res._id || res.id || 'N/A'
-      });
-      setShowSuccess(true);
-      loadPayoutLogs();
+      const bankObj = apiBanks.find(b => 
+        (typeof b === 'string' ? b : b.name || b.bank_name) === selectedBank
+      );
+      const bankIdParam = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
+
+      const orderData = {
+        bank: bankIdParam,
+        accountNumber: accountNumber.trim(),
+        currency: 'NGN',
+        amount: Number(amount),
+        mint: selectedToken.mint || 'So11111111111111111111111111111111111111112',
+        chain: 'SOLANA',
+        webhookURL: 'https://api.paj.cash/webhook',
+      };
+
+      // 1. Create PajCash Off-ramp Order
+      const order = await createOfframpOrder(orderData, PAJCASH_API_KEY);
+      if (!order || !order.address) {
+        throw new Error('PajCash failed to generate a deposit address for this order.');
+      }
+
+      // 2. Build on-chain transaction
+      const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+      const transaction = new Transaction();
+      transaction.feePayer = publicKey;
+      transaction.recentBlockhash = latestBlockhash.blockhash;
+
+      const depositPublicKey = new PublicKey(order.address);
+
+      if (selectedToken.symbol === 'SOL') {
+        const lamports = BigInt(Math.round(order.amount * 1e9));
+        transaction.add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: depositPublicKey,
+            lamports: Number(lamports)
+          })
+        );
+      } else {
+        const mintPubkey = new PublicKey(selectedToken.mint);
+
+        let tokenProgramId = TOKEN_PROGRAM_ID;
+        try {
+          const mintAcct = await connection.getAccountInfo(mintPubkey);
+          if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+            tokenProgramId = TOKEN_2022_PROGRAM_ID;
+          }
+        } catch (e) { }
+
+        const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
+        const receiverATA = getAssociatedTokenAddressSync(mintPubkey, depositPublicKey, false, tokenProgramId);
+
+        // Check if recipient's ATA needs to be created
+        let needsAtaCreation = false;
+        try {
+          const ataInfo = await connection.getAccountInfo(receiverATA);
+          if (!ataInfo) needsAtaCreation = true;
+        } catch (e) {
+          needsAtaCreation = true;
+        }
+
+        const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
+        if (!mintInfo.value) throw new Error('Invalid token mint');
+        const decimals = mintInfo.value.data.parsed.info.decimals;
+        const amountUnits = BigInt(Math.round(order.amount * Math.pow(10, decimals)));
+
+        transaction.add(
+          createAssociatedTokenAccountIdempotentInstruction(
+            publicKey,
+            receiverATA,
+            depositPublicKey,
+            mintPubkey,
+            tokenProgramId
+          )
+        );
+
+        transaction.add(
+          createTransferCheckedInstruction(
+            senderATA,
+            mintPubkey,
+            receiverATA,
+            publicKey,
+            amountUnits,
+            decimals,
+            [],
+            tokenProgramId
+          )
+        );
+      }
+
+      // Add custom on-chain memo instruction
+      const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+      transaction.add(
+        new TransactionInstruction({
+          keys: [],
+          programId: MEMO_PROGRAM_ID,
+          data: new TextEncoder().encode(`fiatwallet:pajcash:order:${order.id}`)
+        })
+      );
+
+      // Auditing transaction before signature
+      verifyOfframpTransaction(transaction, order.address, order.amount, selectedToken, publicKey);
+
+      // Pre-flight simulation
+      const simResult = await connection.simulateTransaction(transaction);
+      if (simResult.value.err) {
+        throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
+      }
+
+      // 3. Prompt user wallet adapter for signature and execution
+      const signature = await sendTransaction(transaction, connection);
+
+      // 5. Poll for confirmation
+      let confirmed = false;
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        try {
+          const status = await connection.getSignatureStatus(signature);
+          const conf = status?.value?.confirmationStatus;
+          if (conf === 'confirmed' || conf === 'finalized') {
+            confirmed = true;
+            break;
+          }
+          if (status?.value?.err) {
+            throw new Error('Transaction rejected by network: ' + JSON.stringify(status.value.err));
+          }
+        } catch (pollErr) {
+          if (pollErr.message.startsWith('Transaction rejected')) throw pollErr;
+        }
+        await new Promise(r => setTimeout(r, 2000));
+      }
+
+      if (confirmed) {
+        // Cache order ID in local storage for user's transaction history retention
+        const userOrderIds = (() => {
+          try {
+            const raw = localStorage.getItem(`paj_user_orders_${publicKey}`);
+            return raw ? JSON.parse(raw) : [];
+          } catch { return []; }
+        })();
+        userOrderIds.push(order.id);
+        localStorage.setItem(`paj_user_orders_${publicKey}`, JSON.stringify(userOrderIds));
+
+        setSuccessDetails({
+          action: 'Sell',
+          amount: `${amount} ${selectedToken.symbol}`,
+          fiat: `₦${fiatAmountText}`,
+          bank: displayBank,
+          account: accountNumber,
+          name: accountName,
+          txId: order.id || 'N/A'
+        });
+        setShowSuccess(true);
+        loadPayoutLogs();
+      } else {
+        alert(`Transaction submitted but confirmation timed out. Signature: ${signature}`);
+      }
     } catch (err) {
       console.error(err);
       alert(`Transaction Failed: ${err.message}`);
@@ -470,6 +779,20 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setSubmitting(false);
     }
   };
+
+  if (!connected || !publicKey) {
+    return (
+      <div className="p2p-coming-soon-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '320px', textAlign: 'center', padding: '20px 24px', background: 'rgba(255, 255, 255, 0.01)', border: '1.5px dashed rgba(255, 255, 255, 0.1)', borderRadius: '16px', margin: '10px 0' }}>
+        <div style={{ fontSize: '38px', marginBottom: '14px' }}>🔌</div>
+        <h4 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', marginBottom: '10px' }}>
+          Connect Your Wallet
+        </h4>
+        <p style={{ fontSize: '11px', color: 'var(--text3)', maxWidth: '300px', lineHeight: '1.5' }}>
+          Please connect your Solana wallet using the button in the top-right corner to perform live off-ramp settlements.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="p2p-panel-wrap">
@@ -784,52 +1107,63 @@ export default function P2PPanel({ connected, walletTokenList }) {
       )}
 
       {/* ── Live Payout History Section ── */}
-      {isLiveRoute && isPajcashLive && !apiError && (
-        <div className="pajcash-logs-section" style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-          <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'white', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>Live Payout History</span>
-            <button onClick={loadPayoutLogs} style={{ background: 'none', border: 'none', color: 'var(--lime)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
-              Refresh
-            </button>
-          </h4>
-          {loadingLogs ? (
-            <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
-              <span className="p2p-mini-spinner" /> Loading payouts...
-            </div>
-          ) : logError ? (
-            <div style={{ fontSize: '11px', color: '#f87171', background: 'rgba(239, 68, 68, 0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)', marginBottom: '8px', lineHeight: '1.4' }}>
-              ⚠️ API error loading history: {logError}
-            </div>
-          ) : payoutLogs.length === 0 ? (
-            <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
-              No recent payouts found.
-            </div>
-          ) : (
-            <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px' }}>
-              {payoutLogs.map(log => (
-                <div key={log._id || log.id} style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span style={{ color: 'white', fontWeight: 'bold', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '170px' }}>
-                      {log.destination}
-                    </span>
-                    <span style={{ color: 'var(--text3)', fontSize: '10px' }}>
-                      {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Recent'}
-                    </span>
+      {isLiveRoute && isPajcashLive && !apiError && (() => {
+        const userOrderIds = (() => {
+          try {
+            const raw = localStorage.getItem(`paj_user_orders_${publicKey}`);
+            return raw ? JSON.parse(raw) : [];
+          } catch { return []; }
+        })();
+
+        const userLogs = payoutLogs.filter(log => userOrderIds.includes(log.id || log._id));
+
+        return (
+          <div className="pajcash-logs-section" style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+            <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'white', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Live Payout History</span>
+              <button onClick={loadPayoutLogs} style={{ background: 'none', border: 'none', color: 'var(--lime)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
+                Refresh
+              </button>
+            </h4>
+            {loadingLogs ? (
+              <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
+                <span className="p2p-mini-spinner" /> Loading payouts...
+              </div>
+            ) : logError ? (
+              <div style={{ fontSize: '11px', color: '#f87171', background: 'rgba(239, 68, 68, 0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)', marginBottom: '8px', lineHeight: '1.4' }}>
+                ⚠️ API error loading history: {logError}
+              </div>
+            ) : userLogs.length === 0 ? (
+              <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
+                No recent payouts found.
+              </div>
+            ) : (
+              <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px' }}>
+                {userLogs.map(log => (
+                  <div key={log._id || log.id} style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span style={{ color: 'white', fontWeight: 'bold', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '170px' }}>
+                        {log.recipient || 'Naira Payout'}
+                      </span>
+                      <span style={{ color: 'var(--text3)', fontSize: '10px' }}>
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Recent'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                      <span style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
+                        ₦{log.fiatAmount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                      <span style={{ color: 'var(--text3)', fontSize: '9px', fontFamily: 'var(--mono)' }}>
+                        {(log._id || log.id)?.slice(0, 8)}
+                      </span>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                    <span style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
-                      ₦{log.amount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                    <span style={{ color: 'var(--text3)', fontSize: '9px', fontFamily: 'var(--mono)' }}>
-                      {(log._id || log.id)?.slice(0, 8)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Success Modal Popup */}
       {showSuccess && successDetails && (

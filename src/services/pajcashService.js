@@ -1,26 +1,38 @@
 /**
- * pajcashService.js - Frontend integration layer for PajCash API
- * Communicates with https://api.paj.cash
+ * pajcashService.js - Frontend integration layer wrapping PajCash SDK (paj_ramp)
  */
+
+import {
+  initializeSDK,
+  initiate,
+  verify,
+  getBanks as getSdkBanks,
+  resolveBankAccount as resolveSdkBankAccount,
+  createOfframpOrder as createSdkOfframpOrder,
+  getAllRate as getSdkAllRate,
+  getAllTransactions as getSdkAllTransactions,
+  Environment
+} from 'paj_ramp';
 
 const API_URL = import.meta.env.VITE_PAJCASH_API_URL || 'https://api.paj.cash';
 
 /**
- * Helper to generate authorization headers
+ * Initialize PajCash SDK environment
+ * @param {string} envString - 'production' | 'staging' | 'local'
  */
-function getHeaders(apiKey) {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-  if (apiKey) {
-    headers['Authorization'] = `Bearer ${apiKey}`;
+export function initPajSDK(envString = 'production') {
+  let env = Environment.Production;
+  const clean = envString.toLowerCase();
+  if (clean.includes('staging') || clean.includes('dev')) {
+    env = Environment.Staging;
+  } else if (clean.includes('local')) {
+    env = Environment.Local;
   }
-  return headers;
+  initializeSDK(env);
 }
 
 /**
- * Fetch all supported tokens from the PajCash gateway
- * @returns {Promise<Array>}
+ * Fetch all supported tokens from the public endpoint
  */
 export async function getSupportedTokens() {
   const res = await fetch(`${API_URL}/token`);
@@ -32,155 +44,56 @@ export async function getSupportedTokens() {
 }
 
 /**
- * Fetch metadata for a specific token
- * @param {string} addressOrSymbol - token mint address or symbol
- * @param {string} chain - uppercase chain ID (e.g. SOLANA, MONAD)
- * @returns {Promise<Object>}
+ * Initiate an OTP session for email/phone
  */
-export async function getTokenMetadata(addressOrSymbol, chain = 'SOLANA') {
-  if (!addressOrSymbol) {
-    throw new Error('Token address or symbol is required');
-  }
-  const res = await fetch(`${API_URL}/token/${addressOrSymbol}?chain=${chain.toUpperCase()}`);
-  if (!res.ok) {
-    const errData = await res.json().catch(() => null);
-    throw new Error(errData?.message || `Failed to fetch token metadata: ${res.statusText || res.status}`);
-  }
-  return res.json();
+export async function initiateSession(emailOrPhone, apiKey) {
+  return initiate(emailOrPhone, apiKey);
 }
 
 /**
- * Initiate a fiat payout/withdrawal to a destination bank account
- * @param {string} businessId - PajCash Business ID
- * @param {string} apiKey - PajCash API Key
- * @param {string} destination - bank details (e.g. "GTBank - 0123456789 - John Doe")
- * @param {number} amount - withdrawal amount (fiat or stablecoin units)
- * @returns {Promise<Object>}
+ * Verify OTP code to obtain a session token
  */
-export async function initiateWithdrawal(businessId, apiKey, destination, amount) {
-  if (!businessId || !apiKey) {
-    throw new Error('PajCash Business ID and API Key are required for withdrawals');
-  }
-  if (!destination || !amount || amount <= 0) {
-    throw new Error('Invalid destination bank details or amount');
-  }
-
-  const res = await fetch(`${API_URL}/business/${businessId}/withdraw`, {
-    method: 'POST',
-    headers: getHeaders(apiKey),
-    body: JSON.stringify({
-      destination,
-      amount: Number(amount)
-    })
-  });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => null);
-    throw new Error(errData?.message || `Withdrawal failed: ${res.statusText}`);
-  }
-
-  return res.json();
+export async function verifySession(emailOrPhone, otp, apiKey) {
+  const deviceInfo = {
+    uuid: 'fiatwallet-session-' + Date.now() + Math.random().toString(36).slice(2, 6),
+    device: 'Desktop',
+    os: 'WebOS',
+    browser: 'dApp-Browser'
+  };
+  return verify(emailOrPhone, otp, deviceInfo, apiKey);
 }
 
 /**
- * Fetch recent payout transactions for a business
- * @param {string} businessId - PajCash Business ID
- * @param {string} apiKey - PajCash API Key
- * @returns {Promise<Array>}
+ * Fetch supported banks list
  */
-export async function getTransactionHistory(businessId, apiKey) {
-  if (!businessId || !apiKey) {
-    throw new Error('PajCash Business ID and API Key are required to fetch transactions');
-  }
-
-  const res = await fetch(`${API_URL}/transaction/business/${businessId}`, {
-    method: 'GET',
-    headers: getHeaders(apiKey)
-  });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => null);
-    throw new Error(errData?.message || `Failed to fetch transaction history: ${res.statusText || res.status}`);
-  }
-
-  return res.json();
+export async function getBanks(sessionToken) {
+  return getSdkBanks(sessionToken);
 }
 
 /**
- * Fetch supported banks list from PajCash API
- * @param {string} apiKey - PajCash API Key
- * @returns {Promise<Array>}
+ * Resolve a bank account number to its registered name
  */
-export async function getBanks(apiKey) {
-  if (!apiKey) {
-    throw new Error('PajCash API Key is required to fetch banks');
-  }
-
-  const res = await fetch(`${API_URL}/bank`, {
-    method: 'GET',
-    headers: getHeaders(apiKey)
-  });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => null);
-    throw new Error(errData?.message || `Failed to fetch banks: ${res.statusText || res.status}`);
-  }
-
-  return res.json();
+export async function resolveBankAccount(sessionToken, bankId, accountNumber) {
+  return resolveSdkBankAccount(sessionToken, bankId, accountNumber);
 }
 
 /**
- * Resolve a bank account number to its registered name using PajCash API
- * @param {string} apiKey - PajCash API Key
- * @param {string} bankId - Bank identifier (ID, code, or name)
- * @param {string} accountNumber - 10-digit account number
- * @returns {Promise<Object>}
+ * Create a direct off-ramp order
  */
-export async function resolveBankAccount(apiKey, bankId, accountNumber) {
-  if (!apiKey) {
-    throw new Error('PajCash API Key is required to resolve bank accounts');
-  }
-  if (!bankId || !accountNumber) {
-    throw new Error('Bank ID and account number are required');
-  }
-
-  // Use the public bank account confirm endpoint
-  const res = await fetch(`${API_URL}/pub/bank-account/confirm/?bankId=${encodeURIComponent(bankId)}&accountNumber=${encodeURIComponent(accountNumber)}`, {
-    method: 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    }
-  });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => null);
-    throw new Error(errData?.message || `Failed to resolve bank account name: ${res.statusText || res.status}`);
-  }
-
-  return res.json();
+export async function createOfframpOrder(options, sessionToken) {
+  return createSdkOfframpOrder(options, sessionToken);
 }
 
 /**
- * Fetch list of businesses associated with the API Key/Account
- * @param {string} apiKey - PajCash API Key
- * @returns {Promise<Array>}
+ * Fetch conversion rates
  */
-export async function getBusinesses(apiKey) {
-  if (!apiKey) {
-    throw new Error('PajCash API Key is required to fetch businesses');
-  }
-
-  const res = await fetch(`${API_URL}/business`, {
-    method: 'GET',
-    headers: getHeaders(apiKey)
-  });
-
-  if (!res.ok) {
-    const errData = await res.json().catch(() => null);
-    throw new Error(errData?.message || `Failed to fetch businesses: ${res.statusText || res.status}`);
-  }
-
-  return res.json();
+export async function getAllRate() {
+  return getSdkAllRate();
 }
 
+/**
+ * Fetch payout logs using the active session token
+ */
+export async function getTransactionHistory(sessionToken) {
+  return getSdkAllTransactions(sessionToken);
+}
