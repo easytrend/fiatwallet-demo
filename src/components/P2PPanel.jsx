@@ -672,14 +672,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
               <div className="tknob" />
             </div>
           </div>
-          {canTransact && (
-            <span style={{
-              fontSize: '10px', color: 'var(--lime)', background: 'rgba(74,222,128,0.1)',
-              padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold',
-            }}>
-              ● Live · Solana Mainnet
-            </span>
-          )}
+
         </div>
 
         {/* Country picker */}
@@ -721,7 +714,45 @@ export default function P2PPanel({ connected, walletTokenList }) {
       {/* ── LIVE OFFRAMP ROUTE ── */}
       {isLiveRoute ? (
         <>
-          {/* Bank selector */}
+          {/* Account Number — shown first */}
+          <div className="field">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="p2p-btn-badge" onClick={handlePaste} disabled={!canTransact} style={{ opacity: canTransact ? 1 : 0.6 }}>Paste</button>
+                <button
+                  className="p2p-btn-badge"
+                  onClick={() => setScannerActive(true)}
+                  disabled={!canTransact}
+                  style={{ opacity: canTransact ? 1 : 0.6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Scan QR Code"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" strokeWidth="2.5" fill="none" />
+                    <rect x="1" y="10" width="22" height="4" fill="currentColor" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="input-wrap" style={{ opacity: canTransact ? 1 : 0.6 }}>
+              <input
+                type="text"
+                value={accountNumber}
+                onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
+                placeholder="0000000000"
+                disabled={!canTransact}
+              />
+            </div>
+            <div style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--lime)', fontWeight: 'bold' }}>
+              {accountNumber && selectedBank !== 'Choose Bank' && (
+                resolvingName
+                  ? <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}><span className="p2p-mini-spinner" /> Resolving...</span>
+                  : accountName && <span className="animated-fade-in">{accountName}</span>
+              )}
+            </div>
+          </div>
+
+          {/* Bank selector — shown second */}
           <div className="field" style={{ position: 'relative' }}>
             <div className="field-label">Bank</div>
             <div
@@ -792,44 +823,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Account Number */}
-          <div className="field">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="p2p-btn-badge" onClick={handlePaste} disabled={!canTransact} style={{ opacity: canTransact ? 1 : 0.6 }}>Paste</button>
-                <button
-                  className="p2p-btn-badge"
-                  onClick={() => setScannerActive(true)}
-                  disabled={!canTransact}
-                  style={{ opacity: canTransact ? 1 : 0.6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  title="Scan QR Code"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" strokeWidth="2.5" fill="none" />
-                    <rect x="1" y="10" width="22" height="4" fill="currentColor" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <div className="input-wrap" style={{ opacity: canTransact ? 1 : 0.6 }}>
-              <input
-                type="text"
-                value={accountNumber}
-                onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
-                placeholder="0000000000"
-                disabled={!canTransact}
-              />
-            </div>
-            <div style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--lime)', fontWeight: 'bold' }}>
-              {accountNumber && selectedBank !== 'Choose Bank' && (
-                resolvingName
-                  ? <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}><span className="p2p-mini-spinner" /> Resolving...</span>
-                  : accountName && <span className="animated-fade-in">{accountName}</span>
-              )}
-            </div>
           </div>
 
           {/* Amount + Token row */}
