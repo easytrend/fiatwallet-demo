@@ -155,7 +155,30 @@ export async function resolveBankAccount(apiKey, bankId, accountNumber) {
 
   if (!res.ok) {
     const errData = await res.json().catch(() => null);
-    throw new Error(errData?.message || `Failed to resolve bank account name: ${res.statusText}`);
+    throw new Error(errData?.message || `Failed to resolve bank account name: ${res.statusText || res.status}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch list of businesses associated with the API Key/Account
+ * @param {string} apiKey - PajCash API Key
+ * @returns {Promise<Array>}
+ */
+export async function getBusinesses(apiKey) {
+  if (!apiKey) {
+    throw new Error('PajCash API Key is required to fetch businesses');
+  }
+
+  const res = await fetch(`${API_URL}/business`, {
+    method: 'GET',
+    headers: getHeaders(apiKey)
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.message || `Failed to fetch businesses: ${res.statusText || res.status}`);
   }
 
   return res.json();

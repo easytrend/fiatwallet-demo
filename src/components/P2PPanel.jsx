@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
-import { getSupportedTokens, initiateWithdrawal, getTransactionHistory, getBanks, resolveBankAccount } from '../services/pajcashService';
+import { getSupportedTokens, initiateWithdrawal, getTransactionHistory, getBanks, resolveBankAccount, getBusinesses } from '../services/pajcashService';
 
 const COUNTRIES = [
   { code: 'NGA', name: 'Nigeria', flag: '🇳🇬', symbol: '₦' },
@@ -85,8 +85,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // PajCash configuration detection
   const PAJCASH_API_KEY = import.meta.env.VITE_PAJCASH_API_KEY;
-  const PAJCASH_BUSINESS_ID = import.meta.env.VITE_PAJCASH_BUSINESS_ID;
-  const isPajcashLive = !!(PAJCASH_API_KEY && PAJCASH_BUSINESS_ID);
+  const isPajcashLive = !!PAJCASH_API_KEY;
+  const [resolvedBusinessId, setResolvedBusinessId] = useState(import.meta.env.VITE_PAJCASH_BUSINESS_ID || '');
+  const [resolvingBusiness, setResolvingBusiness] = useState(false);
 
   // Dynamic tokens, logs, and errors
   const [pajTokens, setPajTokens] = useState([]);
@@ -119,11 +120,42 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // Initialize API and credential warnings
   useEffect(() => {
     if (!isPajcashLive && isLiveRoute) {
-      setApiError("PajCash API keys are not configured. To enable live payouts, configure VITE_PAJCASH_API_KEY and VITE_PAJCASH_BUSINESS_ID in Vercel.");
+      setApiError("PajCash API Key is not configured. To enable live payouts, configure VITE_PAJCASH_API_KEY in Vercel.");
+    } else if (isPajcashLive && !resolvedBusinessId && !resolvingBusiness) {
+      setApiError("Resolving PajCash Business ID...");
     } else {
       setApiError(null);
     }
-  }, [isPajcashLive, isLiveRoute]);
+  }, [isPajcashLive, isLiveRoute, resolvedBusinessId, resolvingBusiness]);
+
+  // Automatically fetch Business ID from API Key if not provided
+  useEffect(() => {
+    async function autoResolveBusiness() {
+      if (!isPajcashLive || resolvedBusinessId) return;
+      setResolvingBusiness(true);
+      try {
+        const list = await getBusinesses(PAJCASH_API_KEY);
+        if (list && list.length > 0) {
+          const firstBiz = list[0];
+          const bizId = firstBiz.id || firstBiz._id;
+          if (bizId) {
+            setResolvedBusinessId(bizId);
+            console.log("Dynamically resolved PajCash Business ID:", bizId);
+          } else {
+            setApiError("PajCash API returned businesses, but they lack an ID field.");
+          }
+        } else {
+          setApiError("No active business found for this PajCash API Key. Please create a business in your PajCash Dashboard.");
+        }
+      } catch (e) {
+        console.error("Failed to automatically resolve PajCash Business ID:", e);
+        setApiError(`Failed to resolve Business ID: ${e.message || "Unauthorized"}. Please check your API Key.`);
+      } finally {
+        setResolvingBusiness(false);
+      }
+    }
+    autoResolveBusiness();
+  }, [PAJCASH_API_KEY, isPajcashLive, resolvedBusinessId]);
 
   // Load supported tokens from PajCash API on mount
   useEffect(() => {
@@ -174,11 +206,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // Fetch payout logs when active
   const loadPayoutLogs = async () => {
-    if (!isLiveRoute || !isPajcashLive) return;
+    if (!isLiveRoute || !isPajcashLive || !resolvedBusinessId) return;
     setLoadingLogs(true);
     setLogError(null);
     try {
-      const txs = await getTransactionHistory(PAJCASH_BUSINESS_ID, PAJCASH_API_KEY);
+      const txs = await getTransactionHistory(resolvedBusinessId, PAJCASH_API_KEY);
       if (txs) {
         setPayoutLogs(txs);
       }
@@ -192,7 +224,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   useEffect(() => {
     loadPayoutLogs();
-  }, [isPajcashLive, isLiveRoute]);
+  }, [isPajcashLive, isLiveRoute, resolvedBusinessId]);
 
   // Resolve account name dynamically matching the country's localized naming style
   useEffect(() => {
@@ -418,7 +450,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     try {
       // Format destination payload: "BankName - AccountNumber - AccountName"
       const destStr = `${displayBank} - ${accountNumber} - ${accountName}`;
-      const res = await initiateWithdrawal(PAJCASH_BUSINESS_ID, PAJCASH_API_KEY, destStr, amount);
+      const res = await initiateWithdrawal(resolvedBusinessId, PAJCASH_API_KEY, destStr, amount);
       
       setSuccessDetails({
         action: 'Sell',
