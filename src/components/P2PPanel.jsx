@@ -7,7 +7,8 @@ import {
   resolveBankAccount, 
   createOfframpOrder, 
   getAllRate, 
-  getTransactionHistory 
+  getTransactionHistory,
+  getBusinesses 
 } from '../services/pajcashService';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram } from '@solana/web3.js';
@@ -221,6 +222,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // PajCash configuration detection
   const PAJCASH_API_KEY = import.meta.env.VITE_PAJCASH_API_KEY;
   const isPajcashLive = !!PAJCASH_API_KEY;
+  const [resolvedBusinessId, setResolvedBusinessId] = useState(import.meta.env.VITE_PAJCASH_BUSINESS_ID || '');
+  const [resolvingBusiness, setResolvingBusiness] = useState(false);
 
   // Dynamic tokens, logs, and errors
   const [pajTokens, setPajTokens] = useState([]);
@@ -263,10 +266,41 @@ export default function P2PPanel({ connected, walletTokenList }) {
   useEffect(() => {
     if (!isPajcashLive && isLiveRoute) {
       setApiError("PajCash API Key is not configured. To enable live payouts, configure VITE_PAJCASH_API_KEY in Vercel.");
+    } else if (isPajcashLive && !resolvedBusinessId && !resolvingBusiness) {
+      setApiError("Resolving PajCash Business ID...");
     } else {
       setApiError(null);
     }
-  }, [isPajcashLive, isLiveRoute]);
+  }, [isPajcashLive, isLiveRoute, resolvedBusinessId, resolvingBusiness]);
+
+  // Automatically fetch Business ID from API Key if not provided
+  useEffect(() => {
+    async function autoResolveBusiness() {
+      if (!isPajcashLive || resolvedBusinessId) return;
+      setResolvingBusiness(true);
+      try {
+        const list = await getBusinesses(PAJCASH_API_KEY);
+        if (list && list.length > 0) {
+          const firstBiz = list[0];
+          const bizId = firstBiz.id || firstBiz._id;
+          if (bizId) {
+            setResolvedBusinessId(bizId);
+            console.log("Dynamically resolved PajCash Business ID:", bizId);
+          } else {
+            setApiError("PajCash API returned businesses, but they lack an ID field.");
+          }
+        } else {
+          setApiError("No active business found for this PajCash API Key. Please create a business in your PajCash Dashboard.");
+        }
+      } catch (e) {
+        console.error("Failed to automatically resolve PajCash Business ID:", e);
+        setApiError(`Failed to resolve Business ID: ${e.message || "Unauthorized"}. Please check your API Key.`);
+      } finally {
+        setResolvingBusiness(false);
+      }
+    }
+    autoResolveBusiness();
+  }, [PAJCASH_API_KEY, isPajcashLive, resolvedBusinessId]);
 
   // Load cached bank details from local storage on wallet connection
   useEffect(() => {
@@ -334,11 +368,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // Fetch payout logs when active
   const loadPayoutLogs = async () => {
-    if (!isLiveRoute || !isPajcashLive) return;
+    if (!isLiveRoute || !isPajcashLive || !resolvedBusinessId) return;
     setLoadingLogs(true);
     setLogError(null);
     try {
-      const txs = await getTransactionHistory(PAJCASH_API_KEY);
+      const txs = await getTransactionHistory(PAJCASH_API_KEY, resolvedBusinessId);
       if (txs) {
         setPayoutLogs(txs);
       }
@@ -352,7 +386,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   useEffect(() => {
     loadPayoutLogs();
-  }, [isPajcashLive, isLiveRoute, PAJCASH_API_KEY]);
+  }, [isPajcashLive, isLiveRoute, PAJCASH_API_KEY, resolvedBusinessId]);
 
   // Fetch exchange rates from PajCash
   useEffect(() => {
@@ -1143,7 +1177,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   <div key={log._id || log.id} style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                       <span style={{ color: 'white', fontWeight: 'bold', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '170px' }}>
-                        {log.recipient || 'Naira Payout'}
+                        {log.recipient || log.destination || 'Naira Payout'}
                       </span>
                       <span style={{ color: 'var(--text3)', fontSize: '10px' }}>
                         {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Recent'}
@@ -1151,7 +1185,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
                       <span style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
-                        ₦{log.fiatAmount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₦{(log.fiatAmount || log.amount)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                       <span style={{ color: 'var(--text3)', fontSize: '9px', fontFamily: 'var(--mono)' }}>
                         {(log._id || log.id)?.slice(0, 8)}

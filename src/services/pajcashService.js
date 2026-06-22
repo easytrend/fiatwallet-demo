@@ -14,7 +14,7 @@ import {
   Environment
 } from 'paj_ramp';
 
-const API_URL = import.meta.env.VITE_PAJCASH_API_URL || 'https://api.paj.cash';
+let API_URL = import.meta.env.VITE_PAJCASH_API_URL || 'https://api.paj.cash';
 
 /**
  * Initialize PajCash SDK environment
@@ -25,8 +25,12 @@ export function initPajSDK(envString = 'production') {
   const clean = envString.toLowerCase();
   if (clean.includes('staging') || clean.includes('dev')) {
     env = Environment.Staging;
+    API_URL = 'https://api-staging.paj.cash';
   } else if (clean.includes('local')) {
     env = Environment.Local;
+    API_URL = 'http://localhost:3000';
+  } else {
+    API_URL = import.meta.env.VITE_PAJCASH_API_URL || 'https://api.paj.cash';
   }
   initializeSDK(env);
 }
@@ -92,8 +96,43 @@ export async function getAllRate() {
 }
 
 /**
- * Fetch payout logs using the active session token
+ * Fetch payout logs using the active session token or merchant API key
  */
-export async function getTransactionHistory(sessionToken) {
-  return getSdkAllTransactions(sessionToken);
+export async function getTransactionHistory(sessionTokenOrApiKey, businessId) {
+  if (businessId) {
+    const res = await fetch(`${API_URL}/transaction/business/${businessId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sessionTokenOrApiKey}`
+      }
+    });
+    if (!res.ok) {
+      const errData = await res.json().catch(() => null);
+      throw new Error(errData?.message || `Failed to fetch transactions: ${res.statusText || res.status}`);
+    }
+    return res.json();
+  }
+  return getSdkAllTransactions(sessionTokenOrApiKey);
+}
+
+/**
+ * Fetch list of businesses associated with the API Key/Account
+ */
+export async function getBusinesses(apiKey) {
+  if (!apiKey) {
+    throw new Error('PajCash API Key is required to fetch businesses');
+  }
+  const res = await fetch(`${API_URL}/business`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    }
+  });
+  if (!res.ok) {
+    const errData = await res.json().catch(() => null);
+    throw new Error(errData?.message || `Failed to fetch businesses: ${res.statusText || res.status}`);
+  }
+  return res.json();
 }
