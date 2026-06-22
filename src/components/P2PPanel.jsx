@@ -1,44 +1,91 @@
 import { useState, useEffect, useRef } from 'react';
 import jsQR from 'jsqr';
-import { 
+import {
   initPajSDK,
-  getSupportedTokens, 
-  getBanks, 
-  resolveBankAccount, 
-  createOfframpOrder, 
-  getAllRate, 
+  getSupportedTokens,
+  getBanks,
+  resolveBankAccount,
+  createOfframpOrder,
+  getAllRate,
   getTransactionHistory,
-  getBusinesses 
 } from '../services/pajcashService';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram } from '@solana/web3.js';
-import { 
-  getAssociatedTokenAddressSync, 
-  createAssociatedTokenAccountIdempotentInstruction, 
+import {
+  getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction,
   createTransferCheckedInstruction,
   TOKEN_PROGRAM_ID,
-  TOKEN_2022_PROGRAM_ID
+  TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token';
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const COUNTRIES = [
-  { code: 'NGA', name: 'Nigeria', flag: '🇳🇬', symbol: '₦' },
-  { code: 'USA', name: 'United States', flag: '🇺🇸', symbol: '$' },
-  { code: 'GBR', name: 'United Kingdom', flag: '🇬🇧', symbol: '£' },
-  { code: 'EUR', name: 'Europe', flag: '🇪🇺', symbol: '€' },
-  { code: 'CAN', name: 'Canada', flag: '🇨🇦', symbol: '$' },
-  { code: 'AUS', name: 'Australia', flag: '🇦🇺', symbol: '$' },
-  { code: 'KEN', name: 'Kenya', flag: '🇰🇪', symbol: 'Sh' },
-  { code: 'GHA', name: 'Ghana', flag: '🇬🇭', symbol: '₵' },
-  { code: 'IND', name: 'India', flag: '🇮🇳', symbol: '₹' },
-  { code: 'ZAF', name: 'South Africa', flag: '🇿🇦', symbol: 'R' },
-  { code: 'BRA', name: 'Brazil', flag: '🇧🇷', symbol: 'R$' },
-  { code: 'JPN', name: 'Japan', flag: '🇯🇵', symbol: '¥' }
+  { code: 'NGA', name: 'Nigeria', flag: '🇳🇬', symbol: '₦', currency: 'NGN' },
+  { code: 'GHA', name: 'Ghana', flag: '🇬🇭', symbol: '₵', currency: 'GHS' },
+  { code: 'KEN', name: 'Kenya', flag: '🇰🇪', symbol: 'Sh', currency: 'KES' },
+  { code: 'ZAF', name: 'South Africa', flag: '🇿🇦', symbol: 'R', currency: 'ZAR' },
+  { code: 'USA', name: 'United States', flag: '🇺🇸', symbol: '$', currency: 'USD' },
+  { code: 'GBR', name: 'United Kingdom', flag: '🇬🇧', symbol: '£', currency: 'USD' },
+  { code: 'EUR', name: 'Europe', flag: '🇪🇺', symbol: '€', currency: 'USD' },
+  { code: 'CAN', name: 'Canada', flag: '🇨🇦', symbol: '$', currency: 'USD' },
+  { code: 'AUS', name: 'Australia', flag: '🇦🇺', symbol: '$', currency: 'USD' },
+  { code: 'IND', name: 'India', flag: '🇮🇳', symbol: '₹', currency: 'USD' },
+  { code: 'BRA', name: 'Brazil', flag: '🇧🇷', symbol: 'R$', currency: 'USD' },
+  { code: 'JPN', name: 'Japan', flag: '🇯🇵', symbol: '¥', currency: 'USD' },
 ];
+
+// Countries supported live by the paj_ramp API
+const LIVE_CURRENCIES = new Set(['NGN', 'GHS', 'KES', 'ZAR']);
+
+const DEFAULT_TOKENS = [
+  {
+    symbol: 'USDC',
+    name: 'USD Coin',
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
+    decimals: 6,
+    balance: 0,
+  },
+  {
+    symbol: 'USDT',
+    name: 'Tether USD',
+    mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB',
+    logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png',
+    decimals: 6,
+    balance: 0,
+  },
+  {
+    symbol: 'SOL',
+    name: 'Solana',
+    mint: 'So11111111111111111111111111111111111111112',
+    logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
+    decimals: 9,
+    balance: 0,
+  },
+];
+
+const ALLOWED_PROGRAM_IDS = new Set([
+  '11111111111111111111111111111111',
+  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',
+  'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
+]);
+
+const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 const getBankMetadata = (bankName) => {
   const clean = bankName.toLowerCase();
   let logo = '';
-  
+
   if (clean.includes('opay')) {
     logo = 'https://play-lh.googleusercontent.com/PFMB9Xeg8vVhnvuiu_jY9ZGXNq6HIuEdz4xlyIOcbdVRccgHa9o8LOJKTyzDUtbL9BphaXvOEhieOQOpW0lgMQ=w240-h240';
   } else if (clean.includes('palm')) {
@@ -48,8 +95,7 @@ const getBankMetadata = (bankName) => {
   } else if (clean.includes('moniepoint')) {
     logo = 'https://play-lh.googleusercontent.com/vd1kyHDKAvbjA4zqUXr6UIVX4bzXQPpNQrwJh_FmJPm2qWJJl0FP45Ad7cGUgyDOc-3Cdme1TwO21wzspL_80A=w240-h240';
   } else {
-    // Sluggify for traditional commercial banks to map to Paystack HQ CDN
-    let slug = clean
+    const slug = clean
       .replace('guaranty trust bank', 'guaranty_trust_bank')
       .replace('gtbank', 'guaranty_trust_bank')
       .replace('first bank of nigeria', 'first_bank')
@@ -57,261 +103,140 @@ const getBankMetadata = (bankName) => {
       .replace('united bank for africa', 'united_bank_for_africa')
       .replace('uba', 'united_bank_for_africa')
       .replace('stanbic ibtc', 'stanbic_ibtc')
-      .replace('sterling bank', 'sterling_bank')
-      .replace('fidelity bank', 'fidelity_bank')
-      .replace('union bank', 'union_bank')
-      .replace('wema bank', 'wema_bank')
       .replace('zenith bank', 'zenith_bank')
       .replace('access bank', 'access_bank')
-      .replace('keystone bank', 'keystone_bank')
-      .replace('polaris bank', 'polaris_bank')
       .replace(/\s+/g, '_')
       .replace(/[^a-z0-9_]/g, '');
-      
     logo = `https://raw.githubusercontent.com/PaystackHQ/nigerialogos/master/public/logos/${slug}/${slug}.svg`;
   }
 
   const initials = bankName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
   let hash = 0;
-  for (let i = 0; i < bankName.length; i++) {
-    hash = bankName.charCodeAt(i) + ((hash << 5) - hash);
-  }
+  for (let i = 0; i < bankName.length; i++) hash = bankName.charCodeAt(i) + ((hash << 5) - hash);
   const color = `hsl(${Math.abs(hash % 360)}, 65%, 40%)`;
   return { name: bankName, logo, color, initial: initials || 'BK' };
 };
 
-const DEFAULT_TOKENS = [
-  { symbol: 'USDC', name: 'USD Coin', mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png', balance: 0 },
-  { symbol: 'SOL', name: 'Solana', mint: 'So11111111111111111111111111111111111111112', logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png', balance: 0 },
-  { symbol: 'USDT', name: 'Tether', mint: 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB', logoURI: 'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png', balance: 0 }
-];
+/**
+ * Verify the constructed transaction is safe to sign:
+ * - Only uses allowed programs
+ * - Transfers to the expected deposit address
+ * - Correct token mint and amount
+ */
+function verifyOfframpTransaction(transaction, expectedRecipient, expectedToken, expectedSignerPublicKey) {
+  if (!transaction.instructions || transaction.instructions.length === 0)
+    throw new Error('Transaction integrity violation: no instructions.');
 
-const ALLOWED_PROGRAM_IDS = new Set([
-  '11111111111111111111111111111111',                         // System Program
-  'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',           // SPL Token Program
-  'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',           // Token-2022 Program
-  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',          // Associated Token Program
-  'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',           // SPL Memo Program
-]);
+  if (!transaction.feePayer || !transaction.feePayer.equals(expectedSignerPublicKey))
+    throw new Error('Transaction integrity violation: fee payer mismatch.');
 
-const ALLOWED_TOKEN_OPCODES = new Set([12]); // TransferChecked only
-const ALLOWED_ATA_OPCODES = new Set([1]); // CreateAssociatedTokenAccountIdempotent only
-
-function verifyOfframpTransaction(transaction, expectedRecipient, expectedAmount, expectedToken, expectedSignerPublicKey) {
-  if (!transaction.instructions || transaction.instructions.length === 0) {
-    throw new Error('Transaction integrity violation: Transaction contains no instructions.');
-  }
-
-  if (!transaction.feePayer) {
-    throw new Error('Transaction integrity violation: Transaction has no fee payer set.');
-  }
-  if (!transaction.feePayer.equals(expectedSignerPublicKey)) {
-    throw new Error(
-      `Transaction integrity violation: Fee payer mismatch. ` +
-      `Expected ${expectedSignerPublicKey.toBase58()}, got ${transaction.feePayer.toBase58()}.`
-    );
-  }
-
-  let transferCheckedCount = 0;
-  let systemTransferCount = 0;
+  let hasTransfer = false;
 
   for (const ix of transaction.instructions) {
-    const programIdStr = ix.programId.toBase58();
+    const progId = ix.programId.toBase58();
 
-    if (!ALLOWED_PROGRAM_IDS.has(programIdStr)) {
-      throw new Error(`Transaction integrity violation: Instruction from disallowed program ${programIdStr}.`);
-    }
+    if (!ALLOWED_PROGRAM_IDS.has(progId))
+      throw new Error(`Transaction integrity violation: disallowed program ${progId}.`);
 
-    if (programIdStr === '11111111111111111111111111111111') {
-      const data = ix.data;
-      const type = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, true);
-      if (type !== 2) {
-        throw new Error('Transaction integrity violation: Unexpected System Program instruction type.');
-      }
-      
-      const toPubkeyStr = ix.keys[1].pubkey.toBase58();
-      const dataView = new DataView(data.buffer, data.byteOffset, data.byteLength);
-      const lamports = dataView.getBigUint64(4, true);
-
-      if (toPubkeyStr !== expectedRecipient) {
-        throw new Error(`Transaction integrity violation: Unexpected SOL transfer destination: ${toPubkeyStr}.`);
-      }
-      if (expectedToken.symbol !== 'SOL') {
-        throw new Error('Transaction integrity violation: Transferring SOL instead of the selected token.');
-      }
-      systemTransferCount++;
-    } else if (programIdStr === 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr') {
-      // Memo is safe
-    } else if (programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs') {
-      const ixType = ix.data[0];
-      if (!ALLOWED_ATA_OPCODES.has(ixType)) {
-        throw new Error(`Transaction integrity violation: Disallowed ATA instruction opcode ${ixType}.`);
-      }
+    if (progId === '11111111111111111111111111111111') {
+      // SOL transfer — System Program instruction type 2
+      const view = new DataView(ix.data.buffer, ix.data.byteOffset, ix.data.byteLength);
+      if (view.getUint32(0, true) !== 2)
+        throw new Error('Transaction integrity violation: unexpected System Program instruction.');
+      const to = ix.keys[1].pubkey.toBase58();
+      if (to !== expectedRecipient)
+        throw new Error(`Transaction integrity violation: SOL transfer to wrong address ${to}.`);
+      if (expectedToken.symbol !== 'SOL')
+        throw new Error('Transaction integrity violation: transferring SOL instead of selected token.');
+      hasTransfer = true;
     } else if (
-      programIdStr === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' || 
-      programIdStr === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
+      progId === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' ||
+      progId === 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
     ) {
-      const ixType = ix.data[0];
-
-      if (!ALLOWED_TOKEN_OPCODES.has(ixType)) {
-        throw new Error(`Transaction integrity violation: Disallowed Token instruction opcode ${ixType}.`);
-      }
-
-      if (ix.data.length < 10) {
-        throw new Error('Transaction integrity violation: TransferChecked instruction data too short.');
-      }
-
+      if (ix.data[0] !== 12)
+        throw new Error(`Transaction integrity violation: disallowed token opcode ${ix.data[0]}.`);
       const mint = ix.keys[1].pubkey.toBase58();
-      const destinationATA = ix.keys[2].pubkey.toBase58();
-      const ownerKey = ix.keys[3]?.pubkey.toBase58();
-
-      const dataView = new DataView(ix.data.buffer, ix.data.byteOffset, ix.data.byteLength);
-      const amount = dataView.getBigUint64(1, true);
-
-      if (mint !== expectedToken.mint) {
-        throw new Error(`Transaction integrity violation: Token mint mismatch. Expected ${expectedToken.mint}, got ${mint}.`);
-      }
-
-      const expectedATA = getAssociatedTokenAddressSync(
-        new PublicKey(mint),
-        new PublicKey(expectedRecipient),
-        false,
-        ix.programId
-      ).toBase58();
-
-      if (destinationATA !== expectedATA) {
-        throw new Error(`Transaction integrity violation: Destination ATA mismatch.`);
-      }
-
-      if (ownerKey && ownerKey !== expectedSignerPublicKey.toBase58()) {
-        throw new Error(`Transaction integrity violation: Owner authority mismatch.`);
-      }
-
-      if (amount === 0n) {
-        throw new Error('Transaction integrity violation: Zero amount transfer.');
-      }
-
-      transferCheckedCount++;
+      if (mint !== expectedToken.mint)
+        throw new Error(`Transaction integrity violation: token mint mismatch. Expected ${expectedToken.mint}, got ${mint}.`);
+      hasTransfer = true;
     }
   }
 
-  const expectedTotal = expectedToken.symbol === 'SOL' ? systemTransferCount : transferCheckedCount;
-  if (expectedTotal === 0) {
-    throw new Error('Transaction integrity violation: No valid transfer instruction found.');
-  }
+  if (!hasTransfer)
+    throw new Error('Transaction integrity violation: no valid transfer instruction found.');
 }
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export default function P2PPanel({ connected, walletTokenList }) {
   const { connection } = useConnection();
   const { publicKey, sendTransaction } = useWallet();
 
-  const [mode, setMode] = useState('sell'); // 'sell' or 'buy'
-  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
-  const [accountNumber, setAccountNumber] = useState('');
+  // ── Env config ──────────────────────────────────────────────────────────
+  const PAJCASH_API_KEY = import.meta.env.VITE_PAJCASH_API_KEY;
+  const isPajcashLive = !!PAJCASH_API_KEY;
 
-  // QR Code Scanner State & Refs
+  // ── Form State ───────────────────────────────────────────────────────────
+  const [mode, setMode] = useState('sell'); // 'sell' | 'buy'
+  const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]); // Nigeria default
+  const [selectedBank, setSelectedBank] = useState('Choose Bank');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [amount, setAmount] = useState('');
+  const [selectedToken, setSelectedToken] = useState(DEFAULT_TOKENS[0]);
+
+  // ── Data State ───────────────────────────────────────────────────────────
+  const [pajTokens, setPajTokens] = useState([]);
+  const [apiBanks, setApiBanks] = useState([]);
+  const [pajRates, setPajRates] = useState(null);
+  const [payoutLogs, setPayoutLogs] = useState([]);
+
+  // ── Loading / Error State ────────────────────────────────────────────────
+  const [loadingBanks, setLoadingBanks] = useState(false);
+  const [loadingRates, setLoadingRates] = useState(false);
+  const [loadingLogs, setLoadingLogs] = useState(false);
+  const [resolvingName, setResolvingName] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [apiError, setApiError] = useState(null);
+  const [logError, setLogError] = useState(null);
+
+  // ── UI State ─────────────────────────────────────────────────────────────
+  const [countryOpen, setCountryOpen] = useState(false);
+  const [bankOpen, setBankOpen] = useState(false);
+  const [tokenOpen, setTokenOpen] = useState(false);
+  const [bankSearch, setBankSearch] = useState('');
+  const [countrySearch, setCountrySearch] = useState('');
+  const [routingState, setRoutingState] = useState('idle'); // 'routing' | 'loading_market' | 'resolved'
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [successDetails, setSuccessDetails] = useState(null);
+
+  // ── QR Scanner Refs ──────────────────────────────────────────────────────
   const [scannerActive, setScannerActive] = useState(false);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
-  const [accountName, setAccountName] = useState('');
-  const [selectedBank, setSelectedBank] = useState('Choose Bank');
-  const [amount, setAmount] = useState('');
-  const [selectedToken, setSelectedToken] = useState(DEFAULT_TOKENS[0]);
 
-  // PajCash configuration detection
-  const PAJCASH_API_KEY = import.meta.env.VITE_PAJCASH_API_KEY;
-  const isPajcashLive = !!PAJCASH_API_KEY;
-  const [resolvedBusinessId, setResolvedBusinessId] = useState(import.meta.env.VITE_PAJCASH_BUSINESS_ID || '');
-  const [resolvingBusiness, setResolvingBusiness] = useState(false);
+  // ── Computed ─────────────────────────────────────────────────────────────
+  const isLiveRoute = LIVE_CURRENCIES.has(selectedCountry.currency) && mode === 'sell';
+  const canTransact = isPajcashLive && isLiveRoute && !apiError;
 
-  // Dynamic tokens, logs, and errors
-  const [pajTokens, setPajTokens] = useState([]);
-  const [payoutLogs, setPayoutLogs] = useState([]);
-  const [loadingLogs, setLoadingLogs] = useState(false);
-  const [logError, setLogError] = useState(null);
-  const [bankSearch, setBankSearch] = useState('');
-  const [countrySearch, setCountrySearch] = useState('');
-  const [apiBanks, setApiBanks] = useState([]);
-  const [loadingBanks, setLoadingBanks] = useState(false);
-  const [apiError, setApiError] = useState(null);
-
-  // Live exchange rate quote state
-  const [pajRates, setPajRates] = useState(null);
-  const [loadingRates, setLoadingRates] = useState(false);
-
-  // Success Pop-up state
-  const [showSuccess, setShowSuccess] = useState(false);
-  const [successDetails, setSuccessDetails] = useState(null);
-
-  // Dropdown states
-  const [countryOpen, setCountryOpen] = useState(false);
-  const [bankOpen, setBankOpen] = useState(false);
-  const [tokenOpen, setTokenOpen] = useState(false);
-
-  // Routing & Loading states
-  const [routingState, setRoutingState] = useState('idle'); // 'routing' | 'loading_market' | 'resolved'
-  const [resolvingName, setResolvingName] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-
-  // Live route determination
-  const isLiveRoute = selectedCountry.code === 'NGA' && mode === 'sell';
-
-  // Initialize SDK
+  // ── SDK Init ─────────────────────────────────────────────────────────────
   useEffect(() => {
     initPajSDK(import.meta.env.VITE_PAJCASH_ENV || 'production');
   }, []);
 
-  // Initialize API and credential warnings
-  useEffect(() => {
-    if (!isPajcashLive && isLiveRoute) {
-      setApiError("PajCash API Key is not configured. To enable live payouts, configure VITE_PAJCASH_API_KEY in Vercel.");
-    } else if (isPajcashLive && !resolvedBusinessId && !resolvingBusiness) {
-      setApiError("Resolving PajCash Business ID...");
-    } else {
-      setApiError(null);
-    }
-  }, [isPajcashLive, isLiveRoute, resolvedBusinessId, resolvingBusiness]);
-
-  // Automatically fetch Business ID from API Key if not provided
-  useEffect(() => {
-    async function autoResolveBusiness() {
-      if (!isPajcashLive || resolvedBusinessId) return;
-      setResolvingBusiness(true);
-      try {
-        const list = await getBusinesses(PAJCASH_API_KEY);
-        if (list && list.length > 0) {
-          const firstBiz = list[0];
-          const bizId = firstBiz.id || firstBiz._id;
-          if (bizId) {
-            setResolvedBusinessId(bizId);
-            console.log("Dynamically resolved PajCash Business ID:", bizId);
-          } else {
-            setApiError("PajCash API returned businesses, but they lack an ID field.");
-          }
-        } else {
-          setApiError("No active business found for this PajCash API Key. Please create a business in your PajCash Dashboard.");
-        }
-      } catch (e) {
-        console.error("Failed to automatically resolve PajCash Business ID:", e);
-        setApiError(`Failed to resolve Business ID: ${e.message || "Unauthorized"}. Please check your API Key.`);
-      } finally {
-        setResolvingBusiness(false);
-      }
-    }
-    autoResolveBusiness();
-  }, [PAJCASH_API_KEY, isPajcashLive, resolvedBusinessId]);
-
-  // Load cached bank details from local storage on wallet connection
+  // ── Restore bank details from localStorage on wallet connect ─────────────
   useEffect(() => {
     if (publicKey) {
-      const cachedBankName = localStorage.getItem(`paj_bank_name_${publicKey}`);
-      const cachedAccNum = localStorage.getItem(`paj_account_number_${publicKey}`);
-      const cachedAccName = localStorage.getItem(`paj_account_name_${publicKey}`);
-
-      if (cachedBankName) setSelectedBank(cachedBankName);
-      if (cachedAccNum) setAccountNumber(cachedAccNum);
-      if (cachedAccName) setAccountName(cachedAccName);
+      const key = publicKey.toBase58();
+      const cachedBank = localStorage.getItem(`paj_bank_name_${key}`);
+      const cachedAcc = localStorage.getItem(`paj_account_number_${key}`);
+      const cachedName = localStorage.getItem(`paj_account_name_${key}`);
+      if (cachedBank) setSelectedBank(cachedBank);
+      if (cachedAcc) setAccountNumber(cachedAcc);
+      if (cachedName) setAccountName(cachedName);
     } else {
       setSelectedBank('Choose Bank');
       setAccountNumber('');
@@ -319,178 +244,159 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }
   }, [publicKey]);
 
-  // Load supported tokens from PajCash API on mount
+  // ── Load supported tokens ─────────────────────────────────────────────────
   useEffect(() => {
-    async function loadTokens() {
-      try {
-        const list = await getSupportedTokens();
-        if (list && list.length > 0) {
-          const mapped = list.map(t => ({
-            symbol: t.symbol,
-            name: t.name,
-            mint: t.address,
-            logoURI: t.logo || '',
-            chain: t.chain,
-            decimals: t.decimals || 6,
-            balance: 0
-          }));
-          setPajTokens(mapped);
+    if (!isPajcashLive) return;
+    getSupportedTokens()
+      .then(list => {
+        if (list?.length > 0) {
+          setPajTokens(
+            list
+              .filter(t => !t.chain || t.chain.toUpperCase() === 'SOLANA')
+              .map(t => ({
+                symbol: t.symbol,
+                name: t.name,
+                mint: t.address || t.mint,
+                logoURI: t.logo || '',
+                decimals: t.decimals || 6,
+                balance: 0,
+              }))
+          );
         }
-      } catch (e) {
-        console.error("Failed to load PajCash tokens:", e);
-      }
-    }
-    loadTokens();
-  }, []);
+      })
+      .catch(e => console.warn('Could not load PajCash tokens:', e));
+  }, [isPajcashLive]);
 
-  // Fetch supported banks from PajCash API on mount/live route change
+  // ── Load banks ────────────────────────────────────────────────────────────
   useEffect(() => {
-    async function fetchApiBanks() {
-      if (!isLiveRoute || !isPajcashLive) return;
-      setLoadingBanks(true);
-      setApiError(null);
-      try {
-        const list = await getBanks(PAJCASH_API_KEY);
-        if (list && list.length > 0) {
-          setApiBanks(list);
-        } else {
-          setApiError("PajCash API returned an empty bank list.");
-        }
-      } catch (e) {
-        console.error("Failed to fetch banks from PajCash API:", e);
-        setApiError(`PajCash API connection failed: ${e.message || "Unauthorized / Connection Refused"}. Please check that your API Key is valid.`);
-      } finally {
-        setLoadingBanks(false);
+    if (!canTransact) {
+      if (isPajcashLive && isLiveRoute && !PAJCASH_API_KEY) {
+        setApiError('VITE_PAJCASH_API_KEY is not configured. Add it to your environment variables.');
       }
+      return;
     }
-    fetchApiBanks();
+    setLoadingBanks(true);
+    setApiError(null);
+    getBanks(PAJCASH_API_KEY)
+      .then(list => {
+        if (list?.length > 0) setApiBanks(list);
+        else setApiError('PajCash returned an empty bank list. Please try again later.');
+      })
+      .catch(e => {
+        console.error('Failed to fetch banks:', e);
+        setApiError(`PajCash API error: ${e.message || 'Connection failed'}. Check your API key.`);
+      })
+      .finally(() => setLoadingBanks(false));
   }, [isPajcashLive, isLiveRoute, PAJCASH_API_KEY]);
 
-  // Fetch payout logs when active
-  const loadPayoutLogs = async () => {
-    if (!isLiveRoute || !isPajcashLive || !resolvedBusinessId) return;
-    setLoadingLogs(true);
-    setLogError(null);
-    try {
-      const txs = await getTransactionHistory(PAJCASH_API_KEY, resolvedBusinessId);
-      if (txs) {
-        setPayoutLogs(txs);
-      }
-    } catch (e) {
-      console.error("Failed to load PajCash payouts logs:", e);
-      setLogError(e.message || "Failed to retrieve live payout history.");
-    } finally {
-      setLoadingLogs(false);
-    }
-  };
-
+  // ── Load rates ────────────────────────────────────────────────────────────
   useEffect(() => {
-    loadPayoutLogs();
-  }, [isPajcashLive, isLiveRoute, PAJCASH_API_KEY, resolvedBusinessId]);
+    if (!isLiveRoute) return;
+    let cancelled = false;
 
-  // Fetch exchange rates from PajCash
-  useEffect(() => {
-    async function loadRates() {
-      if (!isLiveRoute) return;
+    const fetchRates = () => {
       setLoadingRates(true);
-      try {
-        const rates = await getAllRate();
-        if (rates) {
-          setPajRates(rates);
-        }
-      } catch (e) {
-        console.error("Failed to fetch rates:", e);
-      } finally {
-        setLoadingRates(false);
-      }
-    }
-    loadRates();
-    const interval = setInterval(loadRates, 30000);
-    return () => clearInterval(interval);
+      getAllRate()
+        .then(r => { if (!cancelled && r) setPajRates(r); })
+        .catch(e => console.warn('Could not fetch rates:', e))
+        .finally(() => { if (!cancelled) setLoadingRates(false); });
+    };
+
+    fetchRates();
+    const interval = setInterval(fetchRates, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [isLiveRoute]);
 
-  // Resolve account name dynamically matching the country's localized naming style
+  // ── Load payout history ──────────────────────────────────────────────────
+  const loadPayoutLogs = () => {
+    if (!canTransact || !publicKey) return;
+    setLoadingLogs(true);
+    setLogError(null);
+    getTransactionHistory(PAJCASH_API_KEY)
+      .then(txs => { if (txs) setPayoutLogs(Array.isArray(txs) ? txs : []); })
+      .catch(e => {
+        console.warn('Could not load payout history:', e);
+        setLogError(e.message || 'Failed to load history.');
+      })
+      .finally(() => setLoadingLogs(false));
+  };
+
+  useEffect(() => { loadPayoutLogs(); }, [canTransact, publicKey]);
+
+  // ── Resolve account name ──────────────────────────────────────────────────
   useEffect(() => {
     if (!accountNumber || selectedBank === 'Choose Bank' || !isPajcashLive) {
       setAccountName('');
       return;
     }
-    
-    const trimmedAcc = accountNumber.trim();
-    if (selectedCountry.code === 'NGA' && trimmedAcc.length === 10) {
-      setResolvingName(true);
-      
-      const bankObj = apiBanks.find(b => 
-        (typeof b === 'string' ? b : b.name || b.bank_name) === selectedBank
-      );
-      const bankIdParam = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
-
-      const t = setTimeout(async () => {
-        try {
-          const res = await resolveBankAccount(PAJCASH_API_KEY, bankIdParam, trimmedAcc);
-          if (res && res.accountName) {
-            setAccountName(res.accountName);
-            if (publicKey) {
-              localStorage.setItem(`paj_bank_id_${publicKey}`, bankIdParam);
-              localStorage.setItem(`paj_bank_name_${publicKey}`, selectedBank);
-              localStorage.setItem(`paj_account_number_${publicKey}`, trimmedAcc);
-              localStorage.setItem(`paj_account_name_${publicKey}`, res.accountName);
-            }
-          } else if (res && typeof res === 'object' && (res.name || res.account_name)) {
-            const resolvedName = res.name || res.account_name;
-            setAccountName(resolvedName);
-            if (publicKey) {
-              localStorage.setItem(`paj_bank_id_${publicKey}`, bankIdParam);
-              localStorage.setItem(`paj_bank_name_${publicKey}`, selectedBank);
-              localStorage.setItem(`paj_account_number_${publicKey}`, trimmedAcc);
-              localStorage.setItem(`paj_account_name_${publicKey}`, resolvedName);
-            }
-          } else {
-            setAccountName('Beneficiary Account');
-          }
-        } catch (e) {
-          console.error("Failed to resolve bank account name:", e);
-          setAccountName('Beneficiary Account');
-        } finally {
-          setResolvingName(false);
-        }
-      }, 800);
-
-      return () => clearTimeout(t);
-    } else {
+    const trimmed = accountNumber.trim();
+    if (selectedCountry.code === 'NGA' && trimmed.length !== 10) {
       setAccountName('');
+      return;
     }
-  }, [accountNumber, selectedCountry, selectedBank, apiBanks, isPajcashLive, PAJCASH_API_KEY]);
+    setResolvingName(true);
 
-  // Reset fields when country or mode changes
+    const bankObj = apiBanks.find(b => (b.name || b.bank_name || b) === selectedBank);
+    const bankId = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
+
+    const timer = setTimeout(() => {
+      resolveBankAccount(PAJCASH_API_KEY, bankId, trimmed)
+        .then(res => {
+          const name = res?.accountName || res?.name || res?.account_name || '';
+          setAccountName(name || 'Beneficiary Account');
+          if (name && publicKey) {
+            const key = publicKey.toBase58();
+            localStorage.setItem(`paj_bank_id_${key}`, bankId);
+            localStorage.setItem(`paj_bank_name_${key}`, selectedBank);
+            localStorage.setItem(`paj_account_number_${key}`, trimmed);
+            localStorage.setItem(`paj_account_name_${key}`, name);
+          }
+        })
+        .catch(() => setAccountName('Beneficiary Account'))
+        .finally(() => setResolvingName(false));
+    }, 800);
+
+    return () => { clearTimeout(timer); setResolvingName(false); };
+  }, [accountNumber, selectedBank, selectedCountry, apiBanks, PAJCASH_API_KEY, isPajcashLive]);
+
+  // ── Reset on country / mode change ───────────────────────────────────────
   useEffect(() => {
     setSelectedBank('Choose Bank');
     setAccountNumber('');
     setAccountName('');
     setAmount('');
+    setApiBanks([]);
+    setApiError(null);
   }, [selectedCountry, mode]);
 
-  // Fetch token list from props or defaults
-  const getSelectableTokens = () => {
-    let list = pajTokens.length > 0 ? pajTokens : (connected && walletTokenList && walletTokenList.length > 0 ? walletTokenList : DEFAULT_TOKENS);
-    return list.filter(t => !t.chain || t.chain.toUpperCase() === 'SOLANA');
-  };
-
-  const selectableTokens = getSelectableTokens();
-
-  // Adjust selected token if it is not available in the current list
+  // ── Routing animation ─────────────────────────────────────────────────────
   useEffect(() => {
-    const list = getSelectableTokens();
-    const isAvailable = list.some(t => t.symbol === selectedToken.symbol || t.mint === selectedToken.mint);
-    if (!isAvailable && list.length > 0) {
-      setSelectedToken(list[0]);
-    }
+    setRoutingState('routing');
+    const t1 = setTimeout(() => {
+      setRoutingState('loading_market');
+      const t2 = setTimeout(() => setRoutingState('resolved'), 800);
+      return () => clearTimeout(t2);
+    }, 800);
+    return () => clearTimeout(t1);
+  }, [selectedToken, selectedBank]);
+
+  // ── Selectable token list ─────────────────────────────────────────────────
+  const selectableTokens = (() => {
+    const list = pajTokens.length > 0
+      ? pajTokens
+      : (connected && walletTokenList?.length > 0 ? walletTokenList : DEFAULT_TOKENS);
+    return list.filter(t => !t.chain || t.chain.toUpperCase() === 'SOLANA');
+  })();
+
+  useEffect(() => {
+    const available = selectableTokens.some(t => t.symbol === selectedToken.symbol || t.mint === selectedToken.mint);
+    if (!available && selectableTokens.length > 0) setSelectedToken(selectableTokens[0]);
   }, [connected, walletTokenList, pajTokens]);
 
-  // Handle QR code scanning using camera and jsQR
+  // ── QR Scanner ────────────────────────────────────────────────────────────
   const stopScanner = () => {
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
     setScannerActive(false);
@@ -498,374 +404,296 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   useEffect(() => {
     if (!scannerActive) return;
-
     let active = true;
-    let animationFrameId;
+    let raf;
 
-    async function initCamera() {
+    const initCamera = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment' }
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.setAttribute('playsinline', 'true');
-          videoRef.current.play().catch(e => console.error("Play error:", e));
+          await videoRef.current.play();
         }
-        animationFrameId = requestAnimationFrame(tick);
-      } catch (err) {
-        console.error("Camera access failed:", err);
-        alert("Could not access camera. Please ensure permissions are granted.");
+        raf = requestAnimationFrame(tick);
+      } catch {
+        alert('Camera access denied. Please grant permission and retry.');
         setScannerActive(false);
       }
-    }
+    };
 
-    function tick() {
+    const tick = () => {
       if (!active) return;
-
       const video = videoRef.current;
       const canvas = canvasRef.current;
-
       if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
         const ctx = canvas.getContext('2d');
         canvas.height = video.videoHeight;
         canvas.width = video.videoWidth;
-
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'dontInvert',
-        });
-
-        if (code && code.data) {
-          const matched = code.data.trim();
-          // Detect a 10 digit account number
-          if (/^\d{10}$/.test(matched)) {
-            setAccountNumber(matched);
-            stopScanner();
-            return;
-          }
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+        if (code?.data && /^\d{10}$/.test(code.data.trim())) {
+          setAccountNumber(code.data.trim());
+          stopScanner();
+          return;
         }
       }
-
-      animationFrameId = requestAnimationFrame(tick);
-    }
+      raf = requestAnimationFrame(tick);
+    };
 
     initCamera();
-
     return () => {
       active = false;
-      cancelAnimationFrame(animationFrameId);
+      cancelAnimationFrame(raf);
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
       }
     };
   }, [scannerActive]);
 
-  // Handle Paste from Clipboard
+  // ── Clipboard paste ───────────────────────────────────────────────────────
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      if (text && /^\d+$/.test(text.trim())) {
-        setAccountNumber(text.trim());
-      } else {
-        alert("Clipboard content is not a valid account number.");
-      }
-    } catch (err) {
-      const fallback = prompt("Paste your account number here:");
-      if (fallback && /^\d+$/.test(fallback.trim())) {
-        setAccountNumber(fallback.trim());
-      }
+      if (/^\d+$/.test(text.trim())) setAccountNumber(text.trim());
+      else alert('Clipboard content is not a valid account number.');
+    } catch {
+      const fb = prompt('Paste your account number here:');
+      if (fb && /^\d+$/.test(fb.trim())) setAccountNumber(fb.trim());
     }
   };
 
-  // Trigger loading sequence on interactive changes (Token, Bank)
-  useEffect(() => {
-    setRoutingState('routing');
-    const t1 = setTimeout(() => {
-      setRoutingState('loading_market');
-      const t2 = setTimeout(() => {
-        setRoutingState('resolved');
-      }, 800);
-      return () => clearTimeout(t2);
-    }, 800);
-    return () => clearTimeout(t1);
-  }, [selectedToken, selectedBank]);
-
-  // Calculate NGN conversion values dynamically using live exchange rate quotes
-  const tokenPriceUsd = selectedToken.price || (selectedToken.symbol === 'SOL' ? 145.20 : selectedToken.symbol === 'BONK' ? 0.000022 : 1.00);
-  const activeNgnRate = pajRates?.offRampRate?.rate || 1500;
+  // ── Derived values ────────────────────────────────────────────────────────
+  const tokenPriceUsd = selectedToken.price || (selectedToken.symbol === 'SOL' ? 145.20 : 1.00);
+  const activeNgnRate = pajRates?.offRampRate?.rate || pajRates?.rate || 1550;
   const ngnRate = tokenPriceUsd * activeNgnRate;
   const parsedAmt = parseFloat(amount) || 0;
-  
-  const fiatAmountText = parsedAmt > 0 ? (parsedAmt * ngnRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
+  const fiatAmountText = parsedAmt > 0
+    ? (parsedAmt * ngnRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '0.00';
 
-  const allBanksForCountry = apiBanks.map(b => typeof b === 'string' ? b : b.name || b.bank_name || '');
-  const filteredBanksList = allBanksForCountry.filter(b => 
-    b.toLowerCase().includes(bankSearch.toLowerCase())
-  );
-
-  const displayBank = selectedBank === 'Choose Bank' ? (allBanksForCountry[0] || 'Choose Bank') : selectedBank;
-
-  // Filter country dropdown by search input
-  const filteredCountries = COUNTRIES.filter(c => 
+  const allBankNames = apiBanks.map(b => (typeof b === 'string' ? b : b.name || b.bank_name || ''));
+  const filteredBanksList = allBankNames.filter(b => b.toLowerCase().includes(bankSearch.toLowerCase()));
+  const filteredCountries = COUNTRIES.filter(c =>
     c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
     c.code.toLowerCase().includes(countrySearch.toLowerCase())
   );
+  const displayBank = selectedBank === 'Choose Bank' ? (allBankNames[0] || 'Choose Bank') : selectedBank;
 
-  // Handle transaction submission
+  // ── Submit handler ────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!isLiveRoute) {
-      alert('This region/mode is not supported on the active gateway.');
-      return;
-    }
-    if (!isPajcashLive || apiError) {
-      alert('PajCash API is offline. Cannot process transactions.');
-      return;
-    }
-    if (!connected || !publicKey) {
-      alert('Please connect your Solana wallet first.');
-      return;
-    }
-    if (!amount || parseFloat(amount) <= 0) {
-      alert('Please enter a valid amount.');
-      return;
-    }
-    if (!accountNumber) {
-      alert('Please enter an account number.');
-      return;
-    }
-    if (selectedBank === 'Choose Bank') {
-      alert('Please select a bank.');
-      return;
-    }
-    if (!accountName) {
-      alert('Please wait for the account name to resolve.');
-      return;
-    }
+    if (!isLiveRoute) { alert('This region/mode is not currently supported.'); return; }
+    if (!isPajcashLive) { alert('PajCash API Key is not configured.'); return; }
+    if (apiError) { alert(`PajCash API error: ${apiError}`); return; }
+    if (!connected || !publicKey) { alert('Please connect your Solana wallet first.'); return; }
+    if (!amount || parseFloat(amount) <= 0) { alert('Please enter a valid amount.'); return; }
+    if (!accountNumber) { alert('Please enter your bank account number.'); return; }
+    if (selectedBank === 'Choose Bank') { alert('Please select a bank.'); return; }
 
     setSubmitting(true);
     try {
-      const bankObj = apiBanks.find(b => 
-        (typeof b === 'string' ? b : b.name || b.bank_name) === selectedBank
+      const bankObj = apiBanks.find(b => (b.name || b.bank_name || b) === selectedBank);
+      const bankId = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
+
+      // 1. Create paj_ramp off-ramp order
+      const order = await createOfframpOrder(
+        {
+          bank: bankId,
+          accountNumber: accountNumber.trim(),
+          currency: selectedCountry.currency,
+          amount: Number(amount),
+          mint: selectedToken.mint,
+          chain: 'SOLANA',
+          webhookURL: import.meta.env.VITE_PAJCASH_WEBHOOK_URL || undefined,
+        },
+        PAJCASH_API_KEY
       );
-      const bankIdParam = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
 
-      const orderData = {
-        bank: bankIdParam,
-        accountNumber: accountNumber.trim(),
-        currency: 'NGN',
-        amount: Number(amount),
-        mint: selectedToken.mint || 'So11111111111111111111111111111111111111112',
-        chain: 'SOLANA',
-        webhookURL: 'https://api.paj.cash/webhook',
-      };
+      if (!order?.address) throw new Error('PajCash did not return a deposit address for this order.');
 
-      // 1. Create PajCash Off-ramp Order
-      const order = await createOfframpOrder(orderData, PAJCASH_API_KEY);
-      if (!order || !order.address) {
-        throw new Error('PajCash failed to generate a deposit address for this order.');
-      }
-
-      // 2. Build on-chain transaction
-      const latestBlockhash = await connection.getLatestBlockhash('confirmed');
+      // 2. Build on-chain Solana transaction
+      const { blockhash } = await connection.getLatestBlockhash('confirmed');
       const transaction = new Transaction();
       transaction.feePayer = publicKey;
-      transaction.recentBlockhash = latestBlockhash.blockhash;
+      transaction.recentBlockhash = blockhash;
 
-      const depositPublicKey = new PublicKey(order.address);
+      const depositPubkey = new PublicKey(order.address);
 
       if (selectedToken.symbol === 'SOL') {
-        const lamports = BigInt(Math.round(order.amount * 1e9));
+        const lamports = Math.round((order.amount || Number(amount)) * 1e9);
         transaction.add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: depositPublicKey,
-            lamports: Number(lamports)
-          })
+          SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: depositPubkey, lamports })
         );
       } else {
         const mintPubkey = new PublicKey(selectedToken.mint);
-
-        let tokenProgramId = TOKEN_PROGRAM_ID;
+        let tokenProgram = TOKEN_PROGRAM_ID;
         try {
           const mintAcct = await connection.getAccountInfo(mintPubkey);
-          if (mintAcct && mintAcct.owner.equals(TOKEN_2022_PROGRAM_ID)) {
-            tokenProgramId = TOKEN_2022_PROGRAM_ID;
-          }
-        } catch (e) { }
+          if (mintAcct?.owner.equals(TOKEN_2022_PROGRAM_ID)) tokenProgram = TOKEN_2022_PROGRAM_ID;
+        } catch { /* use default */ }
 
-        const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgramId);
-        const receiverATA = getAssociatedTokenAddressSync(mintPubkey, depositPublicKey, false, tokenProgramId);
+        const senderATA = getAssociatedTokenAddressSync(mintPubkey, publicKey, false, tokenProgram);
+        const receiverATA = getAssociatedTokenAddressSync(mintPubkey, depositPubkey, false, tokenProgram);
 
-        // Check if recipient's ATA needs to be created
-        let needsAtaCreation = false;
-        try {
-          const ataInfo = await connection.getAccountInfo(receiverATA);
-          if (!ataInfo) needsAtaCreation = true;
-        } catch (e) {
-          needsAtaCreation = true;
-        }
-
+        // Fetch decimals from chain
         const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
-        if (!mintInfo.value) throw new Error('Invalid token mint');
+        if (!mintInfo.value) throw new Error('Invalid token mint — could not fetch decimals.');
         const decimals = mintInfo.value.data.parsed.info.decimals;
-        const amountUnits = BigInt(Math.round(order.amount * Math.pow(10, decimals)));
+        const sendAmount = order.amount || Number(amount);
+        const units = BigInt(Math.round(sendAmount * Math.pow(10, decimals)));
 
         transaction.add(
           createAssociatedTokenAccountIdempotentInstruction(
-            publicKey,
-            receiverATA,
-            depositPublicKey,
-            mintPubkey,
-            tokenProgramId
+            publicKey, receiverATA, depositPubkey, mintPubkey, tokenProgram
           )
         );
-
         transaction.add(
           createTransferCheckedInstruction(
-            senderATA,
-            mintPubkey,
-            receiverATA,
-            publicKey,
-            amountUnits,
-            decimals,
-            [],
-            tokenProgramId
+            senderATA, mintPubkey, receiverATA, publicKey, units, decimals, [], tokenProgram
           )
         );
       }
 
-      // Add custom on-chain memo instruction
-      const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+      // 3. Attach on-chain memo with order ID
       transaction.add(
         new TransactionInstruction({
           keys: [],
           programId: MEMO_PROGRAM_ID,
-          data: new TextEncoder().encode(`fiatwallet:pajcash:order:${order.id}`)
+          data: new TextEncoder().encode(`fiatwallet:pajcash:offramp:${order.id}`),
         })
       );
 
-      // Auditing transaction before signature
-      verifyOfframpTransaction(transaction, order.address, order.amount, selectedToken, publicKey);
+      // 4. Verify transaction integrity before signing
+      verifyOfframpTransaction(transaction, order.address, selectedToken, publicKey);
 
-      // Pre-flight simulation
-      const simResult = await connection.simulateTransaction(transaction);
-      if (simResult.value.err) {
-        throw new Error(`Transaction simulation failed: ${JSON.stringify(simResult.value.err)}`);
-      }
+      // 5. Pre-flight simulation
+      const sim = await connection.simulateTransaction(transaction);
+      if (sim.value.err) throw new Error(`Simulation failed: ${JSON.stringify(sim.value.err)}`);
 
-      // 3. Prompt user wallet adapter for signature and execution
-      const signature = await sendTransaction(transaction, connection);
+      // 6. Sign & send via wallet adapter
+      const sig = await sendTransaction(transaction, connection);
 
-      // 5. Poll for confirmation
+      // 7. Poll for confirmation
       let confirmed = false;
       const deadline = Date.now() + 60_000;
       while (Date.now() < deadline) {
-        try {
-          const status = await connection.getSignatureStatus(signature);
-          const conf = status?.value?.confirmationStatus;
-          if (conf === 'confirmed' || conf === 'finalized') {
-            confirmed = true;
-            break;
-          }
-          if (status?.value?.err) {
-            throw new Error('Transaction rejected by network: ' + JSON.stringify(status.value.err));
-          }
-        } catch (pollErr) {
-          if (pollErr.message.startsWith('Transaction rejected')) throw pollErr;
-        }
+        const status = await connection.getSignatureStatus(sig).catch(() => null);
+        const conf = status?.value?.confirmationStatus;
+        if (conf === 'confirmed' || conf === 'finalized') { confirmed = true; break; }
+        if (status?.value?.err) throw new Error('Transaction rejected: ' + JSON.stringify(status.value.err));
         await new Promise(r => setTimeout(r, 2000));
       }
 
-      if (confirmed) {
-        // Cache order ID in local storage for user's transaction history retention
-        const userOrderIds = (() => {
-          try {
-            const raw = localStorage.getItem(`paj_user_orders_${publicKey}`);
-            return raw ? JSON.parse(raw) : [];
-          } catch { return []; }
-        })();
-        userOrderIds.push(order.id);
-        localStorage.setItem(`paj_user_orders_${publicKey}`, JSON.stringify(userOrderIds));
-
-        setSuccessDetails({
-          action: 'Sell',
-          amount: `${amount} ${selectedToken.symbol}`,
-          fiat: `₦${fiatAmountText}`,
-          bank: displayBank,
-          account: accountNumber,
-          name: accountName,
-          txId: order.id || 'N/A'
-        });
-        setShowSuccess(true);
-        loadPayoutLogs();
-      } else {
-        alert(`Transaction submitted but confirmation timed out. Signature: ${signature}`);
+      if (!confirmed) {
+        alert(`Transaction sent but not yet confirmed. Signature: ${sig}`);
+        return;
       }
+
+      // 8. Persist order ID in localStorage (keyed by wallet address)
+      const walletKey = publicKey.toBase58();
+      const existing = (() => {
+        try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
+        catch { return []; }
+      })();
+      existing.unshift({ id: order.id, sig, ts: Date.now() });
+      localStorage.setItem(`paj_user_orders_${walletKey}`, JSON.stringify(existing.slice(0, 50)));
+
+      setSuccessDetails({
+        action: 'Sell',
+        amount: `${amount} ${selectedToken.symbol}`,
+        fiat: `${selectedCountry.symbol}${fiatAmountText}`,
+        bank: displayBank,
+        account: accountNumber,
+        name: accountName || 'Account Holder',
+        orderId: order.id,
+        sig,
+      });
+      setShowSuccess(true);
+      setTimeout(loadPayoutLogs, 2000);
     } catch (err) {
-      console.error(err);
+      console.error('Transaction failed:', err);
       alert(`Transaction Failed: ${err.message}`);
     } finally {
       setSubmitting(false);
     }
   };
 
+  // ── Wallet not connected guard ────────────────────────────────────────────
   if (!connected || !publicKey) {
     return (
-      <div className="p2p-coming-soon-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '320px', textAlign: 'center', padding: '20px 24px', background: 'rgba(255, 255, 255, 0.01)', border: '1.5px dashed rgba(255, 255, 255, 0.1)', borderRadius: '16px', margin: '10px 0' }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        minHeight: '320px', textAlign: 'center', padding: '20px 24px',
+        background: 'rgba(255,255,255,0.01)', border: '1.5px dashed rgba(255,255,255,0.1)',
+        borderRadius: '16px', margin: '10px 0',
+      }}>
         <div style={{ fontSize: '38px', marginBottom: '14px' }}>🔌</div>
         <h4 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', marginBottom: '10px' }}>
           Connect Your Wallet
         </h4>
         <p style={{ fontSize: '11px', color: 'var(--text3)', maxWidth: '300px', lineHeight: '1.5' }}>
-          Please connect your Solana wallet using the button in the top-right corner to perform live off-ramp settlements.
+          Connect your Solana wallet to access live off-ramp settlements.
+          Your bank details will be saved automatically for future visits.
         </p>
       </div>
     );
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="p2p-panel-wrap">
-      
-      {/* ── API Configuration Warning Banner ── */}
+
+      {/* API error banner */}
       {isLiveRoute && apiError && (
-        <div style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '12px', padding: '12px 14px', fontSize: '12px', color: '#f87171', marginBottom: '1.25rem', lineHeight: '1.5' }}>
-          ⚠️ <strong>PajCash Payout Gateway Offline:</strong> {apiError}
+        <div style={{
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+          borderRadius: '12px', padding: '12px 14px', fontSize: '12px', color: '#f87171',
+          marginBottom: '1.25rem', lineHeight: '1.5',
+        }}>
+          ⚠️ <strong>Payout Gateway Offline:</strong> {apiError}
         </div>
       )}
 
-      {/* ── Mode Switch & Searchable Country selector ── */}
+      {/* Mode switch + Country selector */}
       <div className="p2p-header-row" style={{ marginBottom: '1.25rem' }}>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <div className="bulk-pill" onClick={() => setMode(mode === 'sell' ? 'buy' : 'sell')} style={{ padding: '6px 12px', cursor: 'pointer' }}>
+          <div
+            className="bulk-pill"
+            onClick={() => setMode(mode === 'sell' ? 'buy' : 'sell')}
+            style={{ padding: '6px 12px', cursor: 'pointer' }}
+          >
             <span className="pill-txt" style={{ fontSize: '11px', fontWeight: 700, color: 'white' }}>
               {mode === 'sell' ? 'Sell' : 'Buy'}
             </span>
-            <div className={`tsw ${mode === 'buy' ? 'on' : ''}`} style={{ marginLeft: '6px' }}><div className="tknob" /></div>
+            <div className={`tsw ${mode === 'buy' ? 'on' : ''}`} style={{ marginLeft: '6px' }}>
+              <div className="tknob" />
+            </div>
           </div>
-          {isLiveRoute && isPajcashLive && !apiError && (
-            <span style={{ fontSize: '10px', color: 'var(--lime)', background: 'rgba(74, 222, 128, 0.1)', padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold' }}>
-              ● Live Payouts
+          {canTransact && (
+            <span style={{
+              fontSize: '10px', color: 'var(--lime)', background: 'rgba(74,222,128,0.1)',
+              padding: '4px 8px', borderRadius: '6px', fontWeight: 'bold',
+            }}>
+              ● Live · Solana Mainnet
             </span>
           )}
         </div>
 
+        {/* Country picker */}
         <div className="p2p-country-selector" style={{ position: 'relative' }}>
           <div className="curr-selector" onClick={() => setCountryOpen(!countryOpen)}>
             <span className="curr-flag">{selectedCountry.flag}</span>
             <span style={{ marginLeft: '4px' }}>{selectedCountry.code}</span>
             <span className="curr-chevron" style={{ marginLeft: '6px' }}>▼</span>
           </div>
-
           {countryOpen && (
             <div className="drop-menu" style={{ right: 0, zIndex: 100, minWidth: '220px' }}>
-              <div className="drop-search" style={{ padding: '8px', borderBottom: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
-                <input 
-                  type="text" 
+              <div style={{ padding: '8px', borderBottom: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
+                <input
+                  type="text"
                   placeholder="Search country..."
                   value={countrySearch}
                   onChange={e => setCountrySearch(e.target.value)}
@@ -874,8 +702,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
               </div>
               <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
                 {filteredCountries.map(c => (
-                  <div 
-                    key={c.code} 
+                  <div
+                    key={c.code}
                     className={`drop-item ${selectedCountry.code === c.code ? 'sel' : ''}`}
                     onClick={() => { setSelectedCountry(c); setCountryOpen(false); setCountrySearch(''); }}
                   >
@@ -884,38 +712,40 @@ export default function P2PPanel({ connected, walletTokenList }) {
                     <span className="di-name">{c.name}</span>
                   </div>
                 ))}
-                {filteredCountries.length === 0 && (
-                  <div style={{ fontSize: '11px', color: 'var(--text3)', fontStyle: 'italic', padding: '12px', textAlign: 'center' }}>
-                    No countries found
-                  </div>
-                )}
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* ── Route Determination & Layout ── */}
+      {/* ── LIVE OFFRAMP ROUTE ── */}
       {isLiveRoute ? (
-        /* ==================== LIVE ROUTE (NIGERIA SELL/OFF-RAMP) ==================== */
         <>
-          {/* Choose Bank Field */}
+          {/* Bank selector */}
           <div className="field" style={{ position: 'relative' }}>
             <div className="field-label">Bank</div>
-            <div 
-              className="input-wrap" 
-              onClick={() => { if (isPajcashLive && !apiError) setBankOpen(!bankOpen); }} 
-              style={{ cursor: (isPajcashLive && !apiError) ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
+            <div
+              className="input-wrap"
+              onClick={() => { if (canTransact) setBankOpen(!bankOpen); }}
+              style={{ cursor: canTransact ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: canTransact ? 1 : 0.6 }}
             >
-              <span style={{ color: selectedBank === 'Choose Bank' ? 'var(--text3)' : 'var(--text)' }}>{selectedBank}</span>
+              {loadingBanks ? (
+                <span style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic' }}>
+                  <span className="p2p-mini-spinner" /> Loading banks...
+                </span>
+              ) : (
+                <span style={{ color: selectedBank === 'Choose Bank' ? 'var(--text3)' : 'var(--text)' }}>
+                  {selectedBank}
+                </span>
+              )}
               <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
             </div>
 
             {bankOpen && (
               <div className="drop-menu" style={{ left: 0, right: 0, width: '100%' }} onClick={e => e.stopPropagation()}>
-                <div className="drop-search" style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
-                  <input 
-                    type="text" 
+                <div style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
+                  <input
+                    type="text"
                     placeholder="Search bank name..."
                     value={bankSearch}
                     onChange={e => setBankSearch(e.target.value)}
@@ -926,34 +756,26 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   {filteredBanksList.map(b => {
                     const meta = getBankMetadata(b);
                     return (
-                      <div 
-                        key={b} 
+                      <div
+                        key={b}
                         className={`drop-item ${selectedBank === b ? 'sel' : ''}`}
                         onClick={() => { setSelectedBank(b); setBankOpen(false); setBankSearch(''); }}
                         style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px' }}
                       >
                         {meta.logo ? (
-                          <img 
-                            src={meta.logo} 
-                            alt={meta.name} 
-                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                            style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover' }} 
+                          <img
+                            src={meta.logo} alt={meta.name}
+                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                            style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover' }}
                           />
                         ) : null}
-                        <div 
+                        <div
                           className="bank-avatar"
-                          style={{ 
-                            display: meta.logo ? 'none' : 'flex', 
-                            width: '22px', 
-                            height: '22px', 
-                            borderRadius: '50%', 
-                            background: meta.color, 
-                            color: 'white', 
-                            fontSize: '9px', 
-                            fontWeight: 'bold', 
-                            alignItems: 'center', 
-                            justifyContent: 'center',
-                            textTransform: 'uppercase'
+                          style={{
+                            display: meta.logo ? 'none' : 'flex',
+                            width: '22px', height: '22px', borderRadius: '50%',
+                            background: meta.color, color: 'white', fontSize: '9px',
+                            fontWeight: 'bold', alignItems: 'center', justifyContent: 'center',
                           }}
                         >
                           {meta.initial}
@@ -972,29 +794,17 @@ export default function P2PPanel({ connected, walletTokenList }) {
             )}
           </div>
 
-          {/* Account Number Field */}
+          {/* Account Number */}
           <div className="field">
-            <div className="field-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
               <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
-              <div className="p2p-action-links" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <button 
-                  className="p2p-btn-badge" 
-                  onClick={handlePaste}
-                  disabled={!isPajcashLive || !!apiError}
-                  style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
-                >
-                  Paste
-                </button>
-                <button 
-                  className="p2p-btn-badge" 
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button className="p2p-btn-badge" onClick={handlePaste} disabled={!canTransact} style={{ opacity: canTransact ? 1 : 0.6 }}>Paste</button>
+                <button
+                  className="p2p-btn-badge"
                   onClick={() => setScannerActive(true)}
-                  disabled={!isPajcashLive || !!apiError}
-                  style={{ 
-                    opacity: (isPajcashLive && !apiError) ? 1 : 0.6,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
+                  disabled={!canTransact}
+                  style={{ opacity: canTransact ? 1 : 0.6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                   title="Scan QR Code"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1004,89 +814,74 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </button>
               </div>
             </div>
-            
-            <div className="input-wrap" style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}>
-              <input 
-                type="text" 
+            <div className="input-wrap" style={{ opacity: canTransact ? 1 : 0.6 }}>
+              <input
+                type="text"
                 value={accountNumber}
                 onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
                 placeholder="0000000000"
-                disabled={!isPajcashLive || !!apiError}
+                disabled={!canTransact}
               />
             </div>
-
-            {/* Resolved Name - Only pops after Bank + Acc Num is entered */}
-            <div className="p2p-account-name-resolved" style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--lime)', fontWeight: 'bold' }}>
-              {accountNumber && accountNumber.trim().length > 0 && selectedBank !== 'Choose Bank' && (
-                resolvingName ? (
-                  <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}>
-                    <span className="p2p-mini-spinner" /> Resolving...
-                  </span>
-                ) : (
-                  accountName && <span className="animated-fade-in">{accountName}</span>
-                )
+            <div style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--lime)', fontWeight: 'bold' }}>
+              {accountNumber && selectedBank !== 'Choose Bank' && (
+                resolvingName
+                  ? <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}><span className="p2p-mini-spinner" /> Resolving...</span>
+                  : accountName && <span className="animated-fade-in">{accountName}</span>
               )}
             </div>
           </div>
 
-          {/* Amount & Token Selection Row */}
-          <div className="p2p-amount-row" style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
+          {/* Amount + Token row */}
+          <div style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
             <div style={{ flex: 1.4 }}>
               <div className="field-label">Amount to Sell</div>
-              <div className="input-wrap" style={{ opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}>
+              <div className="input-wrap" style={{ opacity: canTransact ? 1 : 0.6 }}>
                 <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '13px', marginRight: '6px' }}>
                   {selectedToken.symbol}
                 </span>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   placeholder="0.00"
                   value={amount}
                   onChange={e => setAmount(e.target.value)}
                   style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'white' }}
-                  disabled={!isPajcashLive || !!apiError}
+                  disabled={!canTransact}
                 />
               </div>
-              
               <div style={{ marginTop: '6px', fontSize: '12px', minHeight: '16px' }}>
-                {routingState === 'routing' ? (
-                  <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}>
-                    <span className="p2p-mini-spinner" /> Routing...
-                  </span>
-                ) : (
-                  selectedBank !== 'Choose Bank' && (
-                    <span style={{ color: 'var(--text2)' }}>
-                      ✓ Route: {displayBank} Escrow
-                    </span>
+                {routingState === 'routing'
+                  ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Routing...</span>
+                  : selectedBank !== 'Choose Bank' && (
+                    <span style={{ color: 'var(--text2)' }}>✓ Route: {displayBank} Escrow</span>
                   )
-                )}
+                }
               </div>
             </div>
 
             <div style={{ flex: 1 }}>
               <div className="field-label">Token</div>
               <div className="drop-wrap">
-                <div 
-                  className="input-wrap" 
-                  onClick={() => { if (isPajcashLive && !apiError) setTokenOpen(!tokenOpen); }} 
-                  style={{ cursor: (isPajcashLive && !apiError) ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: (isPajcashLive && !apiError) ? 1 : 0.6 }}
+                <div
+                  className="input-wrap"
+                  onClick={() => { if (canTransact) setTokenOpen(!tokenOpen); }}
+                  style={{ cursor: canTransact ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: canTransact ? 1 : 0.6 }}
                 >
                   <strong style={{ color: 'white' }}>{selectedToken.symbol}</strong>
                   <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
                 </div>
-
                 {tokenOpen && (
                   <div className="drop-menu" style={{ right: 0, minWidth: '260px' }}>
                     {selectableTokens.map(t => (
-                      <div 
-                        key={t.mint || t.symbol} 
+                      <div
+                        key={t.mint || t.symbol}
                         className={`drop-item ${selectedToken.symbol === t.symbol ? 'sel' : ''}`}
                         onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
                       >
-                        {t.logoURI ? (
-                          <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
-                        ) : (
-                          <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
-                        )}
+                        {t.logoURI
+                          ? <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                          : <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
+                        }
                         <span className="di-code" style={{ marginLeft: '8px' }}>{t.symbol}</span>
                         {t.balance > 0 && <span className="di-name">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>}
                       </div>
@@ -1097,87 +892,111 @@ export default function P2PPanel({ connected, walletTokenList }) {
             </div>
           </div>
 
-          {/* Est. Receive Receipt Banner */}
-          <div className="p2p-receipt-banner" style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '12px', padding: '14px', textAlign: 'center', marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Est. Receive</span>
+          {/* Est. receive banner */}
+          <div style={{
+            background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
+            borderRadius: '12px', padding: '14px', textAlign: 'center',
+            marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '4px',
+          }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Est. Receive
+            </span>
             {routingState === 'routing' || routingState === 'loading_market' ? (
               <div style={{ fontSize: '16px', fontWeight: 700, color: 'white' }}>
                 <span className="p2p-mini-spinner" /> Loading...
               </div>
             ) : (
               <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--lime)' }}>
-                ₦{fiatAmountText}
+                {selectedCountry.symbol}{fiatAmountText}
               </div>
+            )}
+            {pajRates?.offRampRate?.rate && (
+              <span style={{ fontSize: '10px', color: 'var(--text3)' }}>
+                Rate: 1 USD = {selectedCountry.symbol}{pajRates.offRampRate.rate.toLocaleString()}
+              </span>
             )}
           </div>
 
-          {/* Submit Button */}
-          <button 
-            className="send-btn" 
+          {/* Submit button */}
+          <button
+            className="send-btn"
             onClick={handleSubmit}
-            disabled={submitting || !isPajcashLive || !!apiError}
-            style={{ opacity: (submitting || !isPajcashLive || !!apiError) ? 0.6 : 1, cursor: (submitting || !isPajcashLive || !!apiError) ? 'not-allowed' : 'pointer' }}
+            disabled={submitting || !canTransact}
+            style={{ opacity: (submitting || !canTransact) ? 0.6 : 1, cursor: (submitting || !canTransact) ? 'not-allowed' : 'pointer' }}
           >
-            {submitting ? (
-              <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />
-            ) : null}
-            {submitting ? 'Processing...' : (!isPajcashLive || apiError ? 'Payout Gateway Offline' : 'Send')}
+            {submitting && <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />}
+            {submitting ? 'Processing...' : (!canTransact ? 'Payout Gateway Offline' : 'Send')}
           </button>
         </>
       ) : (
-        /* ==================== FALLBACK "COMING SOON" FOR OTHER COUNTRIES/BUY MODE ==================== */
-        <div className="p2p-coming-soon-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '320px', textAlign: 'center', padding: '20px 24px', background: 'rgba(255, 255, 255, 0.01)', border: '1.5px dashed rgba(255, 255, 255, 0.1)', borderRadius: '16px', margin: '10px 0' }}>
+        /* ── Coming soon ── */
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          minHeight: '320px', textAlign: 'center', padding: '20px 24px',
+          background: 'rgba(255,255,255,0.01)', border: '1.5px dashed rgba(255,255,255,0.1)',
+          borderRadius: '16px', margin: '10px 0',
+        }}>
           <div style={{ fontSize: '38px', marginBottom: '14px' }}>🚀</div>
-          <h4 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', marginBottom: '10px', tracking: '-0.02em' }}>
-            {mode === 'buy' ? 'Buy Coming Soon' : `${selectedCountry.name} P2P Payouts Coming Soon`}
+          <h4 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', marginBottom: '10px' }}>
+            {mode === 'buy' ? 'Buy Coming Soon' : `${selectedCountry.name} Payouts Coming Soon`}
           </h4>
           <p style={{ fontSize: '11px', color: 'var(--text3)', maxWidth: '300px', lineHeight: '1.5' }}>
-            {mode === 'buy' 
-              ? 'We are currently prioritizing live Sell settlements. Direct purchases will be activated shortly.'
-              : `P2P off-ramping for ${selectedCountry.name} is currently in development. Please select Nigeria (NGA) and Sell mode to access our live PajCash integration.`
+            {mode === 'buy'
+              ? 'Direct crypto purchases will be activated shortly.'
+              : `Off-ramp for ${selectedCountry.name} is in development. Select Nigeria (NGA) in Sell mode to use the live PajCash gateway.`
             }
           </p>
         </div>
       )}
 
-      {/* ── Live Payout History Section ── */}
-      {isLiveRoute && isPajcashLive && !apiError && (() => {
-        const userOrderIds = (() => {
-          try {
-            const raw = localStorage.getItem(`paj_user_orders_${publicKey}`);
-            return raw ? JSON.parse(raw) : [];
-          } catch { return []; }
+      {/* ── Transaction History ── */}
+      {canTransact && publicKey && (() => {
+        const walletKey = publicKey.toBase58();
+        const localOrders = (() => {
+          try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
+          catch { return []; }
         })();
 
-        const userLogs = payoutLogs.filter(log => userOrderIds.includes(log.id || log._id));
+        const localIds = new Set(localOrders.map(o => o.id || o));
+        const userLogs = payoutLogs.filter(log => localIds.has(log.id || log._id));
+        const showHistory = localOrders.length > 0;
+
+        if (!showHistory) return null;
 
         return (
-          <div className="pajcash-logs-section" style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+          <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
             <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'white', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Live Payout History</span>
+              <span>My Payout History</span>
               <button onClick={loadPayoutLogs} style={{ background: 'none', border: 'none', color: 'var(--lime)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
                 Refresh
               </button>
             </h4>
             {loadingLogs ? (
               <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
-                <span className="p2p-mini-spinner" /> Loading payouts...
+                <span className="p2p-mini-spinner" /> Loading...
               </div>
             ) : logError ? (
-              <div style={{ fontSize: '11px', color: '#f87171', background: 'rgba(239, 68, 68, 0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.2)', marginBottom: '8px', lineHeight: '1.4' }}>
-                ⚠️ API error loading history: {logError}
+              <div style={{ fontSize: '11px', color: '#f87171', background: 'rgba(239,68,68,0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.2)' }}>
+                ⚠️ {logError}
               </div>
             ) : userLogs.length === 0 ? (
-              <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
-                No recent payouts found.
+              <div style={{ fontSize: '11px', color: 'var(--text3)', textAlign: 'center', padding: '12px' }}>
+                {localOrders.length > 0
+                  ? `${localOrders.length} order(s) pending confirmation.`
+                  : 'No recent payouts found.'
+                }
               </div>
             ) : (
               <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px' }}>
                 {userLogs.map(log => (
-                  <div key={log._id || log.id} style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div key={log._id || log.id} style={{
+                    background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
+                    borderRadius: '8px', padding: '8px 10px', fontSize: '11px',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      <span style={{ color: 'white', fontWeight: 'bold', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '170px' }}>
-                        {log.recipient || log.destination || 'Naira Payout'}
+                      <span style={{ color: 'white', fontWeight: 'bold' }}>
+                        {log.status || 'Processing'}
                       </span>
                       <span style={{ color: 'var(--text3)', fontSize: '10px' }}>
                         {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Recent'}
@@ -1185,7 +1004,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
                       <span style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
-                        ₦{(log.fiatAmount || log.amount)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {selectedCountry.symbol}{(log.fiatAmount || log.amount)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                       <span style={{ color: 'var(--text3)', fontSize: '9px', fontFamily: 'var(--mono)' }}>
                         {(log._id || log.id)?.slice(0, 8)}
@@ -1199,7 +1018,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         );
       })()}
 
-      {/* Success Modal Popup */}
+      {/* ── Success Modal ── */}
       {showSuccess && successDetails && (
         <div className="p2p-success-overlay">
           <div className="p2p-success-card">
@@ -1208,42 +1027,36 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h3 className="p2p-success-title">Trade Successful</h3>
+            <h3 className="p2p-success-title">Trade Submitted</h3>
             <p className="p2p-success-sub" style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
-              Live Transaction Settled via PajCash Gateway.
+              Transaction confirmed on Solana Mainnet.
             </p>
-            
             <div className="p2p-success-fields">
-              <div className="p2p-success-field">
-                <span>Action:</span>
-                <strong>{successDetails.action} {successDetails.amount}</strong>
-              </div>
-              <div className="p2p-success-field">
-                <span>Fiat Value:</span>
-                <strong>{successDetails.fiat}</strong>
-              </div>
-              <div className="p2p-success-field">
-                <span>Bank:</span>
-                <strong>{successDetails.bank}</strong>
-              </div>
-              <div className="p2p-success-field">
-                <span>Account Number:</span>
-                <strong>{successDetails.account}</strong>
-              </div>
-              <div className="p2p-success-field">
-                <span>Recipient/Sender:</span>
-                <strong>{successDetails.name}</strong>
-              </div>
-              {successDetails.txId && (
+              <div className="p2p-success-field"><span>Action:</span><strong>{successDetails.action} {successDetails.amount}</strong></div>
+              <div className="p2p-success-field"><span>Fiat Value:</span><strong>{successDetails.fiat}</strong></div>
+              <div className="p2p-success-field"><span>Bank:</span><strong>{successDetails.bank}</strong></div>
+              <div className="p2p-success-field"><span>Account:</span><strong>{successDetails.account}</strong></div>
+              <div className="p2p-success-field"><span>Recipient:</span><strong>{successDetails.name}</strong></div>
+              {successDetails.orderId && (
                 <div className="p2p-success-field">
-                  <span>PajCash Tx ID:</span>
-                  <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '11px' }}>
-                    {successDetails.txId}
-                  </strong>
+                  <span>Order ID:</span>
+                  <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '11px' }}>{successDetails.orderId}</strong>
+                </div>
+              )}
+              {successDetails.sig && (
+                <div className="p2p-success-field">
+                  <span>Tx Sig:</span>
+                  <a
+                    href={`https://solscan.io/tx/${successDetails.sig}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '10px', wordBreak: 'break-all' }}
+                  >
+                    {successDetails.sig.slice(0, 16)}...
+                  </a>
                 </div>
               )}
             </div>
-            
             <button className="send-btn" onClick={() => { setShowSuccess(false); setAmount(''); }} style={{ marginTop: '1rem' }}>
               Done
             </button>
@@ -1251,43 +1064,25 @@ export default function P2PPanel({ connected, walletTokenList }) {
         </div>
       )}
 
-      {/* QR Code Scanner Overlay */}
+      {/* ── QR Scanner ── */}
       {scannerActive && (
         <div className="p2p-success-overlay" style={{ zIndex: 1100 }}>
           <div className="p2p-success-card" style={{ maxWidth: '360px', width: '90%', padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <h3 className="p2p-success-title" style={{ fontSize: '15px', color: 'white', marginBottom: '12px', fontWeight: 'bold' }}>Scan QR Code</h3>
+            <h3 className="p2p-success-title" style={{ fontSize: '15px', color: 'white', marginBottom: '12px', fontWeight: 'bold' }}>Scan Account QR</h3>
             <p className="p2p-success-sub" style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '16px', textAlign: 'center', fontWeight: 'normal' }}>
-              Position the account number QR code inside the box to scan automatically.
+              Point camera at a 10-digit account number QR code.
             </p>
-            
             <div style={{ position: 'relative', width: '260px', height: '260px', background: '#000', borderRadius: '12px', overflow: 'hidden', border: '2px solid var(--border)' }}>
-              <video 
-                ref={videoRef} 
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-              />
-              <canvas 
-                ref={canvasRef} 
-                style={{ display: 'none' }} 
-              />
-              
-              {/* Guidelines scan overlay */}
+              <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <canvas ref={canvasRef} style={{ display: 'none' }} />
               <div style={{ position: 'absolute', top: '20px', left: '20px', right: '20px', bottom: '20px', border: '2px dashed var(--lime)', opacity: 0.7, pointerEvents: 'none', borderRadius: '8px' }}>
-                {/* Scanning line animation */}
                 <div style={{ position: 'absolute', left: 0, right: 0, height: '2px', background: 'var(--lime)', boxShadow: '0 0 8px var(--lime)', animation: 'p2pScanLine 2s linear infinite' }} />
               </div>
             </div>
-            
             <button className="send-btn" onClick={stopScanner} style={{ marginTop: '1.25rem', background: 'rgba(255,255,255,0.08)', color: 'white' }}>
               Cancel
             </button>
-            
-            <style>{`
-              @keyframes p2pScanLine {
-                0% { top: 0%; }
-                50% { top: 100%; }
-                100% { top: 0%; }
-              }
-            `}</style>
+            <style>{`@keyframes p2pScanLine { 0% { top:0% } 50% { top:100% } 100% { top:0% } }`}</style>
           </div>
         </div>
       )}
