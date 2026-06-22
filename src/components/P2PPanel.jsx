@@ -926,37 +926,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
           </div>
         ) : (
           <>
-            {/* Show Session active badge at the top */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              background: 'rgba(163,230,53,0.04)',
-              border: '1px solid rgba(163,230,53,0.15)',
-              borderRadius: '12px',
-              padding: '8px 12px',
-              marginBottom: '1.25rem',
-              fontSize: '11px'
-            }}>
-              <span style={{ color: 'var(--text2)' }}>
-                Session: <strong style={{ color: 'var(--lime)' }}>{sessionEmail}</strong>
-              </span>
-              <button
-                onClick={handleLogoutSession}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'rgba(248,113,113,0.8)',
-                  cursor: 'pointer',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  padding: '2px 6px'
-                }}
-              >
-                Disconnect
-              </button>
-            </div>
-
             {/* Account Number — shown first */}
             <div className="field">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
