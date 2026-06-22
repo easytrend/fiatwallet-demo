@@ -461,7 +461,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
             '11111111111111111111111111111111',             // System Program
             'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',  // Token Program (legacy)
             'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',  // Token-2022 Program
-            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs', // Associated Token Program
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
           ];
           if (!allowed.includes(pid)) throw new Error(`Transaction ${i + 1} contains unexpected program: ${pid}`);
         }

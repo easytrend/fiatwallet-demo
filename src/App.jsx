@@ -54,7 +54,7 @@ const ALLOWED_PROGRAM_IDS = new Set([
   SystemProgram.programId.toBase58(),                        // System Program
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',           // SPL Token Program
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',           // Token-2022 Program
-  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',          // Associated Token Program
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',          // Associated Token Program
   // Memo program was missing — caused verifyTransactionIntegrity to throw on
   // every transaction because handleSend() appends a Memo instruction before calling verify.
   // Memo carries no account keys and moves no funds, so it is safe to allowlist.
@@ -140,7 +140,7 @@ function verifyTransactionIntegrity(transaction, expectedTransfers, expectedSign
       // They are safe to allow through without further validation.
       // Do NOT increment transferCheckedCount or systemTransferCount — memo is not a transfer.
     } else if (
-      programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs' // Associated Token Program
+      programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL' // Associated Token Program
     ) {
       // Only CreateAssociatedTokenAccountIdempotent (opcode 1) is permitted.
       // Any other ATA instruction (e.g. undocumented opcodes) is rejected.

@@ -74,7 +74,7 @@ const ALLOWED_PROGRAM_IDS = new Set([
   '11111111111111111111111111111111',
   'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
   'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
-  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
   'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',
 ]);
 

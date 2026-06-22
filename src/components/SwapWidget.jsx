@@ -553,7 +553,7 @@ export default function SwapWidget({
       '11111111111111111111111111111111',                           // System Program
       'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',              // SPL Token
       'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',              // Token-2022
-      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1brs',             // Associated Token Program
+      'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',             // Associated Token Program
       'ComputeBudget111111111111111111111111111111',                // Compute Budget
       'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr',              // Memo
       // ── Jupiter ──────────────────────────────────────────────────────────────
