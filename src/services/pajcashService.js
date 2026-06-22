@@ -1,17 +1,22 @@
 /**
  * pajcashService.js
  *
- * Wallet-only integration with the PajCash (paj_ramp) API.
- *
- * Authentication: Uses the merchant BUSINESS_API_KEY directly via
- * `x-api-key` header — no email/OTP session required.
- * Transaction retention is handled via the connected Solana wallet address.
- *
- * Follows the paj_ramp SDK API surface:
+ * Wallet + Email OTP integration with the PajCash (paj_ramp) API SDK.
+ * Follows the official SDK signatures:
  *   https://github.com/paj-cash/paj_ramp
  */
 
-import { initializeSDK, getAllRate as getSdkAllRate, Environment } from 'paj_ramp';
+import {
+  initializeSDK,
+  initiate as sdkInitiate,
+  verify as sdkVerify,
+  getBanks as sdkGetBanks,
+  resolveBankAccount as sdkResolveBankAccount,
+  createOfframpOrder as sdkCreateOfframpOrder,
+  getAllRate as sdkGetAllRate,
+  getAllTransactions as sdkGetAllTransactions,
+  Environment
+} from 'paj_ramp';
 
 // Base URL resolved from env var; defaults to production
 let BASE_URL = 'https://api.paj.cash';
@@ -35,31 +40,38 @@ export function initPajSDK(envString = 'production') {
 }
 
 /**
- * Internal helper: make an authenticated API request using the merchant API key.
- * Sends both `x-api-key` and `Authorization: Bearer` headers to maximise
- * compatibility across all paj.cash API endpoints.
+ * Initiate an OTP session for the user.
+ * @param {string} emailOrPhone - User email or phone number
+ * @param {string} apiKey - Merchant API Key
  */
-async function apiRequest(method, path, apiKey, body = null) {
-  const url = `${BASE_URL}${path}`;
-
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-    'Authorization': `Bearer ${apiKey}`,
-  };
-
-  const options = { method, headers };
-  if (body) options.body = JSON.stringify(body);
-
-  const res = await fetch(url, options);
-  const data = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    const msg = data?.message || data?.error || res.statusText || `HTTP ${res.status}`;
+export async function initiateSession(emailOrPhone, apiKey) {
+  try {
+    return await sdkInitiate(emailOrPhone, apiKey);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
     throw new Error(msg);
   }
+}
 
-  return data;
+/**
+ * Verify OTP session and obtain JWT token.
+ * @param {string} emailOrPhone - User email or phone number
+ * @param {string} otp - 6-digit OTP code
+ * @param {string} apiKey - Merchant API Key
+ */
+export async function verifySession(emailOrPhone, otp, apiKey) {
+  try {
+    const device = {
+      uuid: 'fiatwallet-browser-session-' + encodeURIComponent(emailOrPhone),
+      device: 'Browser',
+      os: 'Web',
+      browser: 'WebBrowser'
+    };
+    return await sdkVerify(emailOrPhone, otp, device, apiKey);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
+  }
 }
 
 /**
@@ -76,24 +88,30 @@ export async function getSupportedTokens() {
 
 /**
  * Fetch available banks.
- * @param {string} apiKey - Merchant Business API Key
+ * @param {string} sessionToken - User JWT Session Token
  */
-export async function getBanks(apiKey) {
-  return apiRequest('GET', '/pub/bank', apiKey);
+export async function getBanks(sessionToken) {
+  try {
+    return await sdkGetBanks(sessionToken);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
+  }
 }
 
 /**
  * Resolve a bank account number to its registered account name.
- * @param {string} apiKey        - Merchant Business API Key
+ * @param {string} sessionToken  - User JWT Session Token
  * @param {string} bankId        - Bank ID from getBanks()
  * @param {string} accountNumber - Account number to resolve
  */
-export async function resolveBankAccount(apiKey, bankId, accountNumber) {
-  return apiRequest(
-    'GET',
-    `/pub/bank-account/confirm/?bankId=${encodeURIComponent(bankId)}&accountNumber=${encodeURIComponent(accountNumber)}`,
-    apiKey
-  );
+export async function resolveBankAccount(sessionToken, bankId, accountNumber) {
+  try {
+    return await sdkResolveBankAccount(sessionToken, bankId, accountNumber);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
+  }
 }
 
 /**
@@ -101,22 +119,15 @@ export async function resolveBankAccount(apiKey, bankId, accountNumber) {
  * Returns: { id, address, mint, currency, amount, fiatAmount, rate, fee }
  *
  * @param {Object} order
- * @param {string} order.bank          - Bank ID from getBanks()
- * @param {string} order.accountNumber - Beneficiary account number
- * @param {string} order.currency      - Currency code e.g. 'NGN'
- * @param {number} [order.amount]      - Token amount to sell
- * @param {number} [order.fiatAmount]  - Fiat amount to receive (alternative to amount)
- * @param {string} order.mint          - Token mint address on Solana
- * @param {string} order.chain         - Chain identifier e.g. 'SOLANA'
- * @param {string} [order.webhookURL]  - Optional webhook URL for status callbacks
- * @param {number} [order.fee]         - Optional business USDC fee
- * @param {string} apiKey              - Merchant Business API Key
+ * @param {string} sessionToken - User JWT Session Token
  */
-export async function createOfframpOrder(order, apiKey) {
-  const { fee, ...rest } = order;
-  const body = { ...rest };
-  if (fee !== undefined) body.businessUSDCFee = fee;
-  return apiRequest('POST', '/pub/offramp', apiKey, body);
+export async function createOfframpOrder(order, sessionToken) {
+  try {
+    return await sdkCreateOfframpOrder(order, sessionToken);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
+  }
 }
 
 /**
@@ -124,13 +135,23 @@ export async function createOfframpOrder(order, apiKey) {
  * Uses the paj_ramp SDK internally.
  */
 export async function getAllRate() {
-  return getSdkAllRate();
+  try {
+    return await sdkGetAllRate();
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
+  }
 }
 
 /**
- * Fetch all transactions for the merchant account.
- * @param {string} apiKey - Merchant Business API Key
+ * Fetch all transactions for the session account.
+ * @param {string} sessionToken - User JWT Session Token
  */
-export async function getTransactionHistory(apiKey) {
-  return apiRequest('GET', '/pub/transaction', apiKey);
+export async function getTransactionHistory(sessionToken) {
+  try {
+    return await sdkGetAllTransactions(sessionToken);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
+  }
 }

@@ -8,6 +8,8 @@ import {
   createOfframpOrder,
   getAllRate,
   getTransactionHistory,
+  initiateSession,
+  verifySession,
 } from '../services/pajcashService';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram } from '@solana/web3.js';
@@ -178,6 +180,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const PAJCASH_API_KEY = import.meta.env.VITE_PAJCASH_API_KEY;
   const isPajcashLive = !!PAJCASH_API_KEY;
 
+  // ── Session State ────────────────────────────────────────────────────────
+  const [sessionToken, setSessionToken] = useState('');
+  const [sessionEmail, setSessionEmail] = useState('');
+  const [authStep, setAuthStep] = useState('input_email'); // 'input_email' | 'input_otp' | 'logged_in'
+  const [emailInput, setEmailInput] = useState('');
+  const [otpInput, setOtpInput] = useState('');
+  const [authError, setAuthError] = useState(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
   // ── Form State ───────────────────────────────────────────────────────────
   const [mode, setMode] = useState('sell'); // 'sell' | 'buy'
   const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]); // Nigeria default
@@ -220,17 +231,46 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // ── Computed ─────────────────────────────────────────────────────────────
   const isLiveRoute = LIVE_CURRENCIES.has(selectedCountry.currency) && mode === 'sell';
-  const canTransact = isPajcashLive && isLiveRoute && !apiError;
+  const canTransact = !!sessionToken && isLiveRoute && !apiError;
 
   // ── SDK Init ─────────────────────────────────────────────────────────────
   useEffect(() => {
     initPajSDK(import.meta.env.VITE_PAJCASH_ENV || 'production');
   }, []);
 
-  // ── Restore bank details from localStorage on wallet connect ─────────────
+  // ── API Key verification warning ──
+  useEffect(() => {
+    if (isLiveRoute && !PAJCASH_API_KEY) {
+      setApiError('VITE_PAJCASH_API_KEY is not configured. Please add VITE_PAJCASH_API_KEY to your .env file to enable live settlements.');
+    } else {
+      setApiError(null);
+    }
+  }, [isLiveRoute, PAJCASH_API_KEY]);
+
+  // ── Restore bank and session details from localStorage on wallet connect ──
   useEffect(() => {
     if (publicKey) {
       const key = publicKey.toBase58();
+      
+      // Restore session
+      const cachedToken = localStorage.getItem(`paj_sessionToken_${key}`);
+      const cachedEmail = localStorage.getItem(`paj_sessionEmail_${key}`);
+      const cachedExpiry = localStorage.getItem(`paj_sessionExpiry_${key}`);
+      if (cachedToken && cachedExpiry && Date.now() < Number(cachedExpiry)) {
+        setSessionToken(cachedToken);
+        setSessionEmail(cachedEmail || '');
+        setAuthStep('logged_in');
+      } else {
+        // Clear expired session
+        localStorage.removeItem(`paj_sessionToken_${key}`);
+        localStorage.removeItem(`paj_sessionEmail_${key}`);
+        localStorage.removeItem(`paj_sessionExpiry_${key}`);
+        setSessionToken('');
+        setSessionEmail('');
+        setAuthStep('input_email');
+      }
+
+      // Restore bank details
       const cachedBank = localStorage.getItem(`paj_bank_name_${key}`);
       const cachedAcc = localStorage.getItem(`paj_account_number_${key}`);
       const cachedName = localStorage.getItem(`paj_account_name_${key}`);
@@ -241,6 +281,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setSelectedBank('Choose Bank');
       setAccountNumber('');
       setAccountName('');
+      setSessionToken('');
+      setSessionEmail('');
+      setAuthStep('input_email');
     }
   }, [publicKey]);
 
@@ -269,25 +312,21 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // ── Load banks ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!canTransact) {
-      if (isPajcashLive && isLiveRoute && !PAJCASH_API_KEY) {
-        setApiError('VITE_PAJCASH_API_KEY is not configured. Add it to your environment variables.');
-      }
-      return;
-    }
+    if (!isLiveRoute || !sessionToken) return;
+
     setLoadingBanks(true);
     setApiError(null);
-    getBanks(PAJCASH_API_KEY)
+    getBanks(sessionToken)
       .then(list => {
         if (list?.length > 0) setApiBanks(list);
         else setApiError('PajCash returned an empty bank list. Please try again later.');
       })
       .catch(e => {
         console.error('Failed to fetch banks:', e);
-        setApiError(`PajCash API error: ${e.message || 'Connection failed'}. Check your API key.`);
+        setApiError(`PajCash API error: ${e.message || 'Connection failed'}.`);
       })
       .finally(() => setLoadingBanks(false));
-  }, [isPajcashLive, isLiveRoute, PAJCASH_API_KEY]);
+  }, [isLiveRoute, sessionToken]);
 
   // ── Load rates ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -309,10 +348,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // ── Load payout history ──────────────────────────────────────────────────
   const loadPayoutLogs = () => {
-    if (!canTransact || !publicKey) return;
+    if (!sessionToken || !publicKey) return;
     setLoadingLogs(true);
     setLogError(null);
-    getTransactionHistory(PAJCASH_API_KEY)
+    getTransactionHistory(sessionToken)
       .then(txs => { if (txs) setPayoutLogs(Array.isArray(txs) ? txs : []); })
       .catch(e => {
         console.warn('Could not load payout history:', e);
@@ -321,11 +360,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
       .finally(() => setLoadingLogs(false));
   };
 
-  useEffect(() => { loadPayoutLogs(); }, [canTransact, publicKey]);
+  useEffect(() => { loadPayoutLogs(); }, [sessionToken, publicKey]);
 
   // ── Resolve account name ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!accountNumber || selectedBank === 'Choose Bank' || !isPajcashLive) {
+    if (!accountNumber || selectedBank === 'Choose Bank' || !sessionToken) {
       setAccountName('');
       return;
     }
@@ -340,7 +379,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     const bankId = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
 
     const timer = setTimeout(() => {
-      resolveBankAccount(PAJCASH_API_KEY, bankId, trimmed)
+      resolveBankAccount(sessionToken, bankId, trimmed)
         .then(res => {
           const name = res?.accountName || res?.name || res?.account_name || '';
           // Only set the name if a real name was returned; leave blank on mismatch/failure
@@ -358,7 +397,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }, 800);
 
     return () => { clearTimeout(timer); setResolvingName(false); };
-  }, [accountNumber, selectedBank, selectedCountry, apiBanks, PAJCASH_API_KEY, isPajcashLive]);
+  }, [accountNumber, selectedBank, selectedCountry, apiBanks, sessionToken]);
 
   // ── Reset on country / mode change ───────────────────────────────────────
   useEffect(() => {
@@ -367,7 +406,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
     setAccountName('');
     setAmount('');
     setApiBanks([]);
-    setApiError(null);
+    if (PAJCASH_API_KEY) {
+      setApiError(null);
+    }
   }, [selectedCountry, mode]);
 
   // ── Routing animation ─────────────────────────────────────────────────────
@@ -380,6 +421,80 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }, 800);
     return () => clearTimeout(t1);
   }, [selectedToken, selectedBank]);
+
+  // ── Session Handlers ──────────────────────────────────────────────────────
+  const handleInitiateSession = async () => {
+    if (!emailInput) {
+      setAuthError('Please enter your email.');
+      return;
+    }
+    if (!PAJCASH_API_KEY) {
+      setAuthError('API Key is missing. Please add VITE_PAJCASH_API_KEY to your env configuration.');
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      await initiateSession(emailInput.trim(), PAJCASH_API_KEY);
+      setAuthStep('input_otp');
+    } catch (e) {
+      setAuthError(e.message || 'Failed to send OTP. Please check your API key and email.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleVerifySession = async () => {
+    if (!otpInput) {
+      setAuthError('Please enter the OTP.');
+      return;
+    }
+    if (!PAJCASH_API_KEY) {
+      setAuthError('API Key is missing.');
+      return;
+    }
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const res = await verifySession(emailInput.trim(), otpInput.trim(), PAJCASH_API_KEY);
+      if (res?.token) {
+        setSessionToken(res.token);
+        setSessionEmail(emailInput.trim());
+        setAuthStep('logged_in');
+
+        // Save session in localStorage for this wallet
+        if (publicKey) {
+          const key = publicKey.toBase58();
+          localStorage.setItem(`paj_sessionToken_${key}`, res.token);
+          localStorage.setItem(`paj_sessionEmail_${key}`, emailInput.trim());
+          const expiryTime = Date.now() + 24 * 60 * 60 * 1000; // 24 Hours
+          localStorage.setItem(`paj_sessionExpiry_${key}`, String(expiryTime));
+        }
+      } else {
+        throw new Error('Verify response did not include session token.');
+      }
+    } catch (e) {
+      setAuthError(e.message || 'Invalid OTP code. Please try again.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogoutSession = () => {
+    setSessionToken('');
+    setSessionEmail('');
+    setAuthStep('input_email');
+    setEmailInput('');
+    setOtpInput('');
+    setAuthError(null);
+
+    if (publicKey) {
+      const key = publicKey.toBase58();
+      localStorage.removeItem(`paj_sessionToken_${key}`);
+      localStorage.removeItem(`paj_sessionEmail_${key}`);
+      localStorage.removeItem(`paj_sessionExpiry_${key}`);
+    }
+  };
 
   // ── Selectable token list ─────────────────────────────────────────────────
   const selectableTokens = (() => {
@@ -487,7 +602,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // ── Submit handler ────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!isLiveRoute) { alert('This region/mode is not currently supported.'); return; }
-    if (!isPajcashLive) { alert('PajCash API Key is not configured.'); return; }
+    if (!PAJCASH_API_KEY) { alert('PajCash API Key is not configured.'); return; }
+    if (!sessionToken) { alert('Please verify your email OTP session first.'); return; }
     if (apiError) { alert(`PajCash API error: ${apiError}`); return; }
     if (!connected || !publicKey) { alert('Please connect your Solana wallet first.'); return; }
     if (!amount || parseFloat(amount) <= 0) { alert('Please enter a valid amount.'); return; }
@@ -510,7 +626,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           chain: 'SOLANA',
           webhookURL: import.meta.env.VITE_PAJCASH_WEBHOOK_URL || undefined,
         },
-        PAJCASH_API_KEY
+        sessionToken
       );
 
       if (!order?.address) throw new Error('PajCash did not return a deposit address for this order.');
@@ -714,149 +830,270 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
       {/* ── LIVE OFFRAMP ROUTE ── */}
       {isLiveRoute ? (
-        <>
-          {/* Account Number — shown first */}
-          <div className="field">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button className="p2p-btn-badge" onClick={handlePaste} disabled={!canTransact} style={{ opacity: canTransact ? 1 : 0.6 }}>Paste</button>
+        authStep !== 'logged_in' ? (
+          <div className="p2p-auth-container" style={{
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid var(--border)',
+            borderRadius: '16px',
+            padding: '24px',
+            textAlign: 'center',
+            marginBottom: '1.25rem',
+            backdropFilter: 'blur(10px)'
+          }}>
+            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔐</div>
+            <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: 'white', marginBottom: '8px' }}>
+              Unlock Live Settlements
+            </h3>
+            <p style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '20px', lineHeight: '1.5' }}>
+              Verify your email to securely link bank payouts to your Solana wallet.
+            </p>
+
+            {authError && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.2)',
+                borderRadius: '8px',
+                padding: '8px 10px',
+                fontSize: '11px',
+                color: '#f87171',
+                marginBottom: '14px',
+                textAlign: 'left',
+                lineHeight: '1.4'
+              }}>
+                ✕ {authError}
+              </div>
+            )}
+
+            {authStep === 'input_email' ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="field" style={{ textAlign: 'left', marginBottom: 0 }}>
+                  <div className="field-label">Email Address</div>
+                  <div className="input-wrap">
+                    <input
+                      type="email"
+                      value={emailInput}
+                      onChange={e => setEmailInput(e.target.value)}
+                      placeholder="name@example.com"
+                      disabled={authLoading}
+                    />
+                  </div>
+                </div>
                 <button
-                  className="p2p-btn-badge"
-                  onClick={() => setScannerActive(true)}
-                  disabled={!canTransact}
-                  style={{ opacity: canTransact ? 1 : 0.6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  title="Scan QR Code"
+                  className="send-btn"
+                  onClick={handleInitiateSession}
+                  disabled={authLoading || !emailInput}
+                  style={{ marginTop: '8px' }}
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" strokeWidth="2.5" fill="none" />
-                    <rect x="1" y="10" width="22" height="4" fill="currentColor" />
-                  </svg>
+                  {authLoading ? 'Sending code...' : 'Send Verification Code'}
                 </button>
               </div>
-            </div>
-            <div className="input-wrap" style={{ opacity: canTransact ? 1 : 0.6 }}>
-              <input
-                type="text"
-                value={accountNumber}
-                onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
-                placeholder="0000000000"
-                disabled={!canTransact}
-              />
-            </div>
-            <div style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--lime)', fontWeight: 'bold' }}>
-              {accountNumber && selectedBank !== 'Choose Bank' && (
-                resolvingName
-                  ? <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}><span className="p2p-mini-spinner" /> Resolving...</span>
-                  : accountName && <span className="animated-fade-in">{accountName}</span>
-              )}
-            </div>
-          </div>
-
-          {/* Bank selector — shown second */}
-          <div className="field" style={{ position: 'relative' }}>
-            <div className="field-label">Bank</div>
-            <div
-              className="input-wrap"
-              onClick={() => { if (canTransact) setBankOpen(!bankOpen); }}
-              style={{ cursor: canTransact ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: canTransact ? 1 : 0.6 }}
-            >
-              {loadingBanks ? (
-                <span style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic' }}>
-                  <span className="p2p-mini-spinner" /> Loading banks...
-                </span>
-              ) : (
-                <span style={{ color: selectedBank === 'Choose Bank' ? 'var(--text3)' : 'var(--text)' }}>
-                  {selectedBank}
-                </span>
-              )}
-              <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
-            </div>
-
-            {bankOpen && (
-              <div className="drop-menu" style={{ left: 0, right: 0, width: '100%' }} onClick={e => e.stopPropagation()}>
-                <div style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
-                  <input
-                    type="text"
-                    placeholder="Search bank name..."
-                    value={bankSearch}
-                    onChange={e => setBankSearch(e.target.value)}
-                    style={{ width: '100%', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: '6px', color: 'white', fontSize: '12px', outline: 'none' }}
-                  />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="field" style={{ textAlign: 'left', marginBottom: 0 }}>
+                  <div className="field-label">Enter 6-Digit OTP</div>
+                  <div className="input-wrap">
+                    <input
+                      type="text"
+                      maxLength={6}
+                      value={otpInput}
+                      onChange={e => setOtpInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="000000"
+                      disabled={authLoading}
+                      style={{ textAlign: 'center', letterSpacing: '0.5em', fontSize: '18px' }}
+                    />
+                  </div>
                 </div>
-                <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                  {filteredBanksList.map(b => {
-                    const meta = getBankMetadata(b);
-                    return (
-                      <div
-                        key={b}
-                        className={`drop-item ${selectedBank === b ? 'sel' : ''}`}
-                        onClick={() => { setSelectedBank(b); setBankOpen(false); setBankSearch(''); }}
-                        style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px' }}
-                      >
-                        {meta.logo ? (
-                          <img
-                            src={meta.logo} alt={meta.name}
-                            onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
-                            style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover' }}
-                          />
-                        ) : null}
-                        <div
-                          className="bank-avatar"
-                          style={{
-                            display: meta.logo ? 'none' : 'flex',
-                            width: '22px', height: '22px', borderRadius: '50%',
-                            background: meta.color, color: 'white', fontSize: '9px',
-                            fontWeight: 'bold', alignItems: 'center', justifyContent: 'center',
-                          }}
-                        >
-                          {meta.initial}
-                        </div>
-                        <span className="di-name" style={{ marginLeft: 0 }}>{b}</span>
-                      </div>
-                    );
-                  })}
-                  {filteredBanksList.length === 0 && (
-                    <div style={{ fontSize: '11px', color: 'var(--text3)', fontStyle: 'italic', padding: '12px', textAlign: 'center' }}>
-                      No banks found
-                    </div>
-                  )}
+                <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                  <button
+                    className="send-btn"
+                    onClick={() => { setAuthStep('input_email'); setAuthError(null); }}
+                    disabled={authLoading}
+                    style={{ flex: 1, background: 'rgba(255,255,255,0.06)', color: 'white' }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    className="send-btn"
+                    onClick={handleVerifySession}
+                    disabled={authLoading || otpInput.length !== 6}
+                    style={{ flex: 2 }}
+                  >
+                    {authLoading ? 'Verifying...' : 'Verify & Connect'}
+                  </button>
                 </div>
               </div>
             )}
           </div>
+        ) : (
+          <>
+            {/* Show Session active badge at the top */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: 'rgba(163,230,53,0.04)',
+              border: '1px solid rgba(163,230,53,0.15)',
+              borderRadius: '12px',
+              padding: '8px 12px',
+              marginBottom: '1.25rem',
+              fontSize: '11px'
+            }}>
+              <span style={{ color: 'var(--text2)' }}>
+                Session: <strong style={{ color: 'var(--lime)' }}>{sessionEmail}</strong>
+              </span>
+              <button
+                onClick={handleLogoutSession}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'rgba(248,113,113,0.8)',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  padding: '2px 6px'
+                }}
+              >
+                Disconnect
+              </button>
+            </div>
 
-          {/* Amount + Token row */}
-          <div style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
-            <div style={{ flex: 1.4 }}>
-              <div className="field-label">Amount to Sell</div>
+            {/* Account Number — shown first */}
+            <div className="field">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div className="field-label" style={{ marginBottom: 0 }}>Account Number</div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="p2p-btn-badge" onClick={handlePaste} disabled={!canTransact} style={{ opacity: canTransact ? 1 : 0.6 }}>Paste</button>
+                  <button
+                    className="p2p-btn-badge"
+                    onClick={() => setScannerActive(true)}
+                    disabled={!canTransact}
+                    style={{ opacity: canTransact ? 1 : 0.6, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    title="Scan QR Code"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" strokeWidth="2.5" fill="none" />
+                      <rect x="1" y="10" width="22" height="4" fill="currentColor" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
               <div className="input-wrap" style={{ opacity: canTransact ? 1 : 0.6 }}>
-                <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '13px', marginRight: '6px' }}>
-                  {selectedToken.symbol}
-                </span>
                 <input
-                  type="number"
-                  placeholder="0.00"
-                  value={amount}
-                  onChange={e => setAmount(e.target.value)}
-                  style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'white' }}
+                  type="text"
+                  value={accountNumber}
+                  onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ''))}
+                  placeholder="0000000000"
                   disabled={!canTransact}
                 />
               </div>
-              <div style={{ marginTop: '6px', fontSize: '12px', minHeight: '16px' }}>
-                {routingState === 'routing'
-                  ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Routing...</span>
-                  : routingState === 'loading_market'
-                  ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Scanning merchants...</span>
-                  : selectedBank !== 'Choose Bank' && (
-                    <span style={{ color: 'var(--lime)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--lime)', display: 'inline-block', flexShrink: 0 }} />
-                      Best Rate · Market Available
-                    </span>
-                  )
-                }
+              <div style={{ marginTop: '6px', minHeight: '16px', fontSize: '12px', color: 'var(--lime)', fontWeight: 'bold' }}>
+                {accountNumber && selectedBank !== 'Choose Bank' && (
+                  resolvingName
+                    ? <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}><span className="p2p-mini-spinner" /> Resolving...</span>
+                    : accountName && <span className="animated-fade-in">{accountName}</span>
+                )}
               </div>
             </div>
+
+            {/* Bank selector — shown second */}
+            <div className="field" style={{ position: 'relative' }}>
+              <div className="field-label">Bank</div>
+              <div
+                className="input-wrap"
+                onClick={() => { if (canTransact) setBankOpen(!bankOpen); }}
+                style={{ cursor: canTransact ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: canTransact ? 1 : 0.6 }}
+              >
+                {loadingBanks ? (
+                  <span style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic' }}>
+                    <span className="p2p-mini-spinner" /> Loading banks...
+                  </span>
+                ) : (
+                  <span style={{ color: selectedBank === 'Choose Bank' ? 'var(--text3)' : 'var(--text)' }}>
+                    {selectedBank}
+                  </span>
+                )}
+                <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
+              </div>
+
+              {bankOpen && (
+                <div className="drop-menu" style={{ left: 0, right: 0, width: '100%' }} onClick={e => e.stopPropagation()}>
+                  <div style={{ padding: '8px', borderBottom: '1px solid var(--border)' }}>
+                    <input
+                      type="text"
+                      placeholder="Search bank name..."
+                      value={bankSearch}
+                      onChange={e => setBankSearch(e.target.value)}
+                      style={{ width: '100%', padding: '6px 10px', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: '6px', color: 'white', fontSize: '12px', outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    {filteredBanksList.map(b => {
+                      const meta = getBankMetadata(b);
+                      return (
+                        <div
+                          key={b}
+                          className={`drop-item ${selectedBank === b ? 'sel' : ''}`}
+                          onClick={() => { setSelectedBank(b); setBankOpen(false); setBankSearch(''); }}
+                          style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px' }}
+                        >
+                          {meta.logo ? (
+                            <img
+                              src={meta.logo} alt={meta.name}
+                              onError={e => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                              style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover' }}
+                          />
+                          ) : null}
+                          <div
+                            className="bank-avatar"
+                            style={{
+                              display: meta.logo ? 'none' : 'flex',
+                              width: '22px', height: '22px', borderRadius: '50%',
+                              background: meta.color, color: 'white', fontSize: '9px',
+                              fontWeight: 'bold', alignItems: 'center', justifyContent: 'center',
+                            }}
+                          >
+                            {meta.initial}
+                          </div>
+                          <span className="di-name" style={{ marginLeft: 0 }}>{b}</span>
+                        </div>
+                      );
+                    })}
+                    {filteredBanksList.length === 0 && (
+                      <div style={{ fontSize: '11px', color: 'var(--text3)', fontStyle: 'italic', padding: '12px', textAlign: 'center' }}>
+                        No banks found
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Amount + Token row */}
+            <div style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
+              <div style={{ flex: 1.4 }}>
+                <div className="field-label">Amount to Sell</div>
+                <div className="input-wrap" style={{ opacity: canTransact ? 1 : 0.6 }}>
+                  <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '13px', marginRight: '6px' }}>
+                    {selectedToken.symbol}
+                  </span>
+                  <input
+                    type="number"
+                    placeholder="0.00"
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'white' }}
+                    disabled={!canTransact}
+                  />
+                </div>
+                <div style={{ marginTop: '6px', fontSize: '12px', minHeight: '16px' }}>
+                  {routingState === 'routing'
+                    ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Routing...</span>
+                    : routingState === 'loading_market'
+                    ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Scanning merchants...</span>
+                    : null
+                  }
+                </div>
+              </div>
 
             <div style={{ flex: 1 }}>
               <div className="field-label">Token</div>
@@ -927,7 +1164,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
             {submitting ? 'Processing...' : (!canTransact ? 'Payout Gateway Offline' : 'Send')}
           </button>
         </>
-      ) : (
+      ) ) : (
         /* ── Coming soon ── */
         <div style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -1028,7 +1265,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
             </div>
             <h3 className="p2p-success-title">Trade Submitted</h3>
             <p className="p2p-success-sub" style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
-              Transaction confirmed on Solana Mainnet.
+              Transaction confirmed.
             </p>
             <div className="p2p-success-fields">
               <div className="p2p-success-field"><span>Action:</span><strong>{successDetails.action} {successDetails.amount}</strong></div>
