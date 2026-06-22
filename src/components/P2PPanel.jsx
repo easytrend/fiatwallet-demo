@@ -343,7 +343,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
       resolveBankAccount(PAJCASH_API_KEY, bankId, trimmed)
         .then(res => {
           const name = res?.accountName || res?.name || res?.account_name || '';
-          setAccountName(name || 'Beneficiary Account');
+          // Only set the name if a real name was returned; leave blank on mismatch/failure
+          setAccountName(name || '');
           if (name && publicKey) {
             const key = publicKey.toBase58();
             localStorage.setItem(`paj_bank_id_${key}`, bankId);
@@ -352,7 +353,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
             localStorage.setItem(`paj_account_name_${key}`, name);
           }
         })
-        .catch(() => setAccountName('Beneficiary Account'))
+        .catch(() => setAccountName(''))
         .finally(() => setResolvingName(false));
     }, 800);
 
@@ -845,8 +846,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
               <div style={{ marginTop: '6px', fontSize: '12px', minHeight: '16px' }}>
                 {routingState === 'routing'
                   ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Routing...</span>
+                  : routingState === 'loading_market'
+                  ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Scanning merchants...</span>
                   : selectedBank !== 'Choose Bank' && (
-                    <span style={{ color: 'var(--text2)' }}>✓ Route: {displayBank} Escrow</span>
+                    <span style={{ color: 'var(--lime)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--lime)', display: 'inline-block', flexShrink: 0 }} />
+                      Best Rate · Market Available
+                    </span>
                   )
                 }
               </div>
