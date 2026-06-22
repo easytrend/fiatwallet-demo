@@ -890,14 +890,14 @@ export default function P2PPanel({ connected, walletTokenList }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div className="field" style={{ textAlign: 'left', marginBottom: 0 }}>
-                  <div className="field-label">Enter 6-Digit OTP</div>
+                  <div className="field-label">Enter 4-Digit OTP</div>
                   <div className="input-wrap">
                     <input
                       type="text"
-                      maxLength={6}
+                      maxLength={4}
                       value={otpInput}
                       onChange={e => setOtpInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="000000"
+                      placeholder="0000"
                       disabled={authLoading}
                       style={{ textAlign: 'center', letterSpacing: '0.5em', fontSize: '18px' }}
                     />
@@ -915,7 +915,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   <button
                     className="send-btn"
                     onClick={handleVerifySession}
-                    disabled={authLoading || otpInput.length !== 6}
+                    disabled={authLoading || otpInput.length !== 4}
                     style={{ flex: 2 }}
                   >
                     {authLoading ? 'Verifying...' : 'Verify & Connect'}
