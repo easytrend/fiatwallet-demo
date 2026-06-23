@@ -536,17 +536,40 @@ export default function P2PPanel({ connected, walletTokenList }) {
   };
 
   // ── Selectable token list ─────────────────────────────────────────────────
+  // Always show all DEFAULT_TOKENS (USDC, USDT, SOL). Merge with pajTokens
+  // from the API so API metadata takes priority, but defaults are never dropped.
   const selectableTokens = (() => {
-    const list = pajTokens.length > 0
-      ? pajTokens.map(t => {
-          const walletToken = walletTokenList?.find(w => (w.mint && w.mint === t.mint) || w.symbol === t.symbol);
-          return {
-            ...t,
-            balance: walletToken ? walletToken.balance : 0,
-          };
-        })
-      : (connected && walletTokenList?.length > 0 ? walletTokenList : DEFAULT_TOKENS);
-    return list.filter(t => !t.chain || t.chain.toUpperCase() === 'SOLANA');
+    // Start with DEFAULT_TOKENS as the baseline
+    const baseTokens = DEFAULT_TOKENS.map(dt => {
+      // If the API returned a matching token, prefer its metadata
+      const apiToken = pajTokens.find(pt =>
+        pt.mint === dt.mint || pt.symbol === dt.symbol
+      );
+      const merged = apiToken ? { ...dt, ...apiToken } : dt;
+      // Attach live wallet balance
+      const walletToken = walletTokenList?.find(w =>
+        (w.mint && w.mint === merged.mint) || w.symbol === merged.symbol
+      );
+      return {
+        ...merged,
+        balance: walletToken ? walletToken.balance : 0,
+      };
+    });
+
+    // Add any extra API tokens that aren't already in DEFAULT_TOKENS
+    const extraApiTokens = pajTokens
+      .filter(pt =>
+        (!pt.chain || pt.chain.toUpperCase() === 'SOLANA') &&
+        !DEFAULT_TOKENS.some(dt => dt.mint === pt.mint || dt.symbol === pt.symbol)
+      )
+      .map(pt => {
+        const walletToken = walletTokenList?.find(w =>
+          (w.mint && w.mint === pt.mint) || w.symbol === pt.symbol
+        );
+        return { ...pt, balance: walletToken ? walletToken.balance : 0 };
+      });
+
+    return [...baseTokens, ...extraApiTokens];
   })();
 
   const liveSelectedToken = useMemo(() => {
