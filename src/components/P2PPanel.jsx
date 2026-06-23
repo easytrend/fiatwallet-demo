@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import jsQR from 'jsqr';
 import {
   initPajSDK,
@@ -381,6 +381,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       return;
     }
     setResolvingName(true);
+    setAccountName('');
 
     const bankObj = apiBanks.find(b => (b.name || b.bank_name || b) === selectedBank);
     const bankId = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
@@ -389,8 +390,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       resolveBankAccount(sessionToken, bankId, trimmed)
         .then(res => {
           const name = res?.accountName || res?.name || res?.account_name || '';
-          // Only set the name if a real name was returned; leave blank on mismatch/failure
-          setAccountName(name || '');
+          setAccountName(name || 'No Bank Match');
           if (name && publicKey) {
             const key = publicKey.toBase58();
             localStorage.setItem(`paj_bank_id_${key}`, bankId);
@@ -400,13 +400,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
           }
         })
         .catch((err) => {
-          setAccountName('');
+          setAccountName('No Bank Match');
           if (err?.message?.toLowerCase().includes('session') || err?.message?.toLowerCase().includes('expired') || err?.message?.toLowerCase().includes('unauthorized') || err?.message?.toLowerCase().includes('invalid token')) {
             handleLogoutSession();
           }
         })
         .finally(() => setResolvingName(false));
-    }, 800);
+    }, 300);
 
     return () => { clearTimeout(timer); setResolvingName(false); };
   }, [accountNumber, selectedBank, selectedCountry, apiBanks, sessionToken]);
@@ -546,6 +546,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
     return list.filter(t => !t.chain || t.chain.toUpperCase() === 'SOLANA');
   })();
 
+  const liveSelectedToken = useMemo(() => {
+    const found = selectableTokens.find(t => t.mint === selectedToken.mint || t.symbol === selectedToken.symbol);
+    return found || selectedToken;
+  }, [selectableTokens, selectedToken]);
+
   useEffect(() => {
     const available = selectableTokens.some(t => t.symbol === selectedToken.symbol || t.mint === selectedToken.mint);
     if (!available && selectableTokens.length > 0) setSelectedToken(selectableTokens[0]);
@@ -625,21 +630,58 @@ export default function P2PPanel({ connected, walletTokenList }) {
   };
 
   // ── Derived values ────────────────────────────────────────────────────────
-  const tokenPriceUsd = selectedToken.price || (selectedToken.symbol === 'SOL' ? 145.20 : 1.00);
+  const tokenPriceUsd = liveSelectedToken.price || (liveSelectedToken.symbol === 'SOL' ? 145.20 : 1.00);
   const activeNgnRate = pajRates?.offRampRate?.rate || pajRates?.rate || 1550;
   const ngnRate = tokenPriceUsd * activeNgnRate;
   const parsedAmt = parseFloat(amount) || 0;
-  const fiatAmountText = parsedAmt > 0
-    ? (parsedAmt * ngnRate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : '0.00';
+  const estCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
+  const fiatAmountText = parsedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  const allBankNames = apiBanks.map(b => (typeof b === 'string' ? b : b.name || b.bank_name || ''));
-  const filteredBanksList = allBankNames.filter(b => b.toLowerCase().includes(bankSearch.toLowerCase()));
+  const allBankNames = useMemo(() => {
+    return apiBanks.map(b => (typeof b === 'string' ? b : b.name || b.bank_name || ''));
+  }, [apiBanks]);
+
+  const filteredBanksList = useMemo(() => {
+    const query = bankSearch.toLowerCase().trim();
+    if (!query) return allBankNames;
+    const matches = allBankNames.filter(b => b.toLowerCase().includes(query));
+    return matches.sort((a, b) => {
+      const aLower = a.toLowerCase();
+      const bLower = b.toLowerCase();
+
+      const aExact = aLower === query;
+      const bExact = bLower === query;
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+
+      const aStarts = aLower.startsWith(query);
+      const bStarts = bLower.startsWith(query);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+
+      return aLower.localeCompare(bLower);
+    });
+  }, [allBankNames, bankSearch]);
+
   const filteredCountries = COUNTRIES.filter(c =>
     c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
     c.code.toLowerCase().includes(countrySearch.toLowerCase())
   );
   const displayBank = selectedBank === 'Choose Bank' ? (allBankNames[0] || 'Choose Bank') : selectedBank;
+
+  const isFormValid =
+    !!sessionToken &&
+    isLiveRoute &&
+    !apiError &&
+    parsedAmt > 0 &&
+    !!accountNumber &&
+    accountNumber.trim().length >= 8 &&
+    selectedBank !== 'Choose Bank' &&
+    !!accountName &&
+    accountName !== 'No Bank Match' &&
+    !resolvingName &&
+    liveSelectedToken.balance != null &&
+    estCryptoAmount <= liveSelectedToken.balance;
 
   // ── Submit handler ────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -664,8 +706,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
           bank: bankId,
           accountNumber: accountNumber.trim(),
           currency: selectedCountry.currency,
-          amount: Number(amount),
-          mint: selectedToken.mint,
+          amount: Number(amount) / ngnRate,
+          mint: liveSelectedToken.mint,
           chain: 'SOLANA',
           webhookURL: import.meta.env.VITE_PAJCASH_WEBHOOK_URL || undefined,
         },
@@ -682,13 +724,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
       const depositPubkey = new PublicKey(order.address);
 
-      if (selectedToken.symbol === 'SOL') {
-        const lamports = Math.round((order.amount || Number(amount)) * 1e9);
+      if (liveSelectedToken.symbol === 'SOL') {
+        const lamports = Math.round((order.amount || estCryptoAmount) * 1e9);
         transaction.add(
           SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: depositPubkey, lamports })
         );
       } else {
-        const mintPubkey = new PublicKey(selectedToken.mint);
+        const mintPubkey = new PublicKey(liveSelectedToken.mint);
         let tokenProgram = TOKEN_PROGRAM_ID;
         try {
           const mintAcct = await connection.getAccountInfo(mintPubkey);
@@ -702,7 +744,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         const mintInfo = await connection.getParsedAccountInfo(mintPubkey);
         if (!mintInfo.value) throw new Error('Invalid token mint — could not fetch decimals.');
         const decimals = mintInfo.value.data.parsed.info.decimals;
-        const sendAmount = order.amount || Number(amount);
+        const sendAmount = order.amount || estCryptoAmount;
         const units = BigInt(Math.round(sendAmount * Math.pow(10, decimals)));
 
         transaction.add(
@@ -727,7 +769,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       );
 
       // 4. Verify transaction integrity before signing
-      verifyOfframpTransaction(transaction, order.address, selectedToken, publicKey);
+      verifyOfframpTransaction(transaction, order.address, liveSelectedToken, publicKey);
 
       // 5. Pre-flight simulation
       const sim = await connection.simulateTransaction(transaction);
@@ -763,7 +805,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
       setSuccessDetails({
         action: 'Sell',
-        amount: `${amount} ${selectedToken.symbol}`,
+        amount: `${estCryptoAmount.toFixed(4)} ${liveSelectedToken.symbol}`,
         fiat: `${selectedCountry.symbol}${fiatAmountText}`,
         bank: displayBank,
         account: accountNumber,
@@ -1001,7 +1043,14 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 {accountNumber && selectedBank !== 'Choose Bank' && (
                   resolvingName
                     ? <span style={{ fontStyle: 'italic', color: 'var(--text3)', fontWeight: 'normal' }}><span className="p2p-mini-spinner" /> Resolving...</span>
-                    : accountName && <span className="animated-fade-in">{accountName}</span>
+                    : accountName && (
+                      <span
+                        className="animated-fade-in"
+                        style={{ color: accountName === 'No Bank Match' ? '#f87171' : 'var(--lime)' }}
+                      >
+                        {accountName}
+                      </span>
+                    )
                 )}
               </div>
             </div>
@@ -1082,114 +1131,132 @@ export default function P2PPanel({ connected, walletTokenList }) {
             {/* Amount + Token row */}
             <div style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
               <div style={{ flex: 1.4 }}>
-                <div className="field-label">Amount to Sell</div>
-                <div className="input-wrap" style={{ opacity: canTransact ? 1 : 0.6 }}>
-                  <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '13px', marginRight: '6px' }}>
-                    {selectedToken.symbol}
-                  </span>
-                  <input
-                    type="number"
-                    placeholder="0.00"
-                    value={amount}
-                    onChange={e => setAmount(e.target.value)}
-                    style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent', color: 'white' }}
-                    disabled={!canTransact}
-                  />
+                <div className="field-label">AMOUNT</div>
+                <div className="amount-block" style={{ marginTop: '4px', opacity: canTransact ? 1 : 0.6 }}>
+                  <div className="amount-top" style={{ padding: '8px 12px' }}>
+                    <div className="amount-num-wrap" style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '8px' }}>
+                      <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '15px' }}>
+                        {selectedCountry.symbol}
+                      </span>
+                      <input
+                        className="amount-num"
+                        type="number"
+                        placeholder="0"
+                        value={amount}
+                        onChange={e => setAmount(e.target.value)}
+                        disabled={!canTransact}
+                        style={{ fontSize: '15px' }}
+                      />
+                      {liveSelectedToken && liveSelectedToken.balance > 0 && (
+                        <button
+                          className="max-btn"
+                          type="button"
+                          onClick={() => {
+                            const fiatMax = liveSelectedToken.balance * ngnRate;
+                            setAmount(fiatMax.toFixed(2));
+                          }}
+                          disabled={!canTransact}
+                        >
+                          MAX
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="amount-divider" />
+                  <div className="amount-bottom" style={{ padding: '6px 12px' }}>
+                    <span className="amount-converted" style={{ fontSize: '11px' }}>
+                      {routingState === 'routing' || routingState === 'loading_market' ? (
+                        <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}>
+                          <span className="p2p-mini-spinner" /> Routing...
+                        </span>
+                      ) : (
+                        `≈ ${estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol}`
+                      )}
+                    </span>
+                    <div className="input-mode-toggle">
+                      <button className="imt-btn active" style={{ cursor: 'default', padding: '3px 8px', fontSize: '10px' }}>
+                        {selectedCountry.currency}
+                      </button>
+                      <button className="imt-btn" style={{ cursor: 'default', padding: '3px 8px', fontSize: '10px' }}>
+                        {liveSelectedToken.symbol}
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ marginTop: '6px', fontSize: '12px', minHeight: '16px' }}>
-                  {routingState === 'routing'
-                    ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Routing...</span>
-                    : routingState === 'loading_market'
-                    ? <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}><span className="p2p-mini-spinner" /> Scanning merchants...</span>
-                    : null
-                  }
+                <div style={{ marginTop: '6px', fontSize: '11px', minHeight: '16px' }}>
+                  {pajRates?.offRampRate?.rate && (
+                    <span style={{ color: 'var(--text3)' }}>
+                      Rate: 1 {liveSelectedToken.symbol} = {selectedCountry.symbol}{ngnRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  )}
                 </div>
               </div>
 
-            <div style={{ flex: 1 }}>
-              <div className="field-label">Token</div>
-              <div className="drop-wrap">
-                <div
-                  className="input-wrap"
-                  onClick={() => { if (canTransact) setTokenOpen(!tokenOpen); }}
-                  style={{ cursor: canTransact ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: canTransact ? 1 : 0.6 }}
-                >
-                  <strong style={{ color: 'white' }}>{selectedToken.symbol}</strong>
-                  <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
+              <div style={{ flex: 1 }}>
+                <div className="field-label">Token</div>
+                <div className="drop-wrap">
+                  <div
+                    className="input-wrap"
+                    onClick={() => { if (canTransact) setTokenOpen(!tokenOpen); }}
+                    style={{ cursor: canTransact ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: canTransact ? 1 : 0.6 }}
+                  >
+                    <strong style={{ color: 'white' }}>{liveSelectedToken.symbol}</strong>
+                    <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
+                  </div>
+                  {tokenOpen && (
+                    <div className="drop-menu" style={{ right: 0, minWidth: '260px' }}>
+                      {selectableTokens.map(t => (
+                        <div
+                          key={t.mint || t.symbol}
+                          className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                          onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
+                        >
+                          {t.logoURI
+                            ? <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                            : <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
+                          }
+                          <span className="di-code" style={{ marginLeft: '8px' }}>{t.symbol}</span>
+                          {t.balance > 0 && <span className="di-name">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                {tokenOpen && (
-                  <div className="drop-menu" style={{ right: 0, minWidth: '260px' }}>
-                    {selectableTokens.map(t => (
-                      <div
-                        key={t.mint || t.symbol}
-                        className={`drop-item ${selectedToken.symbol === t.symbol ? 'sel' : ''}`}
-                        onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
-                      >
-                        {t.logoURI
-                          ? <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
-                          : <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
-                        }
-                        <span className="di-code" style={{ marginLeft: '8px' }}>{t.symbol}</span>
-                        {t.balance > 0 && <span className="di-name">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>}
-                      </div>
-                    ))}
+                {liveSelectedToken.balance != null && (
+                  <div style={{ fontSize: '11px', color: 'var(--text2)', fontWeight: 600, marginTop: '8px' }}>
+                    {liveSelectedToken.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} {liveSelectedToken.symbol}
+                    {liveSelectedToken.price > 0 && ` ($${(liveSelectedToken.balance * liveSelectedToken.price).toFixed(2)})`}
                   </div>
                 )}
               </div>
             </div>
-          </div>
 
-          {/* Est. receive banner */}
-          <div style={{
-            background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
-            borderRadius: '12px', padding: '14px', textAlign: 'center',
-            marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '4px',
-          }}>
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Est. Receive
-            </span>
-            {routingState === 'routing' || routingState === 'loading_market' ? (
-              <div style={{ fontSize: '16px', fontWeight: 700, color: 'white' }}>
-                <span className="p2p-mini-spinner" /> Loading...
-              </div>
-            ) : (
-              <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--lime)' }}>
-                {selectedCountry.symbol}{fiatAmountText}
+            {p2pError && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.2)',
+                borderRadius: '8px',
+                padding: '10px 12px',
+                fontSize: '11px',
+                color: '#f87171',
+                marginBottom: '12px',
+                textAlign: 'left',
+                lineHeight: '1.4'
+              }}>
+                ✕ {p2pError}
               </div>
             )}
-            {pajRates?.offRampRate?.rate && (
-              <span style={{ fontSize: '10px', color: 'var(--text3)' }}>
-                Rate: 1 USD = {selectedCountry.symbol}{pajRates.offRampRate.rate.toLocaleString()}
-              </span>
-            )}
-          </div>
 
-          {p2pError && (
-            <div style={{
-              background: 'rgba(239, 68, 68, 0.08)',
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              borderRadius: '8px',
-              padding: '10px 12px',
-              fontSize: '11px',
-              color: '#f87171',
-              marginBottom: '12px',
-              textAlign: 'left',
-              lineHeight: '1.4'
-            }}>
-              ✕ {p2pError}
-            </div>
-          )}
-
-          {/* Submit button */}
-          <button
-            className="send-btn"
-            onClick={handleSubmit}
-            disabled={submitting || !canTransact}
-            style={{ opacity: (submitting || !canTransact) ? 0.6 : 1, cursor: (submitting || !canTransact) ? 'not-allowed' : 'pointer' }}
-          >
-            {submitting && <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />}
-            {submitting ? 'Processing...' : (!canTransact ? 'Payout Gateway Offline' : 'Send')}
-          </button>
+            {/* Submit button */}
+            <button
+              className="send-btn"
+              onClick={handleSubmit}
+              disabled={submitting || !isFormValid}
+              style={{ opacity: (submitting || !isFormValid) ? 0.6 : 1, cursor: (submitting || !isFormValid) ? 'not-allowed' : 'pointer' }}
+            >
+              {submitting && <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />}
+              {submitting ? 'Processing...' : (!isLiveRoute || apiError ? 'Payout Gateway Offline' : 'Send')}
+            </button>
         </>
       ) ) : (
         /* ── Coming soon ── */
