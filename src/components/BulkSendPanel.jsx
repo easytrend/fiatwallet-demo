@@ -86,10 +86,16 @@ function verifyTransactionIntegrity(transaction, expectedTransfers) {
           amount += BigInt(ix.data[idx + 1]) << BigInt(idx * 8);
         }
 
-        const match = expectedTransfers.find(expected =>
-          expected.mint === mint &&
-          expected.amountBaseUnits === amount
-        );
+        const match = expectedTransfers.find(expected => {
+          if (expected.mint !== mint || expected.amountBaseUnits !== amount) return false;
+          const expectedATA = getAssociatedTokenAddressSync(
+            new PublicKey(mint),
+            new PublicKey(expected.recipient),
+            false,
+            ix.programId
+          ).toBase58();
+          return destinationATA === expectedATA;
+        });
 
         if (!match) {
           throw new Error(`Transaction integrity violation: Unexpected token transfer of ${amount} units for mint ${mint}.`);

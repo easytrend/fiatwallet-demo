@@ -203,16 +203,22 @@ function verifyTransactionIntegrity(transaction, expectedTransfers, expectedSign
       // Decode decimals (u8, byte 9)
       const decimals = ix.data[9];
 
-      // Step 3 — match against expectedTransfers (mint + amount must both match)
-      const match = expectedTransfers.find(expected =>
-        expected.mint === mint &&
-        expected.amountBaseUnits === amount
-      );
+      // Step 3 — match against expectedTransfers (mint + amount + destination ATA must all match)
+      const match = expectedTransfers.find(expected => {
+        if (expected.mint !== mint || expected.amountBaseUnits !== amount) return false;
+        const expectedATA = getAssociatedTokenAddressSync(
+          new PublicKey(mint),
+          new PublicKey(expected.recipient),
+          false,
+          ix.programId
+        ).toBase58();
+        return destinationATA === expectedATA;
+      });
 
       if (!match) {
         throw new Error(
           `Transaction integrity violation: No expected transfer matches ` +
-          `mint=${mint}, amount=${amount}. ` +
+          `mint=${mint}, amount=${amount}, destination=${destinationATA}. ` +
           `Possible token substitution or amount tampering.`
         );
       }
@@ -689,6 +695,7 @@ export default function App() {
       let senderATA = null;
       let needsAtaCreation = false;
       let solTransferLamports = 0n;
+      let amountUnits = 0n;
       let estimatedFee = 5000n;
 
       if (tokLive.symbol === 'SOL') {
@@ -768,7 +775,7 @@ export default function App() {
         const decimals = mintInfo.value.data.parsed.info.decimals;
 
         // Use safe BigInt integer math to avoid floating-point rounding errors
-        const amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
+        amountUnits = BigInt(Math.round(tokAmt * Math.pow(10, decimals)));
         if (amountUnits <= 0n) {
           throw new Error('Transfer amount must be greater than zero token units.');
         }
