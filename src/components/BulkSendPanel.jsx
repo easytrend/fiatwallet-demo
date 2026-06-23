@@ -229,6 +229,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
     setToast(null);
 
     try {
+      const existingATAs = new Set();
       // 0. Pre-validate rows with amounts but invalid domains
       const invalidRows = rows.filter(r => r.amount && !r.valid);
       if (invalidRows.length > 0) {
@@ -395,8 +396,13 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
         }
 
         let newAtasCount = 0;
-        accountsInfo.forEach(info => {
-          if (info === null) newAtasCount++;
+        receiverATAs.forEach((ata, index) => {
+          const info = accountsInfo[index];
+          if (info === null) {
+            newAtasCount++;
+          } else {
+            existingATAs.add(ata.toBase58());
+          }
         });
 
         // Query fresh SOL balance
@@ -436,7 +442,9 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           for (const rec of chunk) {
             const amountUnits = toBaseUnits(rec.tokAmt, decimals);
             const receiverATA = getAssociatedTokenAddressSync(mintPubkey, rec.pubkey, false, tokenProgramId);
-            tx.add(createAssociatedTokenAccountIdempotentInstruction(publicKey, receiverATA, rec.pubkey, mintPubkey, tokenProgramId));
+            if (!existingATAs.has(receiverATA.toBase58())) {
+              tx.add(createAssociatedTokenAccountIdempotentInstruction(publicKey, receiverATA, rec.pubkey, mintPubkey, tokenProgramId));
+            }
             tx.add(createTransferCheckedInstruction(senderATA, mintPubkey, receiverATA, publicKey, amountUnits, decimals));
           }
         }

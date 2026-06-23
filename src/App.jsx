@@ -781,15 +781,17 @@ export default function App() {
         }
 
         // Instruction 1: Idempotently create the receiver's ATA if it doesn't exist yet.
-        transaction.add(
-          createAssociatedTokenAccountIdempotentInstruction(
-            publicKey,      // payer of rent
-            receiverATA,    // ATA to create
-            finalRecipient, // owner of ATA
-            mintPubkey,     // mint
-            tokenProgramId  // Token-2022 or legacy
-          )
-        );
+        if (needsAtaCreation) {
+          transaction.add(
+            createAssociatedTokenAccountIdempotentInstruction(
+              publicKey,      // payer of rent
+              receiverATA,    // ATA to create
+              finalRecipient, // owner of ATA
+              mintPubkey,     // mint
+              tokenProgramId  // Token-2022 or legacy
+            )
+          );
+        }
 
         // Instruction 2: Transfer tokens using TransferChecked
         transaction.add(
