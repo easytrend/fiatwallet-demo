@@ -684,6 +684,18 @@ export default function P2PPanel({ connected, walletTokenList }) {
     accountName !== 'No Bank Match' &&
     !resolvingName;
 
+  const handleIncrement = () => {
+    const current = parseFloat(amount) || 0;
+    setAmount(String(current + 1));
+  };
+
+  const handleDecrement = () => {
+    const current = parseFloat(amount) || 0;
+    if (current > 0) {
+      setAmount(String(Math.max(0, current - 1)));
+    }
+  };
+
   // ── Submit handler ────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     setP2pError(null);
@@ -1140,32 +1152,71 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 <div className="field-label">AMOUNT</div>
                 <div className="amount-block" style={{ marginTop: '4px', opacity: canTransact ? 1 : 0.6 }}>
                   <div className="amount-top" style={{ padding: '8px 12px' }}>
-                    <div className="amount-num-wrap" style={{ display: 'flex', alignItems: 'center', width: '100%', gap: '8px' }}>
-                      <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '15px' }}>
-                        {selectedCountry.symbol}
-                      </span>
-                      <input
-                        className="amount-num"
-                        type="number"
-                        placeholder="0"
-                        value={amount}
-                        onChange={e => setAmount(e.target.value)}
-                        disabled={!canTransact}
-                        style={{ fontSize: '15px' }}
-                      />
-                      {liveSelectedToken && liveSelectedToken.balance > 0 && (
-                        <button
-                          className="max-btn"
-                          type="button"
-                          onClick={() => {
-                            const fiatMax = liveSelectedToken.balance * ngnRate;
-                            setAmount(fiatMax.toFixed(2));
-                          }}
+                    <div className="amount-num-wrap">
+                      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', width: '100%', gap: '8px' }}>
+                        <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '15px' }}>
+                          {selectedCountry.symbol}
+                        </span>
+                        <input
+                          className="amount-num"
+                          type="number"
+                          placeholder="0"
+                          value={amount}
+                          onChange={e => setAmount(e.target.value)}
                           disabled={!canTransact}
-                        >
-                          MAX
-                        </button>
-                      )}
+                          style={{ fontSize: '15px', flex: 1 }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginLeft: 'auto' }}>
+                          <button
+                            type="button"
+                            onClick={handleIncrement}
+                            disabled={!canTransact}
+                            style={{
+                              background: 'rgba(255,255,255,0.06)',
+                              border: '1px solid var(--border)',
+                              borderRadius: '4px',
+                              color: 'white',
+                              cursor: 'pointer',
+                              padding: '2px 6px',
+                              fontSize: '9px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              lineHeight: 1,
+                              height: '16px',
+                              transition: 'background 0.2s',
+                            }}
+                            onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.12)'}
+                            onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.06)'}
+                          >
+                            ▲
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleDecrement}
+                            disabled={!canTransact}
+                            style={{
+                              background: 'rgba(255,255,255,0.06)',
+                              border: '1px solid var(--border)',
+                              borderRadius: '4px',
+                              color: 'white',
+                              cursor: 'pointer',
+                              padding: '2px 6px',
+                              fontSize: '9px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              lineHeight: 1,
+                              height: '16px',
+                              transition: 'background 0.2s',
+                            }}
+                            onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.12)'}
+                            onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.06)'}
+                          >
+                            ▼
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <div className="amount-divider" />
