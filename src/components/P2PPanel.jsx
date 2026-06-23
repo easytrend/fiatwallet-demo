@@ -272,13 +272,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
         setAuthStep('input_email');
       }
 
-      // Restore bank details
-      const cachedBank = localStorage.getItem(`paj_bank_name_${key}`);
-      const cachedAcc = localStorage.getItem(`paj_account_number_${key}`);
-      const cachedName = localStorage.getItem(`paj_account_name_${key}`);
-      if (cachedBank) setSelectedBank(cachedBank);
-      if (cachedAcc) setAccountNumber(cachedAcc);
-      if (cachedName) setAccountName(cachedName);
     } else {
       setSelectedBank('Choose Bank');
       setAccountNumber('');
@@ -963,19 +956,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
         sig,
       });
       setShowSuccess(true);
-      // Clear form fields AND clear localStorage bank cache so restore useEffect
-      // does not re-fill them. They will be re-cached on next successful resolution.
+      // Clear form fields in the UI. Keep bank cache in localStorage so that
+      // the user can trigger autofill by typing the first 4 digits of the account number later.
       setAmount('');
       setAccountNumber('');
       setAccountName('');
       setSelectedBank('Choose Bank');
-      if (publicKey) {
-        const wKey = publicKey.toBase58();
-        localStorage.removeItem(`paj_bank_name_${wKey}`);
-        localStorage.removeItem(`paj_account_number_${wKey}`);
-        localStorage.removeItem(`paj_account_name_${wKey}`);
-        localStorage.removeItem(`paj_bank_id_${wKey}`);
-      }
       setTimeout(loadPayoutLogs, 2000);
     } catch (err) {
       console.error('Transaction failed:', err);
