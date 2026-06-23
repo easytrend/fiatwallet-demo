@@ -530,7 +530,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           const key = publicKey.toBase58();
           localStorage.setItem(`paj_sessionToken_${key}`, res.token);
           localStorage.setItem(`paj_sessionEmail_${key}`, emailInput.trim());
-          const expiryTime = Date.now() + 24 * 60 * 60 * 1000; // 24 Hours
+          const expiryTime = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 Days
           localStorage.setItem(`paj_sessionExpiry_${key}`, String(expiryTime));
         }
       } else {
