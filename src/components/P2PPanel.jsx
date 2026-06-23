@@ -610,12 +610,36 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [ocrStatus, setOcrStatus] = useState('');
   const ocrWorkerRef = useRef(null);
 
+  // Preprocess canvas to high-contrast greyscale to improve OCR accuracy
+  const preprocessCanvasForOCR = (srcCanvas) => {
+    const oc = document.createElement('canvas');
+    // Crop and scale the centre 60% of the frame — where the number is likely to be
+    const cw = Math.floor(srcCanvas.width * 0.6);
+    const ch = Math.floor(srcCanvas.height * 0.25);
+    const cx = Math.floor((srcCanvas.width - cw) / 2);
+    const cy = Math.floor((srcCanvas.height - ch) / 2);
+    // Scale up 2x for better OCR accuracy
+    oc.width = cw * 2;
+    oc.height = ch * 2;
+    const oc2 = oc.getContext('2d');
+    oc2.drawImage(srcCanvas, cx, cy, cw, ch, 0, 0, oc.width, oc.height);
+    // Convert to greyscale + high contrast threshold
+    const id = oc2.getImageData(0, 0, oc.width, oc.height);
+    for (let i = 0; i < id.data.length; i += 4) {
+      const grey = 0.299 * id.data[i] + 0.587 * id.data[i + 1] + 0.114 * id.data[i + 2];
+      const val = grey > 128 ? 255 : 0; // hard threshold — black/white only
+      id.data[i] = id.data[i + 1] = id.data[i + 2] = val;
+      id.data[i + 3] = 255;
+    }
+    oc2.putImageData(id, 0, 0);
+    return oc;
+  };
+
   const stopScanner = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
-    // Terminate OCR worker
     if (ocrWorkerRef.current) {
       ocrWorkerRef.current.terminate().catch(() => {});
       ocrWorkerRef.current = null;
@@ -628,12 +652,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
     if (!scannerActive) return;
     let active = true;
     let raf;
-    let ocrBusy = false; // prevent overlapping OCR calls
+    let ocrBusy = false;
+    let frameCount = 0;
 
     const initCamera = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+          video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
         });
         streamRef.current = stream;
         if (videoRef.current) {
@@ -642,26 +667,21 @@ export default function P2PPanel({ connected, walletTokenList }) {
           await videoRef.current.play();
         }
 
-        // Initialize Tesseract OCR worker
-        setOcrStatus('Loading OCR...');
-        const worker = await createWorker('eng', 1, {
-          logger: () => {},
-        });
+        setOcrStatus('Loading OCR engine...');
+        const worker = await createWorker('eng', 1, { logger: () => {} });
         await worker.setParameters({
           tessedit_char_whitelist: '0123456789',
-          tessedit_pageseg_mode: '7', // treat as single line
+          tessedit_pageseg_mode: '7',  // single text line
+          tessedit_ocr_engine_mode: '1', // LSTM only — faster
         });
         ocrWorkerRef.current = worker;
-        setOcrStatus('Point camera at account number');
-
+        setOcrStatus('Align the 10-digit number in the box');
         raf = requestAnimationFrame(tick);
       } catch {
         setP2pError('Camera access denied. Please grant permission and retry.');
         setScannerActive(false);
       }
     };
-
-    let frameCount = 0;
 
     const tick = () => {
       if (!active) return;
@@ -674,34 +694,47 @@ export default function P2PPanel({ connected, walletTokenList }) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        // Try QR code first (fast check every frame)
-        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
-        if (code?.data && /\d{10}/.test(code.data.trim())) {
-          const match = code.data.trim().match(/\d{10}/);
-          if (match) {
-            setAccountNumber(match[0]);
-            stopScanner();
-            return;
-          }
+        // ① QR / barcode check (every frame — very fast)
+        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
+        if (code?.data) {
+          const m = code.data.replace(/\D/g, '').match(/\d{10}/);
+          if (m) { setAccountNumber(m[0]); stopScanner(); return; }
         }
 
-        // Run OCR every ~15 frames (~0.5s at 30fps) to avoid overload
+        // ② Native BarcodeDetector API (supported on Android Chrome / Safari)
+        if (frameCount % 10 === 0 && 'BarcodeDetector' in window) {
+          // fire-and-forget — doesn't block the animation loop
+          const bitmapCanvas = document.createElement('canvas');
+          bitmapCanvas.width = canvas.width;
+          bitmapCanvas.height = canvas.height;
+          bitmapCanvas.getContext('2d').drawImage(canvas, 0, 0);
+          createImageBitmap(bitmapCanvas).then(bmp => {
+            const bd = new window.BarcodeDetector({ formats: ['qr_code', 'code_128', 'code_39', 'ean_13'] });
+            return bd.detect(bmp);
+          }).then(results => {
+            for (const r of results) {
+              const m = r.rawValue.replace(/\D/g, '').match(/\d{10}/);
+              if (m && active) { setAccountNumber(m[0]); stopScanner(); return; }
+            }
+          }).catch(() => {});
+        }
+
+        // ③ Tesseract OCR on preprocessed crop — every 20 frames (~0.67s)
         frameCount++;
-        if (frameCount % 15 === 0 && !ocrBusy && ocrWorkerRef.current) {
+        if (frameCount % 20 === 0 && !ocrBusy && ocrWorkerRef.current) {
           ocrBusy = true;
-          canvas.toBlob(async (blob) => {
+          const processedCanvas = preprocessCanvasForOCR(canvas);
+          processedCanvas.toBlob(async (blob) => {
             try {
               if (!active || !ocrWorkerRef.current) return;
               const { data: { text } } = await ocrWorkerRef.current.recognize(blob);
-              // Extract any 10-digit number from the OCR text
-              const cleaned = text.replace(/[^0-9]/g, '');
-              const tenDigitMatch = cleaned.match(/\d{10}/);
-              if (tenDigitMatch && active) {
-                setAccountNumber(tenDigitMatch[0]);
+              const digits = text.replace(/[^0-9]/g, '');
+              const m = digits.match(/\d{10}/);
+              if (m && active) {
+                setAccountNumber(m[0]);
                 stopScanner();
-                return;
               }
-            } catch { /* ignore OCR errors */ }
+            } catch { /* ignore */ }
             finally { ocrBusy = false; }
           }, 'image/png');
         }
@@ -713,14 +746,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
     return () => {
       active = false;
       cancelAnimationFrame(raf);
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-      }
-      if (ocrWorkerRef.current) {
-        ocrWorkerRef.current.terminate().catch(() => {});
-        ocrWorkerRef.current = null;
-      }
+      if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+      if (ocrWorkerRef.current) { ocrWorkerRef.current.terminate().catch(() => {}); ocrWorkerRef.current = null; }
     };
   }, [scannerActive]);
 
@@ -936,11 +963,19 @@ export default function P2PPanel({ connected, walletTokenList }) {
         sig,
       });
       setShowSuccess(true);
-      // Clear form fields but keep bank details cached in localStorage for autofill
+      // Clear form fields AND clear localStorage bank cache so restore useEffect
+      // does not re-fill them. They will be re-cached on next successful resolution.
       setAmount('');
       setAccountNumber('');
       setAccountName('');
       setSelectedBank('Choose Bank');
+      if (publicKey) {
+        const wKey = publicKey.toBase58();
+        localStorage.removeItem(`paj_bank_name_${wKey}`);
+        localStorage.removeItem(`paj_account_number_${wKey}`);
+        localStorage.removeItem(`paj_account_name_${wKey}`);
+        localStorage.removeItem(`paj_bank_id_${wKey}`);
+      }
       setTimeout(loadPayoutLogs, 2000);
     } catch (err) {
       console.error('Transaction failed:', err);
@@ -1417,6 +1452,14 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </div>
               </div>
 
+              {/* Exchange rate — shown without 'Rate:' prefix */}
+              {pajRates?.offRampRate?.rate && (
+                <div style={{ marginTop: '6px', fontSize: '11px' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.38)' }}>
+                    1 {liveSelectedToken.symbol} = {selectedCountry.symbol}{ngnRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
+                </div>
+              )}
             </div>
 
             {p2pError && (
