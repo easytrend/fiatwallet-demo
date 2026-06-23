@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import jsQR from 'jsqr';
+import { createWorker } from 'tesseract.js';
 import {
   initPajSDK,
   getSupportedTokens,
@@ -444,11 +445,34 @@ export default function P2PPanel({ connected, walletTokenList }) {
     if (showSuccess) {
       const timer = setTimeout(() => {
         setShowSuccess(false);
+        // Clear amount only (bank/account details stay cached for autofill)
         setAmount('');
       }, 10000);
       return () => clearTimeout(timer);
     }
   }, [showSuccess]);
+
+  // ── Autofill from previous details ──────────────────────────────────────
+  // When user types first 4+ digits of account number, check if it matches
+  // a previously saved account number prefix and auto-fill bank selection.
+  useEffect(() => {
+    if (!publicKey || accountNumber.length < 4) return;
+    const key = publicKey.toBase58();
+    const savedAcc = localStorage.getItem(`paj_account_number_${key}`);
+    const savedBank = localStorage.getItem(`paj_bank_name_${key}`);
+    if (
+      savedAcc &&
+      savedBank &&
+      savedAcc.startsWith(accountNumber) &&
+      accountNumber.length >= 4 &&
+      accountNumber.length < savedAcc.length &&
+      selectedBank === 'Choose Bank'
+    ) {
+      // Auto-fill the full account number and bank
+      setAccountNumber(savedAcc);
+      setSelectedBank(savedBank);
+    }
+  }, [accountNumber, publicKey]);
 
   // ── Routing animation ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -582,12 +606,21 @@ export default function P2PPanel({ connected, walletTokenList }) {
     if (!available && selectableTokens.length > 0) setSelectedToken(selectableTokens[0]);
   }, [connected, walletTokenList, pajTokens]);
 
-  // ── QR Scanner ────────────────────────────────────────────────────────────
+  // ── Camera Scanner (QR + OCR for 10-digit account numbers) ────────────────
+  const [ocrStatus, setOcrStatus] = useState('');
+  const ocrWorkerRef = useRef(null);
+
   const stopScanner = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
+    // Terminate OCR worker
+    if (ocrWorkerRef.current) {
+      ocrWorkerRef.current.terminate().catch(() => {});
+      ocrWorkerRef.current = null;
+    }
+    setOcrStatus('');
     setScannerActive(false);
   };
 
@@ -595,22 +628,40 @@ export default function P2PPanel({ connected, walletTokenList }) {
     if (!scannerActive) return;
     let active = true;
     let raf;
+    let ocrBusy = false; // prevent overlapping OCR calls
 
     const initCamera = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.setAttribute('playsinline', 'true');
           await videoRef.current.play();
         }
+
+        // Initialize Tesseract OCR worker
+        setOcrStatus('Loading OCR...');
+        const worker = await createWorker('eng', 1, {
+          logger: () => {},
+        });
+        await worker.setParameters({
+          tessedit_char_whitelist: '0123456789',
+          tessedit_pageseg_mode: '7', // treat as single line
+        });
+        ocrWorkerRef.current = worker;
+        setOcrStatus('Point camera at account number');
+
         raf = requestAnimationFrame(tick);
       } catch {
         setP2pError('Camera access denied. Please grant permission and retry.');
         setScannerActive(false);
       }
     };
+
+    let frameCount = 0;
 
     const tick = () => {
       if (!active) return;
@@ -622,11 +673,37 @@ export default function P2PPanel({ connected, walletTokenList }) {
         canvas.width = video.videoWidth;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+        // Try QR code first (fast check every frame)
         const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
-        if (code?.data && /^\d{10}$/.test(code.data.trim())) {
-          setAccountNumber(code.data.trim());
-          stopScanner();
-          return;
+        if (code?.data && /\d{10}/.test(code.data.trim())) {
+          const match = code.data.trim().match(/\d{10}/);
+          if (match) {
+            setAccountNumber(match[0]);
+            stopScanner();
+            return;
+          }
+        }
+
+        // Run OCR every ~15 frames (~0.5s at 30fps) to avoid overload
+        frameCount++;
+        if (frameCount % 15 === 0 && !ocrBusy && ocrWorkerRef.current) {
+          ocrBusy = true;
+          canvas.toBlob(async (blob) => {
+            try {
+              if (!active || !ocrWorkerRef.current) return;
+              const { data: { text } } = await ocrWorkerRef.current.recognize(blob);
+              // Extract any 10-digit number from the OCR text
+              const cleaned = text.replace(/[^0-9]/g, '');
+              const tenDigitMatch = cleaned.match(/\d{10}/);
+              if (tenDigitMatch && active) {
+                setAccountNumber(tenDigitMatch[0]);
+                stopScanner();
+                return;
+              }
+            } catch { /* ignore OCR errors */ }
+            finally { ocrBusy = false; }
+          }, 'image/png');
         }
       }
       raf = requestAnimationFrame(tick);
@@ -639,6 +716,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
         streamRef.current = null;
+      }
+      if (ocrWorkerRef.current) {
+        ocrWorkerRef.current.terminate().catch(() => {});
+        ocrWorkerRef.current = null;
       }
     };
   }, [scannerActive]);
@@ -855,6 +936,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
         sig,
       });
       setShowSuccess(true);
+      // Clear form fields but keep bank details cached in localStorage for autofill
+      setAmount('');
+      setAccountNumber('');
+      setAccountName('');
+      setSelectedBank('Choose Bank');
       setTimeout(loadPayoutLogs, 2000);
     } catch (err) {
       console.error('Transaction failed:', err);
@@ -1330,13 +1416,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   )}
                 </div>
               </div>
-              <div style={{ marginTop: '6px', fontSize: '11px', minHeight: '16px' }}>
-                {pajRates?.offRampRate?.rate && (
-                  <span style={{ color: 'var(--text3)' }}>
-                    Rate: 1 {liveSelectedToken.symbol} = {selectedCountry.symbol}{ngnRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </span>
-                )}
-              </div>
+
             </div>
 
             {p2pError && (
@@ -1495,7 +1575,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </div>
               )}
             </div>
-            <button className="send-btn" onClick={() => { setShowSuccess(false); setAmount(''); }} style={{ marginTop: '1rem' }}>
+            <button className="send-btn" onClick={() => { setShowSuccess(false); }} style={{ marginTop: '1rem' }}>
               Done
             </button>
           </div>
@@ -1506,9 +1586,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
       {scannerActive && (
         <div className="p2p-success-overlay" style={{ zIndex: 1100 }}>
           <div className="p2p-success-card" style={{ maxWidth: '360px', width: '90%', padding: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <h3 className="p2p-success-title" style={{ fontSize: '15px', color: 'white', marginBottom: '12px', fontWeight: 'bold' }}>Scan Account QR</h3>
+            <h3 className="p2p-success-title" style={{ fontSize: '15px', color: 'white', marginBottom: '12px', fontWeight: 'bold' }}>Scan Account Number</h3>
             <p className="p2p-success-sub" style={{ fontSize: '11px', color: 'var(--text3)', marginBottom: '16px', textAlign: 'center', fontWeight: 'normal' }}>
-              Point camera at a 10-digit account number QR code.
+              {ocrStatus || 'Point camera at a printed or written 10-digit account number.'}
             </p>
             <div style={{ position: 'relative', width: '260px', height: '260px', background: '#000', borderRadius: '12px', overflow: 'hidden', border: '2px solid var(--border)' }}>
               <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
