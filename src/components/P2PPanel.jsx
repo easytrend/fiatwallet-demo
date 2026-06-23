@@ -1146,135 +1146,172 @@ export default function P2PPanel({ connected, walletTokenList }) {
               )}
             </div>
 
-            {/* Amount + Token row */}
-            <div style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
-              <div style={{ flex: 1 }}>
-                <div className="field-label">AMOUNT</div>
-                <div className="amount-block" style={{ marginTop: '4px', opacity: canTransact ? 1 : 0.6 }}>
-                  <div className="amount-top" style={{ padding: '8px 12px' }}>
-                    <div className="amount-num-wrap">
-                      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', width: '100%', gap: '8px' }}>
-                        <span style={{ color: 'var(--text2)', fontWeight: 700, fontSize: '15px' }}>
-                          {selectedCountry.symbol}
-                        </span>
-                        <input
-                          className="amount-num"
-                          type="number"
-                          placeholder="0"
-                          value={amount}
-                          onChange={e => setAmount(e.target.value)}
-                          disabled={!canTransact}
-                          style={{ fontSize: '15px', flex: 1 }}
-                        />
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginLeft: 'auto' }}>
-                          <button
-                            type="button"
-                            onClick={handleIncrement}
-                            disabled={!canTransact}
-                            style={{
-                              background: 'rgba(255,255,255,0.06)',
-                              border: '1px solid var(--border)',
-                              borderRadius: '4px',
-                              color: 'white',
-                              cursor: 'pointer',
-                              padding: '2px 6px',
-                              fontSize: '9px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              lineHeight: 1,
-                              height: '16px',
-                              transition: 'background 0.2s',
-                            }}
-                            onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.12)'}
-                            onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.06)'}
-                          >
-                            ▲
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleDecrement}
-                            disabled={!canTransact}
-                            style={{
-                              background: 'rgba(255,255,255,0.06)',
-                              border: '1px solid var(--border)',
-                              borderRadius: '4px',
-                              color: 'white',
-                              cursor: 'pointer',
-                              padding: '2px 6px',
-                              fontSize: '9px',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              lineHeight: 1,
-                              height: '16px',
-                              transition: 'background 0.2s',
-                            }}
-                            onMouseEnter={e => e.target.style.background = 'rgba(255,255,255,0.12)'}
-                            onMouseLeave={e => e.target.style.background = 'rgba(255,255,255,0.06)'}
-                          >
-                            ▼
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="amount-divider" />
-                  <div className="amount-bottom" style={{ padding: '6px 12px' }}>
-                    <span className="amount-converted" style={{ fontSize: '11px' }}>
-                      {routingState === 'routing' || routingState === 'loading_market' ? (
-                        <span style={{ color: 'var(--text3)', fontStyle: 'italic' }}>
-                          <span className="p2p-mini-spinner" /> Routing...
-                        </span>
-                      ) : (
-                        `≈ ${estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol}`
-                      )}
+            {/* Amount + Token Row */}
+            <div style={{ marginBottom: '0.95rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                <div className="field-label" style={{ marginBottom: 0, textTransform: 'none', fontSize: '13px', fontWeight: '500', color: 'rgba(255,255,255,0.6)', letterSpacing: 'normal' }}>
+                  Amount
+                </div>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'rgba(255,255,255,0.4)', cursor: 'help' }} title="P2P Settlement Off-ramp amount">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+              </div>
+              <div className="amount-block" style={{ marginTop: '4px', opacity: canTransact ? 1 : 0.6, padding: '14px 16px' }}>
+                {/* Top Row: Input & Token Selector */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  {/* Left Part: Input & symbol */}
+                  <div style={{ display: 'flex', flex: 1, flexDirection: 'row', alignItems: 'center', gap: '6px' }}>
+                    <span style={{
+                      color: amount ? 'white' : 'rgba(255, 255, 255, 0.38)',
+                      fontWeight: '500',
+                      fontSize: '32px',
+                      fontFamily: 'var(--ff)',
+                      lineHeight: 1,
+                      userSelect: 'none'
+                    }}>
+                      {selectedCountry.symbol}
                     </span>
+                    <input
+                      className="amount-num"
+                      type="number"
+                      placeholder="0"
+                      value={amount}
+                      onChange={e => setAmount(e.target.value)}
+                      disabled={!canTransact}
+                      style={{
+                        fontSize: '32px',
+                        fontWeight: '500',
+                        fontFamily: 'var(--ff)',
+                        width: '100%',
+                        flex: 1,
+                        color: 'white',
+                        padding: 0,
+                        lineHeight: 1,
+                      }}
+                    />
+                  </div>
+
+                  {/* Right Part: Token selector dropdown */}
+                  <div className="drop-wrap" style={{ position: 'relative' }}>
+                    <div
+                      className="input-wrap"
+                      onClick={() => { if (canTransact) setTokenOpen(!tokenOpen); }}
+                      style={{
+                        cursor: canTransact ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '24px',
+                        padding: '6px 12px',
+                        fontWeight: 600,
+                        color: 'white',
+                        userSelect: 'none',
+                        transition: 'background 0.2s, border-color 0.2s',
+                      }}
+                      onMouseEnter={(e) => { if (canTransact) e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+                      onMouseLeave={(e) => { if (canTransact) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+                    >
+                      {liveSelectedToken.logoURI ? (
+                        <img src={liveSelectedToken.logoURI} alt={liveSelectedToken.symbol} style={{ width: '18px', height: '18px', borderRadius: '50%' }} />
+                      ) : (
+                        <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                          {liveSelectedToken.symbol.slice(0, 2)}
+                        </div>
+                      )}
+                      <span style={{ fontSize: '13px', fontWeight: '500' }}>{liveSelectedToken.symbol}</span>
+                      <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'rgba(255,255,255,0.6)', marginLeft: '2px' }}>
+                        <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+
+                    {tokenOpen && (
+                      <div className="drop-menu" style={{ right: 0, minWidth: '220px', zIndex: 100 }}>
+                        {selectableTokens.map(t => (
+                          <div
+                            key={t.mint || t.symbol}
+                            className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                            onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
+                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px' }}
+                          >
+                            {t.logoURI ? (
+                              <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                            ) : (
+                              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                                {t.symbol.slice(0, 2)}
+                              </div>
+                            )}
+                            <span className="di-code" style={{ marginLeft: 0 }}>{t.symbol}</span>
+                            {t.balance > 0 && (
+                              <span className="di-name" style={{ marginLeft: 'auto' }}>
+                                {t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div style={{ marginTop: '6px', fontSize: '11px', minHeight: '16px' }}>
-                  {pajRates?.offRampRate?.rate && (
-                    <span style={{ color: 'var(--text3)' }}>
-                      Rate: 1 {liveSelectedToken.symbol} = {selectedCountry.symbol}{ngnRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </span>
+
+                {/* Bottom Row: Estimated & Wallet Balance */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {/* Estimated crypto quantity */}
+                  <span className="amount-converted" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.38)', fontFamily: 'var(--ff)' }}>
+                    {routingState === 'routing' || routingState === 'loading_market' ? (
+                      <span style={{ color: 'rgba(255,255,255,0.38)', fontStyle: 'italic' }}>
+                        <span className="p2p-mini-spinner" /> Routing...
+                      </span>
+                    ) : (
+                      amount && Number(amount) > 0
+                        ? `≈ ${estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol}`
+                        : `≈ ${liveSelectedToken.symbol}`
+                    )}
+                  </span>
+
+                  {/* Token balance with small MAX button before the quantity */}
+                  {liveSelectedToken.balance != null && (
+                    <div style={{ display: 'flex', alignItems: 'center', fontSize: '12px', color: 'rgba(255, 255, 255, 0.38)', fontWeight: 'normal', fontFamily: 'var(--ff)' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const fiatMax = liveSelectedToken.balance * ngnRate;
+                          setAmount(fiatMax.toFixed(2));
+                        }}
+                        disabled={!canTransact}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--lime)',
+                          cursor: 'pointer',
+                          padding: 0,
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          letterSpacing: '0.05em',
+                          marginRight: '6px',
+                          opacity: canTransact ? 0.85 : 0.5,
+                          transition: 'opacity 0.2s',
+                        }}
+                        onMouseEnter={(e) => { if (canTransact) e.currentTarget.style.opacity = '1'; }}
+                        onMouseLeave={(e) => { if (canTransact) e.currentTarget.style.opacity = '0.85'; }}
+                      >
+                        MAX
+                      </button>
+                      <span>
+                        {liveSelectedToken.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} {liveSelectedToken.symbol}
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>
-
-              <div style={{ flex: '0 0 130px' }}>
-                <div className="field-label">Token</div>
-                <div className="drop-wrap">
-                  <div
-                    className="input-wrap"
-                    onClick={() => { if (canTransact) setTokenOpen(!tokenOpen); }}
-                    style={{ cursor: canTransact ? 'pointer' : 'not-allowed', justifyContent: 'space-between', opacity: canTransact ? 1 : 0.6 }}
-                  >
-                    <strong style={{ color: 'white' }}>{liveSelectedToken.symbol}</strong>
-                    <span style={{ color: 'var(--text3)', fontSize: '11px' }}>▼</span>
-                  </div>
-                  {tokenOpen && (
-                    <div className="drop-menu" style={{ right: 0, minWidth: '260px' }}>
-                      {selectableTokens.map(t => (
-                        <div
-                          key={t.mint || t.symbol}
-                          className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
-                          onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
-                        >
-                          {t.logoURI
-                            ? <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
-                            : <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>{t.symbol.slice(0, 2)}</div>
-                          }
-                          <span className="di-code" style={{ marginLeft: '8px' }}>{t.symbol}</span>
-                          {t.balance > 0 && <span className="di-name">{t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {liveSelectedToken.balance != null && (
-                  <div style={{ fontSize: '11px', color: 'var(--text2)', fontWeight: 600, marginTop: '8px' }}>
-                    {liveSelectedToken.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} {liveSelectedToken.symbol}
-                  </div>
+              <div style={{ marginTop: '6px', fontSize: '11px', minHeight: '16px' }}>
+                {pajRates?.offRampRate?.rate && (
+                  <span style={{ color: 'var(--text3)' }}>
+                    Rate: 1 {liveSelectedToken.symbol} = {selectedCountry.symbol}{ngnRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  </span>
                 )}
               </div>
             </div>
