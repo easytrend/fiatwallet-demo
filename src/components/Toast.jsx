@@ -11,7 +11,7 @@ import { useEffect, useRef } from 'react';
  *   onClose   – callback when dismissed
  *   duration  – ms before auto-close (default 5000)
  */
-export default function Toast({ type = 'success', title, message, link, onClose, duration = 5000 }) {
+export default function Toast({ type = 'success', title, message, link, onClose, duration = 10000 }) {
   const timerRef = useRef(null);
 
   useEffect(() => {

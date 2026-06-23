@@ -719,6 +719,21 @@ export default function SwapWidget({
   const hasAmount = parseFloat(inputAmount) > 0;
   const canSwap   = connected && hasAmount && !swapping && !!quote && !quoteLoading;
 
+  // Auto-dismiss errors and success messages after 10 seconds
+  useEffect(() => {
+    if (swapError) {
+      const timer = setTimeout(() => setSwapError(null), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [swapError]);
+
+  useEffect(() => {
+    if (swapSuccess) {
+      const timer = setTimeout(() => setSwapSuccess(null), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [swapSuccess]);
+
   // Close on Escape key
   useEffect(() => {
     if (!isOpen) return;

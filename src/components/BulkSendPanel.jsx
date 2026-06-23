@@ -180,6 +180,19 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
   const updateRow = (id,field,val) => setRows(r => r.map(x => x.id===id ? {...x,[field]:val,valid:field==='domain'?isValidEntry(val):x.valid,resolved:field==='domain'?null:x.resolved} : x));
   const applyGlobal = () => { if (globalAmt) setRows(r => r.map(x => ({...x, amount:globalAmt}))); };
 
+  // Auto-dismiss errorMsg after 10 seconds
+  useEffect(() => {
+    if (errorMsg) {
+      const timer = setTimeout(() => {
+        setErrorMsg('');
+        if (sendingState === 'error') {
+          setSendingState(null);
+        }
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorMsg, sendingState]);
+
   // Inline resolution for responsive feedback
   const [resolvingIds, setResolvingIds] = useState(new Set());
   useEffect(() => {

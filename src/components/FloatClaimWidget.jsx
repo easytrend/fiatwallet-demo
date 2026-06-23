@@ -226,6 +226,14 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
     }
   }, [connected, publicKey?.toString()]);
 
+  // Auto-dismiss local toast after 10 seconds
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
   // Check if wallet has no empty accounts or cashback left
   const isRealWalletClean = useMemo(() => {
     return connected && emptyAccounts.length === 0 && realCashback === 0;

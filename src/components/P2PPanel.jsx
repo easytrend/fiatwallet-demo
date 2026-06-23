@@ -212,6 +212,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [submitting, setSubmitting] = useState(false);
   const [apiError, setApiError] = useState(null);
   const [logError, setLogError] = useState(null);
+  const [p2pError, setP2pError] = useState(null);
 
   // ── UI State ─────────────────────────────────────────────────────────────
   const [countryOpen, setCountryOpen] = useState(false);
@@ -422,6 +423,36 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }
   }, [selectedCountry, mode]);
 
+  // ── Clear error on input changes ─────────────────────────────────────────
+  useEffect(() => {
+    setP2pError(null);
+  }, [amount, accountNumber, selectedBank, selectedToken, selectedCountry, mode]);
+
+  // ── Auto-dismiss errors and confirmations ──────────────────────────────
+  useEffect(() => {
+    if (p2pError) {
+      const timer = setTimeout(() => setP2pError(null), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [p2pError]);
+
+  useEffect(() => {
+    if (authError) {
+      const timer = setTimeout(() => setAuthError(null), 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [authError]);
+
+  useEffect(() => {
+    if (showSuccess) {
+      const timer = setTimeout(() => {
+        setShowSuccess(false);
+        setAmount('');
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [showSuccess]);
+
   // ── Routing animation ─────────────────────────────────────────────────────
   useEffect(() => {
     setRoutingState('routing');
@@ -545,7 +576,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         }
         raf = requestAnimationFrame(tick);
       } catch {
-        alert('Camera access denied. Please grant permission and retry.');
+        setP2pError('Camera access denied. Please grant permission and retry.');
         setScannerActive(false);
       }
     };
@@ -586,7 +617,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     try {
       const text = await navigator.clipboard.readText();
       if (/^\d+$/.test(text.trim())) setAccountNumber(text.trim());
-      else alert('Clipboard content is not a valid account number.');
+      else setP2pError('Clipboard content is not a valid account number.');
     } catch {
       const fb = prompt('Paste your account number here:');
       if (fb && /^\d+$/.test(fb.trim())) setAccountNumber(fb.trim());
@@ -612,14 +643,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // ── Submit handler ────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!isLiveRoute) { alert('This region/mode is not currently supported.'); return; }
-    if (!PAJCASH_API_KEY) { alert('PajCash API Key is not configured.'); return; }
-    if (!sessionToken) { alert('Please verify your email OTP session first.'); return; }
-    if (apiError) { alert(`PajCash API error: ${apiError}`); return; }
-    if (!connected || !publicKey) { alert('Please connect your Solana wallet first.'); return; }
-    if (!amount || parseFloat(amount) <= 0) { alert('Please enter a valid amount.'); return; }
-    if (!accountNumber) { alert('Please enter your bank account number.'); return; }
-    if (selectedBank === 'Choose Bank') { alert('Please select a bank.'); return; }
+    setP2pError(null);
+    if (!isLiveRoute) { setP2pError('This region/mode is not currently supported.'); return; }
+    if (!PAJCASH_API_KEY) { setP2pError('PajCash API Key is not configured.'); return; }
+    if (!sessionToken) { setP2pError('Please verify your email OTP session first.'); return; }
+    if (apiError) { setP2pError(`PajCash API error: ${apiError}`); return; }
+    if (!connected || !publicKey) { setP2pError('Please connect your Solana wallet first.'); return; }
+    if (!amount || parseFloat(amount) <= 0) { setP2pError('Please enter a valid amount.'); return; }
+    if (!accountNumber) { setP2pError('Please enter your bank account number.'); return; }
+    if (selectedBank === 'Choose Bank') { setP2pError('Please select a bank.'); return; }
 
     setSubmitting(true);
     try {
@@ -716,7 +748,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       }
 
       if (!confirmed) {
-        alert(`Transaction sent but not yet confirmed. Signature: ${sig}`);
+        setP2pError(`Transaction sent but not yet confirmed. Signature: ${sig}`);
         return;
       }
 
@@ -743,7 +775,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setTimeout(loadPayoutLogs, 2000);
     } catch (err) {
       console.error('Transaction failed:', err);
-      alert(`Transaction Failed: ${err.message}`);
+      setP2pError(err.message || 'Transaction failed');
       if (err.message?.toLowerCase().includes('session') || err.message?.toLowerCase().includes('expired') || err.message?.toLowerCase().includes('unauthorized') || err.message?.toLowerCase().includes('invalid token')) {
         handleLogoutSession();
       }
@@ -1131,6 +1163,22 @@ export default function P2PPanel({ connected, walletTokenList }) {
               </span>
             )}
           </div>
+
+          {p2pError && (
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              borderRadius: '8px',
+              padding: '10px 12px',
+              fontSize: '11px',
+              color: '#f87171',
+              marginBottom: '12px',
+              textAlign: 'left',
+              lineHeight: '1.4'
+            }}>
+              ✕ {p2pError}
+            </div>
+          )}
 
           {/* Submit button */}
           <button

@@ -576,6 +576,16 @@ export default function App() {
     }
   }, [connected]);
 
+  // Auto-dismiss walletError after 10 seconds
+  useEffect(() => {
+    if (walletError) {
+      const timer = setTimeout(() => {
+        setWalletError(null);
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [walletError]);
+
   // Separate domain lookup
   useEffect(() => {
     if (connected && publicKey) {
