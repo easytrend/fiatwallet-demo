@@ -324,6 +324,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
       .catch(e => {
         console.error('Failed to fetch banks:', e);
         setApiError(`PajCash API error: ${e.message || 'Connection failed'}.`);
+        if (e.message?.toLowerCase().includes('session') || e.message?.toLowerCase().includes('expired') || e.message?.toLowerCase().includes('unauthorized') || e.message?.toLowerCase().includes('invalid token')) {
+          handleLogoutSession();
+        }
       })
       .finally(() => setLoadingBanks(false));
   }, [isLiveRoute, sessionToken]);
@@ -356,6 +359,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
       .catch(e => {
         console.warn('Could not load payout history:', e);
         setLogError(e.message || 'Failed to load history.');
+        if (e.message?.toLowerCase().includes('session') || e.message?.toLowerCase().includes('expired') || e.message?.toLowerCase().includes('unauthorized') || e.message?.toLowerCase().includes('invalid token')) {
+          handleLogoutSession();
+        }
       })
       .finally(() => setLoadingLogs(false));
   };
@@ -392,7 +398,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
             localStorage.setItem(`paj_account_name_${key}`, name);
           }
         })
-        .catch(() => setAccountName(''))
+        .catch((err) => {
+          setAccountName('');
+          if (err?.message?.toLowerCase().includes('session') || err?.message?.toLowerCase().includes('expired') || err?.message?.toLowerCase().includes('unauthorized') || err?.message?.toLowerCase().includes('invalid token')) {
+            handleLogoutSession();
+          }
+        })
         .finally(() => setResolvingName(false));
     }, 800);
 
@@ -733,6 +744,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
     } catch (err) {
       console.error('Transaction failed:', err);
       alert(`Transaction Failed: ${err.message}`);
+      if (err.message?.toLowerCase().includes('session') || err.message?.toLowerCase().includes('expired') || err.message?.toLowerCase().includes('unauthorized') || err.message?.toLowerCase().includes('invalid token')) {
+        handleLogoutSession();
+      }
     } finally {
       setSubmitting(false);
     }
