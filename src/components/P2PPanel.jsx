@@ -313,11 +313,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // ── Load banks ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isLiveRoute || !sessionToken) return;
+    if (!isLiveRoute || !PAJCASH_API_KEY) return;
 
     setLoadingBanks(true);
     setApiError(null);
-    getBanks(sessionToken)
+    getBanks(PAJCASH_API_KEY)
       .then(list => {
         if (list?.length > 0) setApiBanks(list);
         else setApiError('PajCash returned an empty bank list. Please try again later.');
@@ -325,12 +325,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
       .catch(e => {
         console.error('Failed to fetch banks:', e);
         setApiError(`PajCash API error: ${e.message || 'Connection failed'}.`);
-        if (e.message?.toLowerCase().includes('session') || e.message?.toLowerCase().includes('expired') || e.message?.toLowerCase().includes('unauthorized') || e.message?.toLowerCase().includes('invalid token')) {
-          handleLogoutSession();
-        }
       })
       .finally(() => setLoadingBanks(false));
-  }, [isLiveRoute, sessionToken]);
+  }, [isLiveRoute, PAJCASH_API_KEY]);
 
   // ── Load rates ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -679,9 +676,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     selectedBank !== 'Choose Bank' &&
     !!accountName &&
     accountName !== 'No Bank Match' &&
-    !resolvingName &&
-    liveSelectedToken.balance != null &&
-    estCryptoAmount <= liveSelectedToken.balance;
+    !resolvingName;
 
   // ── Submit handler ────────────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -697,6 +692,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
     setSubmitting(true);
     try {
+      const balance = liveSelectedToken.balance || 0;
+      if (estCryptoAmount > balance) {
+        throw new Error(`Insufficient ${liveSelectedToken.symbol} balance. You have ${balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} but need ${estCryptoAmount.toFixed(4)} ${liveSelectedToken.symbol}.`);
+      }
+
       const bankObj = apiBanks.find(b => (b.name || b.bank_name || b) === selectedBank);
       const bankId = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
 
@@ -1130,7 +1130,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
             {/* Amount + Token row */}
             <div style={{ display: 'flex', gap: '16px', marginBottom: '0.95rem' }}>
-              <div style={{ flex: 1.4 }}>
+              <div style={{ flex: 1 }}>
                 <div className="field-label">AMOUNT</div>
                 <div className="amount-block" style={{ marginTop: '4px', opacity: canTransact ? 1 : 0.6 }}>
                   <div className="amount-top" style={{ padding: '8px 12px' }}>
@@ -1173,14 +1173,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
                         `≈ ${estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol}`
                       )}
                     </span>
-                    <div className="input-mode-toggle">
-                      <button className="imt-btn active" style={{ cursor: 'default', padding: '3px 8px', fontSize: '10px' }}>
-                        {selectedCountry.currency}
-                      </button>
-                      <button className="imt-btn" style={{ cursor: 'default', padding: '3px 8px', fontSize: '10px' }}>
-                        {liveSelectedToken.symbol}
-                      </button>
-                    </div>
                   </div>
                 </div>
                 <div style={{ marginTop: '6px', fontSize: '11px', minHeight: '16px' }}>
@@ -1192,7 +1184,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </div>
               </div>
 
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: '0 0 130px' }}>
                 <div className="field-label">Token</div>
                 <div className="drop-wrap">
                   <div
@@ -1225,7 +1217,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 {liveSelectedToken.balance != null && (
                   <div style={{ fontSize: '11px', color: 'var(--text2)', fontWeight: 600, marginTop: '8px' }}>
                     {liveSelectedToken.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} {liveSelectedToken.symbol}
-                    {liveSelectedToken.price > 0 && ` ($${(liveSelectedToken.balance * liveSelectedToken.price).toFixed(2)})`}
                   </div>
                 )}
               </div>
