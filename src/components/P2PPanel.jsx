@@ -538,7 +538,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // ── Selectable token list ─────────────────────────────────────────────────
   const selectableTokens = (() => {
     const list = pajTokens.length > 0
-      ? pajTokens
+      ? pajTokens.map(t => {
+          const walletToken = walletTokenList?.find(w => (w.mint && w.mint === t.mint) || w.symbol === t.symbol);
+          return {
+            ...t,
+            balance: walletToken ? walletToken.balance : 0,
+          };
+        })
       : (connected && walletTokenList?.length > 0 ? walletTokenList : DEFAULT_TOKENS);
     return list.filter(t => !t.chain || t.chain.toUpperCase() === 'SOLANA');
   })();
