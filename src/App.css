@@ -106,7 +106,7 @@ nav {
 .input-wrap input { flex:1; border:none; outline:none; font-size:15px; color:var(--text); background:transparent; font-family:var(--mono); }
 .input-wrap input::placeholder { color:var(--text3); font-family:var(--ff); font-size:14px; }
 .sol-icon { color:var(--text3); font-size:13px; font-family:var(--mono); }
-.amount-block { background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:11px; overflow:hidden; transition:border-color 0.2s; }
+.amount-block { background:rgba(255,255,255,0.04); border:1.5px solid var(--border); border-radius:11px; overflow:visible; transition:border-color 0.2s; }
 .amount-block:focus-within { border-color:rgba(163,230,53,0.4); }
 .amount-top { display:flex; align-items:center; padding:11px 14px; gap:8px; }
 .amount-num-wrap { flex:1; display:flex; flex-direction:column; }
