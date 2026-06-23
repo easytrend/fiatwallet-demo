@@ -854,13 +854,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
             marginBottom: '1.25rem',
             backdropFilter: 'blur(10px)'
           }}>
-            <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔐</div>
-            <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: 'white', marginBottom: '8px' }}>
-              Unlock Live Settlements
+            <h3 style={{ fontSize: '16px', fontWeight: 'bold', color: 'var(--lime)', marginBottom: '20px' }}>
+              Verify Your Email
             </h3>
-            <p style={{ fontSize: '12px', color: 'var(--text2)', marginBottom: '20px', lineHeight: '1.5' }}>
-              Verify your email to securely link bank payouts to your Solana wallet.
-            </p>
 
             {authError && (
               <div style={{
