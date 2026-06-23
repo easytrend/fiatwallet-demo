@@ -948,6 +948,7 @@ export default function App() {
           <img src={logoImg} alt="Fiatwallet Logo" className="nav-logo" />
           <div className="nav-links">
             <button className={`nav-link-btn ${activeTab === 'send' ? 'active' : ''}`} onClick={() => setActiveTab('send')}>Send</button>
+            <button className={`nav-link-btn ${activeTab === 'swap' ? 'active' : ''}`} onClick={() => setActiveTab('swap')}>Swap</button>
             <button className={`nav-link-btn ${activeTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveTab('p2p')}>P2P</button>
           </div>
         </div>

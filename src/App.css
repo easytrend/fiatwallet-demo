@@ -1672,13 +1672,19 @@ footer a { color:var(--lime); text-decoration:none; }
   .main.tab-p2p .p2p-card {
     display: block;
   }
+  .main.tab-swap .send-card {
+    display: none;
+  }
+  .main.tab-swap .swp-modal-overlay {
+    display: block !important;
+  }
   
   /* Swap widget desktop layout */
   .swp-float-pill {
     display: none !important;
   }
   .swp-modal-overlay {
-    display: block !important;
+    display: none !important;
     position: static !important;
     background: none !important;
     backdrop-filter: none !important;
