@@ -109,6 +109,39 @@ const getRelativeTime = (isoString) => {
   return `${days} day${days > 1 ? 's' : ''} ago`;
 };
 
+const getCleanNameForLog = (log) => {
+  if (!log) return 'Pending Confirmation…';
+  let name = '';
+  if (log.accountName && typeof log.accountName === 'string') {
+    name = log.accountName;
+  } else if (log.name && typeof log.name === 'string') {
+    name = log.name;
+  } else if (log.recipient && typeof log.recipient === 'string') {
+    const isSol = log.recipient.length >= 32 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(log.recipient);
+    if (!isSol) {
+      name = log.recipient;
+    }
+  }
+  const clean = name.trim();
+  return clean || log.bank || 'Payout';
+};
+
+const formatTransactionDate = (dateStr) => {
+  if (!dateStr) return 'Recent';
+  try {
+    const date = new Date(dateStr);
+    const day = date.getDate();
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = months[date.getMonth()];
+    const year = date.getFullYear();
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${day} ${month} ${year} · ${hours}:${minutes}`;
+  } catch (e) {
+    return 'Recent';
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -255,6 +288,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [showHistoryView, setShowHistoryView] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState(null); // log detail pop-up
+  const [copiedAccount, setCopiedAccount] = useState(false);
 
   // ── QR Scanner Refs ──────────────────────────────────────────────────────
   const [scannerActive, setScannerActive] = useState(false);
@@ -1844,111 +1878,444 @@ export default function P2PPanel({ connected, walletTokenList }) {
       )}
 
       {/* ── Success Modal (never auto-closes, user must click Done) ── */}
-      {showSuccess && successDetails && (
-        <div className="p2p-success-overlay">
-          <div className="p2p-success-card">
-            <div className="p2p-success-icon-wrap">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-            {/* Status label only — no title, no subtitle */}
-            <p style={{
-              fontSize: '18px', fontWeight: '700', margin: '0 0 1.25rem 0', textAlign: 'center',
-              color: isConfirmed(successDetails.status) ? 'var(--lime)' : isSettling(successDetails.status) ? '#eab308' : 'rgba(255,255,255,0.45)',
-            }}>
-              {isConfirmed(successDetails.status) ? 'Confirmed' : isSettling(successDetails.status) ? 'Settling…' : 'Pending'}
-            </p>
-            <div className="p2p-success-fields">
-              <div className="p2p-success-field"><span>Action:</span><strong>{successDetails.amount}</strong></div>
-              <div className="p2p-success-field"><span>Fiat Value:</span><strong>{successDetails.fiat}</strong></div>
-              <div className="p2p-success-field"><span>Bank:</span><strong>{successDetails.bank}</strong></div>
-              <div className="p2p-success-field"><span>Account:</span><strong>{successDetails.account}</strong></div>
-              <div className="p2p-success-field"><span>Recipient:</span><strong>{successDetails.name}</strong></div>
-              {successDetails.orderId && (
-                <div className="p2p-success-field">
-                  <span>Order ID:</span>
-                  <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '11px' }}>{successDetails.orderId}</strong>
+      {showSuccess && successDetails && (() => {
+        const parseFiatNum = (str) => {
+          if (!str) return 0;
+          const cleaned = str.replace(/[^\d.]/g, '');
+          return parseFloat(cleaned) || 0;
+        };
+        const fiatNum = typeof successDetails.fiat === 'number' ? successDetails.fiat : parseFiatNum(successDetails.fiat);
+        const fiatValStr = `${selectedCountry.symbol}${fiatNum.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+        const cryptoValStr = successDetails.amount;
+        const recipientName = successDetails.name ? successDetails.name.toUpperCase() : 'PENDING';
+        const accountNumber = successDetails.account || '—';
+        const bankName = successDetails.bank || '—';
+        const dateStr = formatTransactionDate(successDetails.createdAt || new Date().toISOString());
+        const statusVal = isConfirmed(successDetails.status) ? 'Successful' : isSettling(successDetails.status) ? 'Settling…' : 'Pending';
+        const statusHeader = `TRANSFER ${statusVal.toUpperCase()}`;
+        const bankMeta = bankName !== '—' ? getBankMetadata(bankName) : null;
+        const orderId = successDetails.orderId;
+        const sig = successDetails.sig;
+
+        return (
+          <div className="p2p-success-overlay" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)', zIndex: 1000, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+            <div 
+              style={{
+                background: '#192230',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+                borderRadius: '24px',
+                width: '92%',
+                maxWidth: '380px',
+                padding: '30px 24px 24px 24px',
+                position: 'relative',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+              }}
+            >
+              {/* Circular Status Icon */}
+              <div 
+                style={{
+                  width: '56px',
+                  height: '56px',
+                  borderRadius: '50%',
+                  background: statusVal === 'Successful' ? 'rgba(34, 197, 94, 0.1)' : statusVal === 'Settling…' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                  border: statusVal === 'Successful' ? '2px solid rgba(34, 197, 94, 0.4)' : statusVal === 'Settling…' ? '2px solid rgba(234, 179, 8, 0.4)' : '2px solid rgba(255, 255, 255, 0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 20px auto'
+                }}
+              >
+                {statusVal === 'Successful' ? (
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={statusVal === 'Pending' ? '#8e9aa8' : '#eab308'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                )}
+              </div>
+
+              {/* Header Info */}
+              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                <div style={{ fontSize: '11px', color: '#8e9aa8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '6px' }}>
+                  {statusHeader}
                 </div>
-              )}
-              {successDetails.sig && (
-                <div className="p2p-success-field">
-                  <span>Tx Sig:</span>
-                  <a
-                    href={`https://solscan.io/tx/${successDetails.sig}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '10px', wordBreak: 'break-all' }}
-                  >
-                    {successDetails.sig.slice(0, 16)}...
-                  </a>
+                <div style={{ fontSize: '38px', fontWeight: '800', color: '#fcefdc', letterSpacing: '-0.02em', marginBottom: '6px', fontFamily: 'sans-serif' }}>
+                  {fiatValStr}
                 </div>
-              )}
+                <div style={{ fontSize: '13.5px', color: '#8e9aa8' }}>
+                  ≈ {cryptoValStr}
+                </div>
+              </div>
+
+              {/* Dashed ticket style divider with circular notches */}
+              <div style={{ position: 'relative', margin: '8px -24px 24px -24px', height: '1px' }}>
+                <div style={{ position: 'absolute', left: '24px', right: '24px', top: 0, borderTop: '1.5px dashed rgba(255, 255, 255, 0.12)' }}></div>
+                <div style={{ position: 'absolute', left: '-10px', top: -10, width: '20px', height: '20px', background: '#0a1628', borderRadius: '50%', zIndex: 3 }}></div>
+                <div style={{ position: 'absolute', right: '-10px', top: -10, width: '20px', height: '20px', background: '#0a1628', borderRadius: '50%', zIndex: 3 }}></div>
+              </div>
+
+              {/* Details list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '28px' }}>
+                {/* Recipient Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8', minWidth: '80px' }}>Recipient</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', color: 'white', fontWeight: '700', textAlign: 'right', maxWidth: '70%', lineHeight: '1.4' }}>
+                    {recipientName}
+                  </div>
+                </div>
+
+                {/* Account Number Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Account Number</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontWeight: '700' }}>
+                    <span>{accountNumber}</span>
+                    {accountNumber !== '—' && (
+                      <svg 
+                        onClick={() => {
+                          navigator.clipboard.writeText(accountNumber);
+                          setCopiedAccount(true);
+                          setTimeout(() => setCopiedAccount(false), 2000);
+                        }}
+                        style={{ cursor: 'pointer', transition: 'color 0.15s', color: copiedAccount ? 'var(--lime)' : '#8e9aa8' }}
+                        width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      >
+                        {copiedAccount ? (
+                          <polyline points="20 6 9 17 4 12" />
+                        ) : (
+                          <>
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </>
+                        )}
+                      </svg>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bank Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Bank</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontWeight: '700', maxWidth: '70%', textAlign: 'right' }}>
+                    {bankMeta && bankMeta.logo ? (
+                      <img src={bankMeta.logo} alt="bank" style={{ width: '18px', height: '18px', borderRadius: '50%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }} />
+                    ) : null}
+                    {bankMeta ? (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: bankMeta.color, color: 'white', display: bankMeta.logo ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 'bold' }}>
+                        {bankMeta.initial}
+                      </div>
+                    ) : null}
+                    <span>{bankName}</span>
+                  </div>
+                </div>
+
+                {/* Date Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Date</span>
+                  <span style={{ color: 'white', fontWeight: '700' }}>{dateStr}</span>
+                </div>
+
+                {/* Status Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Status</span>
+                  <span style={{ color: 'white', fontWeight: '700' }}>{statusVal}</span>
+                </div>
+
+                {/* Sender Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Sender</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontWeight: '700' }}>
+                    <div style={{ 
+                      width: '18px', 
+                      height: '18px', 
+                      borderRadius: '50%', 
+                      background: 'black', 
+                      color: 'white', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      fontSize: '9px', 
+                      fontWeight: '800', 
+                      fontStyle: 'italic', 
+                      fontFamily: '"Georgia", serif' 
+                    }}>
+                      paj
+                    </div>
+                    <span>Paj Cash</span>
+                  </div>
+                </div>
+
+                {/* Order ID & Tx Sig (Optional/Utility rows under Sender) */}
+                {orderId && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderTop: '1px dashed rgba(255,255,255,0.05)', paddingTop: '12px', marginTop: '4px' }}>
+                    <span style={{ color: '#8e9aa8' }}>Order ID</span>
+                    <span style={{ color: 'var(--lime)', fontFamily: 'var(--mono)' }}>{orderId.slice(0, 16)}...</span>
+                  </div>
+                )}
+
+                {sig && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
+                    <span style={{ color: '#8e9aa8' }}>Tx Signature</span>
+                    <a
+                      href={`https://solscan.io/tx/${sig}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', textDecoration: 'underline' }}
+                    >
+                      {sig.slice(0, 12)}...
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Close Button */}
+              <button 
+                className="send-btn" 
+                onClick={() => { setShowSuccess(false); setSuccessDetails(null); }} 
+                style={{ 
+                  width: '100%', 
+                  padding: '16px', 
+                  borderRadius: '28px', 
+                  background: '#ff8f3d', 
+                  border: 'none', 
+                  color: 'white', 
+                  fontSize: '15px', 
+                  fontWeight: 'bold', 
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(255,143,61,0.25)',
+                  transition: 'opacity 0.15s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = 0.9}
+                onMouseLeave={e => e.currentTarget.style.opacity = 1}
+              >
+                Done
+              </button>
             </div>
-            <button className="send-btn" onClick={() => { setShowSuccess(false); setSuccessDetails(null); }} style={{ marginTop: '1rem' }}>
-              Done
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── History Detail Pop-up (clicking a history entry) ── */}
-      {selectedLog && (
-        <div className="p2p-success-overlay">
-          <div className="p2p-success-card">
-            <div className="p2p-success-icon-wrap">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-            <p style={{
-              fontSize: '18px', fontWeight: '700', margin: '0 0 1.25rem 0', textAlign: 'center',
-              color: isConfirmed(selectedLog.status) ? 'var(--lime)' : isSettling(selectedLog.status) ? '#eab308' : 'rgba(255,255,255,0.45)',
-            }}>
-              {isConfirmed(selectedLog.status) ? 'Confirmed' : isSettling(selectedLog.status) ? 'Settling…' : 'Pending'}
-            </p>
-            <div className="p2p-success-fields">
-              {selectedLog.amount != null && (
-                <div className="p2p-success-field"><span>Action:</span><strong>{selectedLog.cryptoAmount || selectedLog.amount} {selectedLog.tokenSymbol || ''}</strong></div>
-              )}
-              {(selectedLog.fiatAmount || selectedLog.fiat) && (
-                <div className="p2p-success-field"><span>Fiat Value:</span><strong>{selectedCountry.symbol}{(selectedLog.fiatAmount || selectedLog.fiat)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
-              )}
-              {selectedLog.bank && (
-                <div className="p2p-success-field"><span>Bank:</span><strong>{selectedLog.bank}</strong></div>
-              )}
-              {(selectedLog.accountNumber || selectedLog.account) && (
-                <div className="p2p-success-field"><span>Account:</span><strong>{selectedLog.accountNumber || selectedLog.account}</strong></div>
-              )}
-              {(selectedLog.recipient || selectedLog.name) && (
-                <div className="p2p-success-field"><span>Recipient:</span><strong>{selectedLog.recipient || selectedLog.name}</strong></div>
-              )}
-              {(selectedLog.id || selectedLog._id) && (
-                <div className="p2p-success-field">
-                  <span>Order ID:</span>
-                  <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '11px' }}>{selectedLog.id || selectedLog._id}</strong>
+      {selectedLog && (() => {
+        const logFiatVal = selectedLog.fiatAmount || selectedLog.fiat || 0;
+        const fiatValStr = `${selectedCountry.symbol}${logFiatVal.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+
+        // Equivalent Crypto
+        const tokenSymbol = selectedLog.tokenSymbol || (selectedLog.mint ? (selectableTokens.find(t => t.mint === selectedLog.mint)?.symbol || 'USDC') : 'USDC');
+        const cryptoAmt = selectedLog.cryptoAmount || selectedLog.amount || 0;
+        const cryptoValStr = `${cryptoAmt.toFixed(4)} ${tokenSymbol}`;
+
+        const recipientName = getCleanNameForLog(selectedLog).toUpperCase();
+        const accountNumber = selectedLog.accountNumber || selectedLog.account || '—';
+        const bankName = selectedLog.bank || '—';
+        const dateStr = formatTransactionDate(selectedLog.createdAt);
+        const statusVal = isConfirmed(selectedLog.status) ? 'Successful' : isSettling(selectedLog.status) ? 'Settling…' : 'Pending';
+        const statusHeader = `TRANSFER ${statusVal.toUpperCase()}`;
+        const bankMeta = bankName !== '—' ? getBankMetadata(bankName) : null;
+        const orderId = selectedLog.id || selectedLog._id;
+        const sig = selectedLog.sig;
+
+        return (
+          <div className="p2p-success-overlay" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)', zIndex: 1000, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}>
+            <div 
+              style={{
+                background: '#192230',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+                borderRadius: '24px',
+                width: '92%',
+                maxWidth: '380px',
+                padding: '30px 24px 24px 24px',
+                position: 'relative',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+              }}
+            >
+              {/* Circular Status Icon */}
+              <div 
+                style={{
+                  width: '56px',
+                  height: '56px',
+                  borderRadius: '50%',
+                  background: statusVal === 'Successful' ? 'rgba(34, 197, 94, 0.1)' : statusVal === 'Settling…' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                  border: statusVal === 'Successful' ? '2px solid rgba(34, 197, 94, 0.4)' : statusVal === 'Settling…' ? '2px solid rgba(234, 179, 8, 0.4)' : '2px solid rgba(255, 255, 255, 0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 20px auto'
+                }}
+              >
+                {statusVal === 'Successful' ? (
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={statusVal === 'Pending' ? '#8e9aa8' : '#eab308'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                )}
+              </div>
+
+              {/* Header Info */}
+              <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                <div style={{ fontSize: '11px', color: '#8e9aa8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600, marginBottom: '6px' }}>
+                  {statusHeader}
                 </div>
-              )}
-              {selectedLog.sig && (
-                <div className="p2p-success-field">
-                  <span>Tx Sig:</span>
-                  <a
-                    href={`https://solscan.io/tx/${selectedLog.sig}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '10px', wordBreak: 'break-all' }}
-                  >
-                    {selectedLog.sig.slice(0, 16)}...
-                  </a>
+                <div style={{ fontSize: '38px', fontWeight: '800', color: '#fcefdc', letterSpacing: '-0.02em', marginBottom: '6px', fontFamily: 'sans-serif' }}>
+                  {fiatValStr}
                 </div>
-              )}
+                <div style={{ fontSize: '13.5px', color: '#8e9aa8' }}>
+                  ≈ {cryptoValStr}
+                </div>
+              </div>
+
+              {/* Dashed ticket style divider with circular notches */}
+              <div style={{ position: 'relative', margin: '8px -24px 24px -24px', height: '1px' }}>
+                <div style={{ position: 'absolute', left: '24px', right: '24px', top: 0, borderTop: '1.5px dashed rgba(255, 255, 255, 0.12)' }}></div>
+                <div style={{ position: 'absolute', left: '-10px', top: -10, width: '20px', height: '20px', background: '#0a1628', borderRadius: '50%', zIndex: 3 }}></div>
+                <div style={{ position: 'absolute', right: '-10px', top: -10, width: '20px', height: '20px', background: '#0a1628', borderRadius: '50%', zIndex: 3 }}></div>
+              </div>
+
+              {/* Details list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '28px' }}>
+                {/* Recipient Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8', minWidth: '80px' }}>Recipient</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', color: 'white', fontWeight: '700', textAlign: 'right', maxWidth: '70%', lineHeight: '1.4' }}>
+                    {recipientName}
+                  </div>
+                </div>
+
+                {/* Account Number Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Account Number</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontWeight: '700' }}>
+                    <span>{accountNumber}</span>
+                    {accountNumber !== '—' && (
+                      <svg 
+                        onClick={() => {
+                          navigator.clipboard.writeText(accountNumber);
+                          setCopiedAccount(true);
+                          setTimeout(() => setCopiedAccount(false), 2000);
+                        }}
+                        style={{ cursor: 'pointer', transition: 'color 0.15s', color: copiedAccount ? 'var(--lime)' : '#8e9aa8' }}
+                        width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                      >
+                        {copiedAccount ? (
+                          <polyline points="20 6 9 17 4 12" />
+                        ) : (
+                          <>
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </>
+                        )}
+                      </svg>
+                    )}
+                  </div>
+                </div>
+
+                {/* Bank Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Bank</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontWeight: '700', maxWidth: '70%', textAlign: 'right' }}>
+                    {bankMeta && bankMeta.logo ? (
+                      <img src={bankMeta.logo} alt="bank" style={{ width: '18px', height: '18px', borderRadius: '50%', objectFit: 'cover' }} onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }} />
+                    ) : null}
+                    {bankMeta ? (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: bankMeta.color, color: 'white', display: bankMeta.logo ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '8px', fontWeight: 'bold' }}>
+                        {bankMeta.initial}
+                      </div>
+                    ) : null}
+                    <span>{bankName}</span>
+                  </div>
+                </div>
+
+                {/* Date Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Date</span>
+                  <span style={{ color: 'white', fontWeight: '700' }}>{dateStr}</span>
+                </div>
+
+                {/* Status Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Status</span>
+                  <span style={{ color: 'white', fontWeight: '700' }}>{statusVal}</span>
+                </div>
+
+                {/* Sender Row */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13.5px' }}>
+                  <span style={{ color: '#8e9aa8' }}>Sender</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'white', fontWeight: '700' }}>
+                    <div style={{ 
+                      width: '18px', 
+                      height: '18px', 
+                      borderRadius: '50%', 
+                      background: 'black', 
+                      color: 'white', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center', 
+                      fontSize: '9px', 
+                      fontWeight: '800', 
+                      fontStyle: 'italic', 
+                      fontFamily: '"Georgia", serif' 
+                    }}>
+                      paj
+                    </div>
+                    <span>Paj Cash</span>
+                  </div>
+                </div>
+
+                {/* Order ID & Tx Sig (Optional/Utility rows under Sender) */}
+                {orderId && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', borderTop: '1px dashed rgba(255,255,255,0.05)', paddingTop: '12px', marginTop: '4px' }}>
+                    <span style={{ color: '#8e9aa8' }}>Order ID</span>
+                    <span style={{ color: 'var(--lime)', fontFamily: 'var(--mono)' }}>{orderId.slice(0, 16)}...</span>
+                  </div>
+                )}
+
+                {sig && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
+                    <span style={{ color: '#8e9aa8' }}>Tx Signature</span>
+                    <a
+                      href={`https://solscan.io/tx/${sig}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', textDecoration: 'underline' }}
+                    >
+                      {sig.slice(0, 12)}...
+                    </a>
+                  </div>
+                )}
+              </div>
+
+              {/* Close Button */}
+              <button 
+                className="send-btn" 
+                onClick={() => setSelectedLog(null)} 
+                style={{ 
+                  width: '100%', 
+                  padding: '16px', 
+                  borderRadius: '28px', 
+                  background: '#ff8f3d', 
+                  border: 'none', 
+                  color: 'white', 
+                  fontSize: '15px', 
+                  fontWeight: 'bold', 
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(255,143,61,0.25)',
+                  transition: 'opacity 0.15s'
+                }}
+                onMouseEnter={e => e.currentTarget.style.opacity = 0.9}
+                onMouseLeave={e => e.currentTarget.style.opacity = 1}
+              >
+                Done
+              </button>
             </div>
-            <button className="send-btn" onClick={() => setSelectedLog(null)} style={{ marginTop: '1rem' }}>
-              Done
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── QR Scanner ── */}
       {scannerActive && (
