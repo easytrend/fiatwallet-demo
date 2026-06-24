@@ -81,6 +81,87 @@ const ALLOWED_PROGRAM_IDS = new Set([
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 
+const MOCK_PAYOUT_LOGS = [
+  {
+    id: 'mock-1',
+    recipient: 'POS Transfer-TAMPY',
+    bank: 'Moniepoint',
+    amount: 0.8900,
+    status: 'PENDING',
+    createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    signature: '5K1234567890abcdef1234567890abcdef1234567890abcdef'
+  },
+  {
+    id: 'mock-2',
+    recipient: 'STEPHEN OLADIMENJI',
+    bank: 'OPay',
+    amount: 0.7500,
+    status: 'SUCCESSFUL',
+    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    signature: '5K4567890abcdef1234567890abcdef1234567890abcdef123'
+  },
+  {
+    id: 'mock-3',
+    recipient: 'MONICA TITILAYO',
+    bank: 'OPay',
+    amount: 3.6700,
+    status: 'PENDING',
+    createdAt: new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString(),
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    signature: '5K7890abcdef1234567890abcdef1234567890abcdef123456'
+  },
+  {
+    id: 'mock-4',
+    recipient: 'MONICA TITILAYO',
+    bank: 'OPay',
+    amount: 3.6700,
+    status: 'PENDING',
+    createdAt: new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString(),
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    signature: '5K101010abcdef1234567890abcdef1234567890abcdef123'
+  },
+  {
+    id: 'mock-5',
+    recipient: 'ABDULAZEEZ ABIOYE',
+    bank: 'OPay',
+    amount: 0.9000,
+    status: 'SUCCESSFUL',
+    createdAt: new Date(Date.now() - 22 * 60 * 60 * 1000).toISOString(),
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    signature: '5K202020abcdef1234567890abcdef1234567890abcdef123'
+  },
+  {
+    id: 'mock-6',
+    recipient: 'POS Transfer-TAMPY',
+    bank: 'Moniepoint',
+    amount: 1.1300,
+    status: 'SUCCESSFUL',
+    createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    signature: '5K303030abcdef1234567890abcdef1234567890abcdef123'
+  }
+];
+
+const getRelativeTime = (isoString) => {
+  if (!isoString) return 'Recent';
+  const now = Date.now();
+  const date = new Date(isoString).getTime();
+  const diff = now - date;
+
+  const seconds = Math.floor(diff / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (seconds < 60) return 'just now';
+  if (minutes < 60) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+  if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+  if (days === 1) return 'yesterday';
+  return `${days} day${days > 1 ? 's' : ''} ago`;
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -224,6 +305,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [routingState, setRoutingState] = useState('idle'); // 'routing' | 'loading_market' | 'resolved'
   const [showSuccess, setShowSuccess] = useState(false);
   const [successDetails, setSuccessDetails] = useState(null);
+  const [showHistoryView, setShowHistoryView] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // ── QR Scanner Refs ──────────────────────────────────────────────────────
   const [scannerActive, setScannerActive] = useState(false);
@@ -234,6 +317,25 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // ── Computed ─────────────────────────────────────────────────────────────
   const isLiveRoute = LIVE_CURRENCIES.has(selectedCountry.currency) && mode === 'sell';
   const canTransact = !!sessionToken && isLiveRoute && !apiError;
+
+  const displayLogs = useMemo(() => {
+    return payoutLogs.length > 0 ? payoutLogs : MOCK_PAYOUT_LOGS;
+  }, [payoutLogs]);
+
+  const itemsPerPage = 5;
+  const totalPages = Math.ceil(displayLogs.length / itemsPerPage);
+  const paginatedLogs = useMemo(() => {
+    return displayLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  }, [displayLogs, currentPage]);
+
+  const getTokenLogo = (mintOrSymbol) => {
+    if (!mintOrSymbol) return '';
+    const tokenObj = selectableTokens.find(t =>
+      t.mint === mintOrSymbol ||
+      t.symbol === mintOrSymbol
+    );
+    return tokenObj ? tokenObj.logoURI : '';
+  };
 
   // ── SDK Init ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -359,6 +461,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
   };
 
   useEffect(() => { loadPayoutLogs(); }, [sessionToken, publicKey]);
+
+  useEffect(() => {
+    if (showHistoryView) {
+      loadPayoutLogs();
+      setCurrentPage(1);
+    }
+  }, [showHistoryView]);
 
   // ── Resolve account name ──────────────────────────────────────────────────
   useEffect(() => {
@@ -1010,6 +1119,111 @@ export default function P2PPanel({ connected, walletTokenList }) {
         </div>
       )}
 
+      {/* Title Row with History Icon */}
+      <div className="title-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+        <h2 className="card-title" style={{ margin: 0, fontSize: '1.25rem' }}>P2P Trade</h2>
+        {canTransact && publicKey && (
+          <button 
+            onClick={() => setShowHistoryView(true)}
+            style={{ background: 'none', border: 'none', color: 'var(--text2)', cursor: 'pointer', padding: '4px' }}
+            title="Transaction History"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+          </button>
+        )}
+      </div>
+      <p className="card-sub" style={{ marginBottom: '1.25rem' }}>Peer-to-peer token trading platform.</p>
+
+      {showHistoryView ? (
+        <div className="p2p-history-view" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1.25rem', gap: '10px' }}>
+            <button 
+              onClick={() => setShowHistoryView(false)}
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '8px', color: 'white', cursor: 'pointer', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+              Back
+            </button>
+            <h3 style={{ fontSize: '14px', margin: 0, color: 'white' }}>Transaction History</h3>
+          </div>
+          {loadingLogs ? (
+              <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '24px' }}>
+                <span className="p2p-mini-spinner" /> Loading history...
+              </div>
+          ) : logError ? (
+              <div style={{ fontSize: '11px', color: '#f87171', background: 'rgba(239,68,68,0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.2)' }}>
+                ⚠️ {logError}
+              </div>
+          ) : paginatedLogs.length === 0 ? (
+              <div style={{ fontSize: '12px', color: 'var(--text3)', textAlign: 'center', padding: '24px' }}>
+                No payout history found.
+              </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minHeight: '300px' }}>
+                {paginatedLogs.map(log => (
+                  <div key={log._id || log.id} style={{
+                    background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
+                    borderRadius: '12px', padding: '12px', fontSize: '12px',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <span style={{ color: 'white', fontWeight: 'bold', fontSize: '13px' }}>
+                        {log.recipient || log.name || 'Recipient'}
+                      </span>
+                      <span style={{ color: 'var(--text3)', fontSize: '11px' }}>
+                        {log.bank || 'Bank'} • {log.createdAt ? getRelativeTime(log.createdAt) : 'Recent'}
+                      </span>
+                      <span style={{ 
+                        color: log.status === 'SUCCESSFUL' ? 'var(--lime)' : log.status === 'FAILED' ? '#ef4444' : '#eab308', 
+                        fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.05em' 
+                      }}>
+                        {log.status || 'PROCESSING'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                      <span style={{ color: 'var(--lime)', fontWeight: 'bold', fontSize: '14px' }}>
+                        {selectedCountry.symbol}{(log.fiatAmount || log.amount)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        {getTokenLogo(log.mint) && <img src={getTokenLogo(log.mint)} alt="token" style={{ width: '12px', height: '12px', borderRadius: '50%' }} />}
+                        <span style={{ color: 'var(--text3)', fontSize: '10px', fontFamily: 'var(--mono)' }}>
+                          {(log._id || log.id)?.slice(0, 8)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {/* Pagination Controls */}
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+                  <button 
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    style={{ background: 'none', border: 'none', color: currentPage === 1 ? 'var(--text3)' : 'white', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+                  >
+                    Prev
+                  </button>
+                  <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Page {currentPage} of {totalPages}</span>
+                  <button 
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    style={{ background: 'none', border: 'none', color: currentPage === totalPages ? 'var(--text3)' : 'white', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : (
+        <>
       {/* Mode switch + Country selector */}
       <div className="p2p-header-row" style={{ marginBottom: '1.25rem' }}>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -1495,75 +1709,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
           </p>
         </div>
       )}
-
-      {/* ── Transaction History ── */}
-      {canTransact && publicKey && (() => {
-        const walletKey = publicKey.toBase58();
-        const localOrders = (() => {
-          try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
-          catch { return []; }
-        })();
-
-        const localIds = new Set(localOrders.map(o => o.id || o));
-        const userLogs = payoutLogs.filter(log => localIds.has(log.id || log._id));
-        const showHistory = localOrders.length > 0;
-
-        if (!showHistory) return null;
-
-        return (
-          <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-            <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'white', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>My Payout History</span>
-              <button onClick={loadPayoutLogs} style={{ background: 'none', border: 'none', color: 'var(--lime)', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }}>
-                Refresh
-              </button>
-            </h4>
-            {loadingLogs ? (
-              <div style={{ fontSize: '12px', color: 'var(--text3)', fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
-                <span className="p2p-mini-spinner" /> Loading...
-              </div>
-            ) : logError ? (
-              <div style={{ fontSize: '11px', color: '#f87171', background: 'rgba(239,68,68,0.08)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(239,68,68,0.2)' }}>
-                ⚠️ {logError}
-              </div>
-            ) : userLogs.length === 0 ? (
-              <div style={{ fontSize: '11px', color: 'var(--text3)', textAlign: 'center', padding: '12px' }}>
-                {localOrders.length > 0
-                  ? `${localOrders.length} order(s) pending confirmation.`
-                  : 'No recent payouts found.'
-                }
-              </div>
-            ) : (
-              <div style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', paddingRight: '4px' }}>
-                {userLogs.map(log => (
-                  <div key={log._id || log.id} style={{
-                    background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
-                    borderRadius: '8px', padding: '8px 10px', fontSize: '11px',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                      <span style={{ color: 'white', fontWeight: 'bold' }}>
-                        {log.status || 'Processing'}
-                      </span>
-                      <span style={{ color: 'var(--text3)', fontSize: '10px' }}>
-                        {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Recent'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                      <span style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
-                        {selectedCountry.symbol}{(log.fiatAmount || log.amount)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </span>
-                      <span style={{ color: 'var(--text3)', fontSize: '9px', fontFamily: 'var(--mono)' }}>
-                        {(log._id || log.id)?.slice(0, 8)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      </>
+      )}
 
       {/* ── Success Modal ── */}
       {showSuccess && successDetails && (

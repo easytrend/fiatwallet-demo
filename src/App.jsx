@@ -1121,10 +1121,6 @@ export default function App() {
 
         <div className="app-card p2p-card">
           <div className="card-body">
-            <div className="title-row">
-              <h2 className="card-title">P2P Trade</h2>
-            </div>
-            <p className="card-sub">Peer-to-peer token trading platform.</p>
             <P2PPanel connected={connected} walletTokenList={walletTokenList} />
           </div>
         </div>
