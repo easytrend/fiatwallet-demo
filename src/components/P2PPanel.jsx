@@ -82,6 +82,14 @@ const ALLOWED_PROGRAM_IDS = new Set([
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 
 
+// PajCash API status values: COMPLETED | PAID | INIT
+// COMPLETED = bank payout sent/settled
+// PAID      = crypto received, fiat payout in progress
+// INIT      = order created, waiting for crypto
+const isConfirmed = (status) =>
+  status === 'COMPLETED' || status === 'SUCCESSFUL'; // guard legacy value too
+
+const isSettling = (status) => status === 'PAID';
 
 const getRelativeTime = (isoString) => {
   if (!isoString) return 'Recent';
@@ -271,7 +279,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
     // Merge: prefer API data, fall back to localStorage metadata
     return localOrders
       .map(localEntry => {
-        const apiLog = payoutLogs.find(l => (l.id || l._id) === (localEntry.id || localEntry));
+        // Match against API data using both `id` and `_id` fields
+        const localId = localEntry.id || (typeof localEntry === 'string' ? localEntry : null);
+        const apiLog = payoutLogs.find(l => {
+          const apiId = l.id || l._id;
+          return apiId && localId && (apiId === localId || String(apiId) === String(localId));
+        });
         if (apiLog) return apiLog;
         // Not yet confirmed by API — show placeholder from localStorage
         return {
@@ -1153,10 +1166,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
                         {log.bank ? `${log.bank} • ` : ''}{log.createdAt ? getRelativeTime(log.createdAt) : 'Recent'}
                       </span>
                       <span style={{ 
-                        color: log.status === 'SUCCESSFUL' ? 'var(--lime)' : log.status === 'FAILED' ? '#ef4444' : 'rgba(255,255,255,0.4)', 
+                        color: isConfirmed(log.status) ? 'var(--lime)' : isSettling(log.status) ? '#eab308' : log.status === 'FAILED' ? '#ef4444' : 'rgba(255,255,255,0.4)', 
                         fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.05em' 
                       }}>
-                        {log.status === 'SUCCESSFUL' ? 'Confirmed' : log.status === 'FAILED' ? 'Failed' : 'Pending'}
+                        {isConfirmed(log.status) ? 'Confirmed' : isSettling(log.status) ? 'Settling…' : log.status === 'FAILED' ? 'Failed' : 'Pending'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
@@ -1702,9 +1715,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
             {/* Status label only — no title, no subtitle */}
             <p style={{
               fontSize: '18px', fontWeight: '700', margin: '0 0 1.25rem 0', textAlign: 'center',
-              color: successDetails.status === 'SUCCESSFUL' ? 'var(--lime)' : 'rgba(255,255,255,0.45)',
+              color: isConfirmed(successDetails.status) ? 'var(--lime)' : isSettling(successDetails.status) ? '#eab308' : 'rgba(255,255,255,0.45)',
             }}>
-              {successDetails.status === 'SUCCESSFUL' ? 'Confirmed' : 'Pending'}
+              {isConfirmed(successDetails.status) ? 'Confirmed' : isSettling(successDetails.status) ? 'Settling…' : 'Pending'}
             </p>
             <div className="p2p-success-fields">
               <div className="p2p-success-field"><span>Action:</span><strong>{successDetails.amount}</strong></div>
@@ -1750,9 +1763,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
             </div>
             <p style={{
               fontSize: '18px', fontWeight: '700', margin: '0 0 1.25rem 0', textAlign: 'center',
-              color: selectedLog.status === 'SUCCESSFUL' ? 'var(--lime)' : 'rgba(255,255,255,0.45)',
+              color: isConfirmed(selectedLog.status) ? 'var(--lime)' : isSettling(selectedLog.status) ? '#eab308' : 'rgba(255,255,255,0.45)',
             }}>
-              {selectedLog.status === 'SUCCESSFUL' ? 'Confirmed' : 'Pending'}
+              {isConfirmed(selectedLog.status) ? 'Confirmed' : isSettling(selectedLog.status) ? 'Settling…' : 'Pending'}
             </p>
             <div className="p2p-success-fields">
               {selectedLog.amount != null && (
