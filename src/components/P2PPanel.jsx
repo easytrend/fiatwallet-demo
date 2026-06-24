@@ -1168,49 +1168,164 @@ export default function P2PPanel({ connected, walletTokenList }) {
           ) : (
             <>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minHeight: '300px' }}>
-                {paginatedLogs.map(log => (
-                  <div 
-                    key={log._id || log.id}
-                    onClick={() => setSelectedLog(log)}
-                    style={{
-                      background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
-                      borderRadius: '12px', padding: '12px', fontSize: '12px',
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      cursor: 'pointer', transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <span style={{ color: 'white', fontWeight: 'bold', fontSize: '13px' }}>
-                        {log.recipient || log.name || 'Pending Confirmation…'}
-                      </span>
-                      <span style={{ color: 'var(--text3)', fontSize: '11px' }}>
-                        {log.bank ? `${log.bank} • ` : ''}{log.createdAt ? getRelativeTime(log.createdAt) : 'Recent'}
-                      </span>
-                      <span style={{ 
-                        color: isConfirmed(log.status) ? 'var(--lime)' : isSettling(log.status) ? '#eab308' : log.status === 'FAILED' ? '#ef4444' : 'rgba(255,255,255,0.4)', 
-                        fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.05em' 
-                      }}>
-                        {isConfirmed(log.status) ? 'Confirmed' : isSettling(log.status) ? 'Settling…' : log.status === 'FAILED' ? 'Failed' : 'Pending'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                      <span style={{ color: log.fiatAmount || log.amount ? 'var(--lime)' : 'rgba(255,255,255,0.3)', fontWeight: 'bold', fontSize: '14px' }}>
-                        {(log.fiatAmount || log.amount) != null
-                          ? `${selectedCountry.symbol}${(log.fiatAmount || log.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : '—'
-                        }
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        {getTokenLogo(log.mint) && <img src={getTokenLogo(log.mint)} alt="token" style={{ width: '12px', height: '12px', borderRadius: '50%' }} />}
-                        <span style={{ color: 'var(--text3)', fontSize: '10px', fontFamily: 'var(--mono)' }}>
-                          {(log._id || log.id)?.slice(0, 8)}
+                {paginatedLogs.map(log => {
+                  const tokenLogo = getTokenLogo(log.mint || 'USDC');
+                  const bankMeta = log.bank ? getBankMetadata(log.bank) : null;
+                  
+                  // Get token symbol
+                  const tokenSymbol = log.tokenSymbol || (log.mint ? (selectableTokens.find(t => t.mint === log.mint)?.symbol || 'USDC') : 'USDC');
+                  
+                  // Get crypto amount
+                  const cryptoAmt = log.cryptoAmount || log.amount || 0;
+                  const formattedCrypto = `${cryptoAmt.toFixed(4)} ${tokenSymbol}`;
+
+                  // Determine display name
+                  let displayName = 'Pending Confirmation…';
+                  if (log.status !== 'INIT' && log.status !== 'PENDING') {
+                    let name = '';
+                    if (log.accountName && typeof log.accountName === 'string') {
+                      name = log.accountName;
+                    } else if (log.name && typeof log.name === 'string') {
+                      name = log.name;
+                    } else if (log.recipient && typeof log.recipient === 'string') {
+                      const isSol = log.recipient.length >= 32 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(log.recipient);
+                      if (!isSol) {
+                        name = log.recipient;
+                      }
+                    }
+                    const cleanName = name.trim();
+                    if (cleanName) {
+                      displayName = `POS Transfer-${cleanName}`;
+                    } else if (log.bank) {
+                      displayName = `POS Transfer-${log.bank}`;
+                    } else {
+                      displayName = 'POS Transfer';
+                    }
+                  } else {
+                    displayName = 'POS Transfer';
+                  }
+
+                  return (
+                    <div 
+                      key={log._id || log.id}
+                      onClick={() => setSelectedLog(log)}
+                      style={{
+                        background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
+                        borderRadius: '12px', padding: '12px', fontSize: '12px',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        cursor: 'pointer', transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        {/* Overlapping double circular icons */}
+                        <div style={{ position: 'relative', width: '38px', height: '38px', flexShrink: 0 }}>
+                          {/* Token Logo */}
+                          {tokenLogo ? (
+                            <img 
+                              src={tokenLogo} 
+                              alt="token" 
+                              style={{ 
+                                position: 'absolute', top: 0, left: 0, 
+                                width: '26px', height: '26px', borderRadius: '50%', 
+                                zIndex: 1, border: '2px solid rgba(18, 18, 18, 1)' 
+                              }} 
+                              onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }}
+                            />
+                          ) : null}
+                          <div 
+                            style={{ 
+                              position: 'absolute', top: 0, left: 0, 
+                              width: '26px', height: '26px', borderRadius: '50%', 
+                              background: 'rgba(255,255,255,0.1)', color: 'white', 
+                              display: tokenLogo ? 'none' : 'flex', alignItems: 'center', justifyContent: 'center', 
+                              fontSize: '9px', fontWeight: 'bold', zIndex: 1, 
+                              border: '2px solid rgba(18, 18, 18, 1)' 
+                            }}
+                          >
+                            {tokenSymbol.slice(0, 3)}
+                          </div>
+
+                          {/* Bank Logo */}
+                          {bankMeta && bankMeta.logo ? (
+                            <img 
+                              src={bankMeta.logo} 
+                              alt="bank" 
+                              style={{ 
+                                position: 'absolute', bottom: 0, right: 0, 
+                                width: '20px', height: '20px', borderRadius: '50%', 
+                                zIndex: 2, border: '2px solid rgba(18, 18, 18, 1)',
+                                objectFit: 'cover'
+                              }} 
+                              onError={(e) => { e.target.style.display = 'none'; e.target.nextElementSibling.style.display = 'flex'; }}
+                            />
+                          ) : null}
+                          <div 
+                            style={{ 
+                              position: 'absolute', bottom: 0, right: 0, 
+                              width: '20px', height: '20px', borderRadius: '50%', 
+                              background: bankMeta ? bankMeta.color : 'var(--border)', 
+                              color: 'white', display: (bankMeta && bankMeta.logo) ? 'none' : 'flex', alignItems: 'center', 
+                              justifyContent: 'center', fontSize: '8px', fontWeight: 'bold', 
+                              zIndex: 2, border: '2px solid rgba(18, 18, 18, 1)' 
+                            }}
+                          >
+                            {bankMeta ? bankMeta.initial : 'BK'}
+                          </div>
+                        </div>
+
+                        {/* Texts */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span 
+                            style={{ 
+                              color: 'white', fontWeight: 'bold', fontSize: '13px',
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                              maxWidth: '160px', display: 'block' 
+                            }}
+                            title={displayName}
+                          >
+                            {displayName}
+                          </span>
+                          <span style={{ color: 'var(--text3)', fontSize: '11px' }}>
+                            {log.createdAt ? getRelativeTime(log.createdAt) : 'Recent'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Right Details */}
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ color: 'white', fontWeight: 'bold', fontSize: '13px' }}>
+                            {formattedCrypto}
+                          </span>
+                          {log.sig && (
+                            <a 
+                              href={`https://solscan.io/tx/${log.sig}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ color: 'var(--text3)', display: 'inline-flex', alignItems: 'center', transition: 'color 0.15s' }}
+                              onMouseEnter={e => e.currentTarget.style.color = 'var(--lime)'}
+                              onMouseLeave={e => e.currentTarget.style.color = 'var(--text3)'}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="7" y1="17" x2="17" y2="7"></line>
+                                <polyline points="7 7 17 7 17 17"></polyline>
+                              </svg>
+                            </a>
+                          )}
+                        </div>
+                        <span style={{ 
+                          color: isConfirmed(log.status) ? 'var(--lime)' : isSettling(log.status) ? '#eab308' : log.status === 'FAILED' ? '#ef4444' : 'rgba(255,255,255,0.4)', 
+                          fontSize: '11px', fontWeight: 'bold'
+                        }}>
+                          {isConfirmed(log.status) ? 'Successful' : isSettling(log.status) ? 'Settling…' : log.status === 'FAILED' ? 'Failed' : 'Pending'}
                         </span>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               
               {/* Pagination Controls */}
