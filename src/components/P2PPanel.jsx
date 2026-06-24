@@ -428,7 +428,33 @@ export default function P2PPanel({ connected, walletTokenList }) {
     setLoadingLogs(true);
     setLogError(null);
     getTransactionHistory(sessionToken)
-      .then(txs => { if (txs) setPayoutLogs(Array.isArray(txs) ? txs : []); })
+      .then(res => {
+        // The API might wrap data: res could be [] directly, or { data: [] }, or { transactions: [] }
+        let txs = res;
+        if (res && !Array.isArray(res)) {
+          txs = res.data || res.transactions || res.items || res.result || [];
+        }
+        if (!Array.isArray(txs)) txs = [];
+
+        // Debug: log raw API data to browser console so we can inspect field names
+        console.group('[PajCash] Transaction History API Response');
+        console.log('Raw response:', res);
+        console.log('Parsed txs array:', txs);
+        if (txs.length > 0) {
+          console.log('First transaction keys:', Object.keys(txs[0]));
+          console.log('First transaction:', txs[0]);
+        }
+        // Log localStorage orders for this wallet
+        const walletKey = publicKey.toBase58();
+        const localOrders = (() => {
+          try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
+          catch { return []; }
+        })();
+        console.log('Local orders in storage:', localOrders);
+        console.groupEnd();
+
+        setPayoutLogs(txs);
+      })
       .catch(e => {
         console.warn('Could not load payout history:', e);
         setLogError(e.message || 'Failed to load history.');
