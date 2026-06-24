@@ -279,7 +279,7 @@ export default function App() {
   const [rpcWarnDismissed, setRpcWarnDismissed] = useState(false);
 
   const [bulkMode, setBulkMode] = useState(false);
-  const [activeTab, setActiveTab] = useState('send');
+  const [activeTab, setActiveTab] = useState('p2p');
   const [showModal, setShowModal] = useState(false);
   // walletPubkey string state removed — use `publicKey` from useWallet() directly to
   // avoid exposing a redundant plaintext string that malicious extensions can enumerate via React fiber.
@@ -957,9 +957,9 @@ export default function App() {
         <div className="nav-logo-wrap">
           <img src={logoImg} alt="Fiatwallet Logo" className="nav-logo" />
           <div className="nav-links">
+            <button className={`nav-link-btn ${activeTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveTab('p2p')}>P2P</button>
             <button className={`nav-link-btn ${activeTab === 'send' ? 'active' : ''}`} onClick={() => setActiveTab('send')}>Send</button>
             <button className={`nav-link-btn ${activeTab === 'swap' ? 'active' : ''}`} onClick={() => setActiveTab('swap')}>Swap</button>
-            <button className={`nav-link-btn ${activeTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveTab('p2p')}>P2P</button>
           </div>
         </div>
 
@@ -977,6 +977,12 @@ export default function App() {
       <FloatClaimWidget liveSolPrice={liveSolPrice} onClaimSuccess={fetchBalances} />
 
       <div className={`main tab-${activeTab}`}>
+        <div className="app-card p2p-card">
+          <div className="card-body">
+            <P2PPanel connected={connected} walletTokenList={walletTokenList} />
+          </div>
+        </div>
+
         <div className="app-card send-card">
           <div className="card-body">
 
@@ -1119,12 +1125,6 @@ export default function App() {
           </div>
         </div>
 
-        <div className="app-card p2p-card">
-          <div className="card-body">
-            <P2PPanel connected={connected} walletTokenList={walletTokenList} />
-          </div>
-        </div>
-
         <SwapWidget
           walletTokenList={walletTokenList}
           onSwapSuccess={fetchBalances}
@@ -1160,6 +1160,15 @@ export default function App() {
 
       {/* Bottom Navigation for mobile view */}
       <div className="bottom-nav">
+        <button className={`bnav-item ${activeTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveTab('p2p')}>
+          <svg className="bnav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+          <span className="bnav-label">P2P</span>
+        </button>
         <button className={`bnav-item ${activeTab === 'send' ? 'active' : ''}`} onClick={() => setActiveTab('send')}>
           <svg className="bnav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="22" y1="2" x2="11" y2="13"></line>
@@ -1175,15 +1184,6 @@ export default function App() {
             <path d="M21 13v2a4 4 0 0 1-4 4H3"></path>
           </svg>
           <span className="bnav-label">Swap</span>
-        </button>
-        <button className={`bnav-item ${activeTab === 'p2p' ? 'active' : ''}`} onClick={() => setActiveTab('p2p')}>
-          <svg className="bnav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-          </svg>
-          <span className="bnav-label">P2P</span>
         </button>
       </div>
     </div>
