@@ -266,39 +266,36 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const isLiveRoute = LIVE_CURRENCIES.has(selectedCountry.currency) && mode === 'sell';
   const canTransact = !!sessionToken && isLiveRoute && !apiError;
 
-  // Only show real orders that belong to this wallet, matched against API history
+  // Show all transactions from the API (already scoped to authenticated user).
+  // Supplement with localStorage-only entries that haven't appeared in the API yet.
   const displayLogs = useMemo(() => {
+    // If the API returned transactions, use them as the primary source
+    if (payoutLogs.length > 0) {
+      // Sort newest-first
+      return [...payoutLogs].sort((a, b) => {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return tb - ta;
+      });
+    }
+
+    // API returned nothing yet — fall back to localStorage placeholders
     if (!publicKey) return [];
     const walletKey = publicKey.toBase58();
     const localOrders = (() => {
       try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
       catch { return []; }
     })();
-    if (localOrders.length === 0) return [];
-    const localIds = new Set(localOrders.map(o => o.id || o));
-    // Merge: prefer API data, fall back to localStorage metadata
-    return localOrders
-      .map(localEntry => {
-        // Match against API data using both `id` and `_id` fields
-        const localId = localEntry.id || (typeof localEntry === 'string' ? localEntry : null);
-        const apiLog = payoutLogs.find(l => {
-          const apiId = l.id || l._id;
-          return apiId && localId && (apiId === localId || String(apiId) === String(localId));
-        });
-        if (apiLog) return apiLog;
-        // Not yet confirmed by API — show placeholder from localStorage
-        return {
-          id: localEntry.id || localEntry,
-          status: 'PENDING',
-          createdAt: localEntry.ts ? new Date(localEntry.ts).toISOString() : null,
-          amount: null,
-          recipient: null,
-          bank: null,
-          sig: localEntry.sig,
-          mint: null,
-        };
-      })
-      .filter(Boolean);
+    return localOrders.map(entry => ({
+      id: entry.id || entry,
+      status: 'INIT',
+      createdAt: entry.ts ? new Date(entry.ts).toISOString() : null,
+      amount: null,
+      recipient: null,
+      bank: null,
+      sig: entry.sig,
+      mint: null,
+    }));
   }, [payoutLogs, publicKey]);
 
   const itemsPerPage = 5;
