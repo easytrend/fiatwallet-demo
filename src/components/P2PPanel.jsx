@@ -303,10 +303,57 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // Show all transactions from the API (already scoped to authenticated user).
   // Supplement with localStorage-only entries that haven't appeared in the API yet.
   const displayLogs = useMemo(() => {
-    // If the API returned transactions, use them as the primary source
+    if (!publicKey) return [];
+    const walletKey = publicKey.toBase58();
+    const localOrders = (() => {
+      try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
+      catch { return []; }
+    })();
+
+    const parseDestination = (dest) => {
+      if (!dest || typeof dest !== 'string') return null;
+      // Format is usually: "Bank Name - Account Number - Account Name"
+      const parts = dest.split(' - ').map(p => p.trim());
+      if (parts.length >= 3) {
+        return { bank: parts[0], account: parts[1], name: parts[2] };
+      }
+      const parts2 = dest.split(' • ').map(p => p.trim());
+      if (parts2.length >= 3) {
+        return { bank: parts2[0], account: parts2[1], name: parts2[2] };
+      }
+      return null;
+    };
+
+    const getLocalMeta = (apiLog) => {
+      const apiId = apiLog.id || apiLog._id;
+      return localOrders.find(entry => {
+        const localId = entry.id || (typeof entry === 'string' ? entry : null);
+        return (apiId && localId && String(apiId) === String(localId)) || 
+               (apiLog.sig && entry.sig && apiLog.sig === entry.sig);
+      });
+    };
+
+    // If the API returned transactions, use them as the primary source, but merge local metadata and parse destination fallbacks
     if (payoutLogs.length > 0) {
+      const merged = payoutLogs.map(apiLog => {
+        const localMatch = getLocalMeta(apiLog);
+        const parsedDest = parseDestination(apiLog.destination);
+
+        const bankVal = apiLog.bank || (parsedDest ? parsedDest.bank : null) || (localMatch ? localMatch.bank : null);
+        const accountVal = apiLog.accountNumber || apiLog.account || (parsedDest ? parsedDest.account : null) || (localMatch ? localMatch.account : null);
+        const nameVal = apiLog.accountName || apiLog.name || (parsedDest ? parsedDest.name : null) || (localMatch ? localMatch.name : null);
+
+        return {
+          ...apiLog,
+          bank: bankVal,
+          accountNumber: accountVal,
+          accountName: nameVal,
+          name: nameVal,
+        };
+      });
+
       // Sort newest-first
-      return [...payoutLogs].sort((a, b) => {
+      return merged.sort((a, b) => {
         const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
         const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
         return tb - ta;
@@ -314,19 +361,14 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }
 
     // API returned nothing yet — fall back to localStorage placeholders
-    if (!publicKey) return [];
-    const walletKey = publicKey.toBase58();
-    const localOrders = (() => {
-      try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
-      catch { return []; }
-    })();
     return localOrders.map(entry => ({
       id: entry.id || entry,
       status: 'INIT',
       createdAt: entry.ts ? new Date(entry.ts).toISOString() : null,
       amount: null,
-      recipient: null,
-      bank: null,
+      recipient: entry.name || null,
+      bank: entry.bank || null,
+      accountNumber: entry.account || null,
       sig: entry.sig,
       mint: null,
     }));
@@ -1081,13 +1123,20 @@ export default function P2PPanel({ connected, walletTokenList }) {
         return;
       }
 
-      // 8. Persist order ID in localStorage (keyed by wallet address)
+      // 8. Persist order details in localStorage (keyed by wallet address)
       const walletKey = publicKey.toBase58();
       const existing = (() => {
         try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
         catch { return []; }
       })();
-      existing.unshift({ id: order.id, sig, ts: Date.now() });
+      existing.unshift({ 
+        id: order.id, 
+        sig, 
+        ts: Date.now(),
+        bank: displayBank,
+        account: accountNumber.trim(),
+        name: accountName || 'Account Holder'
+      });
       localStorage.setItem(`paj_user_orders_${walletKey}`, JSON.stringify(existing.slice(0, 50)));
 
       setSuccessDetails({
@@ -1894,7 +1943,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         const statusVal = isConfirmed(successDetails.status) ? 'Successful' : isSettling(successDetails.status) ? 'Settling…' : 'Pending';
         const statusHeader = `TRANSFER ${statusVal.toUpperCase()}`;
         const bankMeta = bankName !== '—' ? getBankMetadata(bankName) : null;
-        const orderId = successDetails.orderId;
+        const orderId = successDetails.orderId || successDetails.id || successDetails._id || '—';
         const sig = successDetails.sig;
 
         return (
@@ -2114,7 +2163,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         const statusVal = isConfirmed(selectedLog.status) ? 'Successful' : isSettling(selectedLog.status) ? 'Settling…' : 'Pending';
         const statusHeader = `TRANSFER ${statusVal.toUpperCase()}`;
         const bankMeta = bankName !== '—' ? getBankMetadata(bankName) : null;
-        const orderId = selectedLog.id || selectedLog._id;
+        const orderId = selectedLog.orderId || selectedLog.id || selectedLog._id || selectedLog.reference || '—';
         const sig = selectedLog.sig;
 
         return (
