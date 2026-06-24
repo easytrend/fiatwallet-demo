@@ -1195,15 +1195,17 @@ export default function P2PPanel({ connected, walletTokenList }) {
                     }
                     const cleanName = name.trim();
                     if (cleanName) {
-                      displayName = `POS Transfer-${cleanName}`;
+                      displayName = cleanName;
                     } else if (log.bank) {
-                      displayName = `POS Transfer-${log.bank}`;
+                      displayName = log.bank;
                     } else {
-                      displayName = 'POS Transfer';
+                      displayName = 'Payout';
                     }
                   } else {
-                    displayName = 'POS Transfer';
+                    displayName = 'Pending Confirmation…';
                   }
+
+                  const upperName = displayName !== 'Pending Confirmation…' ? displayName.toUpperCase() : displayName;
 
                   return (
                     <div 
@@ -1283,9 +1285,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                               maxWidth: '160px', display: 'block' 
                             }}
-                            title={displayName}
+                            title={upperName}
                           >
-                            {displayName}
+                            {upperName}
                           </span>
                           <span style={{ color: 'var(--text3)', fontSize: '11px' }}>
                             {log.createdAt ? getRelativeTime(log.createdAt) : 'Recent'}
