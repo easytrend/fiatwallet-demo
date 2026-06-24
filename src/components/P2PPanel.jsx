@@ -81,68 +81,7 @@ const ALLOWED_PROGRAM_IDS = new Set([
 
 const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
 
-const MOCK_PAYOUT_LOGS = [
-  {
-    id: 'mock-1',
-    recipient: 'POS Transfer-TAMPY',
-    bank: 'Moniepoint',
-    amount: 0.8900,
-    status: 'PENDING',
-    createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
-    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    signature: '5K1234567890abcdef1234567890abcdef1234567890abcdef'
-  },
-  {
-    id: 'mock-2',
-    recipient: 'STEPHEN OLADIMENJI',
-    bank: 'OPay',
-    amount: 0.7500,
-    status: 'SUCCESSFUL',
-    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    signature: '5K4567890abcdef1234567890abcdef1234567890abcdef123'
-  },
-  {
-    id: 'mock-3',
-    recipient: 'MONICA TITILAYO',
-    bank: 'OPay',
-    amount: 3.6700,
-    status: 'PENDING',
-    createdAt: new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString(),
-    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    signature: '5K7890abcdef1234567890abcdef1234567890abcdef123456'
-  },
-  {
-    id: 'mock-4',
-    recipient: 'MONICA TITILAYO',
-    bank: 'OPay',
-    amount: 3.6700,
-    status: 'PENDING',
-    createdAt: new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString(),
-    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    signature: '5K101010abcdef1234567890abcdef1234567890abcdef123'
-  },
-  {
-    id: 'mock-5',
-    recipient: 'ABDULAZEEZ ABIOYE',
-    bank: 'OPay',
-    amount: 0.9000,
-    status: 'SUCCESSFUL',
-    createdAt: new Date(Date.now() - 22 * 60 * 60 * 1000).toISOString(),
-    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    signature: '5K202020abcdef1234567890abcdef1234567890abcdef123'
-  },
-  {
-    id: 'mock-6',
-    recipient: 'POS Transfer-TAMPY',
-    bank: 'Moniepoint',
-    amount: 1.1300,
-    status: 'SUCCESSFUL',
-    createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
-    mint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-    signature: '5K303030abcdef1234567890abcdef1234567890abcdef123'
-  }
-];
+
 
 const getRelativeTime = (isoString) => {
   if (!isoString) return 'Recent';
@@ -307,6 +246,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [successDetails, setSuccessDetails] = useState(null);
   const [showHistoryView, setShowHistoryView] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedLog, setSelectedLog] = useState(null); // log detail pop-up
 
   // ── QR Scanner Refs ──────────────────────────────────────────────────────
   const [scannerActive, setScannerActive] = useState(false);
@@ -318,9 +258,35 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const isLiveRoute = LIVE_CURRENCIES.has(selectedCountry.currency) && mode === 'sell';
   const canTransact = !!sessionToken && isLiveRoute && !apiError;
 
+  // Only show real orders that belong to this wallet, matched against API history
   const displayLogs = useMemo(() => {
-    return payoutLogs.length > 0 ? payoutLogs : MOCK_PAYOUT_LOGS;
-  }, [payoutLogs]);
+    if (!publicKey) return [];
+    const walletKey = publicKey.toBase58();
+    const localOrders = (() => {
+      try { return JSON.parse(localStorage.getItem(`paj_user_orders_${walletKey}`) || '[]'); }
+      catch { return []; }
+    })();
+    if (localOrders.length === 0) return [];
+    const localIds = new Set(localOrders.map(o => o.id || o));
+    // Merge: prefer API data, fall back to localStorage metadata
+    return localOrders
+      .map(localEntry => {
+        const apiLog = payoutLogs.find(l => (l.id || l._id) === (localEntry.id || localEntry));
+        if (apiLog) return apiLog;
+        // Not yet confirmed by API — show placeholder from localStorage
+        return {
+          id: localEntry.id || localEntry,
+          status: 'PENDING',
+          createdAt: localEntry.ts ? new Date(localEntry.ts).toISOString() : null,
+          amount: null,
+          recipient: null,
+          bank: null,
+          sig: localEntry.sig,
+          mint: null,
+        };
+      })
+      .filter(Boolean);
+  }, [payoutLogs, publicKey]);
 
   const itemsPerPage = 5;
   const totalPages = Math.ceil(displayLogs.length / itemsPerPage);
@@ -1055,7 +1021,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
       localStorage.setItem(`paj_user_orders_${walletKey}`, JSON.stringify(existing.slice(0, 50)));
 
       setSuccessDetails({
-        action: 'Sell',
         amount: `${estCryptoAmount.toFixed(4)} ${liveSelectedToken.symbol}`,
         fiat: `${selectedCountry.symbol}${fiatAmountText}`,
         bank: displayBank,
@@ -1063,6 +1028,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
         name: accountName || 'Account Holder',
         orderId: order.id,
         sig,
+        // status comes from the API — mark as PENDING initially; history refresh will update
+        status: 'PENDING',
       });
       setShowSuccess(true);
       // Clear form fields in the UI. Keep bank cache in localStorage so that
@@ -1071,6 +1038,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setAccountNumber('');
       setAccountName('');
       setSelectedBank('Choose Bank');
+      // Refresh history after 2s to get updated status from API
       setTimeout(loadPayoutLogs, 2000);
     } catch (err) {
       console.error('Transaction failed:', err);
@@ -1165,28 +1133,38 @@ export default function P2PPanel({ connected, walletTokenList }) {
             <>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minHeight: '300px' }}>
                 {paginatedLogs.map(log => (
-                  <div key={log._id || log.id} style={{
-                    background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
-                    borderRadius: '12px', padding: '12px', fontSize: '12px',
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  }}>
+                  <div 
+                    key={log._id || log.id}
+                    onClick={() => setSelectedLog(log)}
+                    style={{
+                      background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)',
+                      borderRadius: '12px', padding: '12px', fontSize: '12px',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      cursor: 'pointer', transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                  >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <span style={{ color: 'white', fontWeight: 'bold', fontSize: '13px' }}>
-                        {log.recipient || log.name || 'Recipient'}
+                        {log.recipient || log.name || 'Pending Confirmation…'}
                       </span>
                       <span style={{ color: 'var(--text3)', fontSize: '11px' }}>
-                        {log.bank || 'Bank'} • {log.createdAt ? getRelativeTime(log.createdAt) : 'Recent'}
+                        {log.bank ? `${log.bank} • ` : ''}{log.createdAt ? getRelativeTime(log.createdAt) : 'Recent'}
                       </span>
                       <span style={{ 
-                        color: log.status === 'SUCCESSFUL' ? 'var(--lime)' : log.status === 'FAILED' ? '#ef4444' : '#eab308', 
+                        color: log.status === 'SUCCESSFUL' ? 'var(--lime)' : log.status === 'FAILED' ? '#ef4444' : 'rgba(255,255,255,0.4)', 
                         fontSize: '10px', fontWeight: 'bold', letterSpacing: '0.05em' 
                       }}>
-                        {log.status || 'PROCESSING'}
+                        {log.status === 'SUCCESSFUL' ? 'Confirmed' : log.status === 'FAILED' ? 'Failed' : 'Pending'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                      <span style={{ color: 'var(--lime)', fontWeight: 'bold', fontSize: '14px' }}>
-                        {selectedCountry.symbol}{(log.fiatAmount || log.amount)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      <span style={{ color: log.fiatAmount || log.amount ? 'var(--lime)' : 'rgba(255,255,255,0.3)', fontWeight: 'bold', fontSize: '14px' }}>
+                        {(log.fiatAmount || log.amount) != null
+                          ? `${selectedCountry.symbol}${(log.fiatAmount || log.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : '—'
+                        }
                       </span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                         {getTokenLogo(log.mint) && <img src={getTokenLogo(log.mint)} alt="token" style={{ width: '12px', height: '12px', borderRadius: '50%' }} />}
@@ -1712,7 +1690,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       </>
       )}
 
-      {/* ── Success Modal ── */}
+      {/* ── Success Modal (never auto-closes, user must click Done) ── */}
       {showSuccess && successDetails && (
         <div className="p2p-success-overlay">
           <div className="p2p-success-card">
@@ -1721,12 +1699,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             </div>
-            <h3 className="p2p-success-title">Trade Submitted</h3>
-            <p className="p2p-success-sub" style={{ color: 'var(--lime)', fontWeight: 'bold' }}>
-              Transaction confirmed.
+            {/* Status label only — no title, no subtitle */}
+            <p style={{
+              fontSize: '18px', fontWeight: '700', margin: '0 0 1.25rem 0', textAlign: 'center',
+              color: successDetails.status === 'SUCCESSFUL' ? 'var(--lime)' : 'rgba(255,255,255,0.45)',
+            }}>
+              {successDetails.status === 'SUCCESSFUL' ? 'Confirmed' : 'Pending'}
             </p>
             <div className="p2p-success-fields">
-              <div className="p2p-success-field"><span>Action:</span><strong>{successDetails.action} {successDetails.amount}</strong></div>
+              <div className="p2p-success-field"><span>Action:</span><strong>{successDetails.amount}</strong></div>
               <div className="p2p-success-field"><span>Fiat Value:</span><strong>{successDetails.fiat}</strong></div>
               <div className="p2p-success-field"><span>Bank:</span><strong>{successDetails.bank}</strong></div>
               <div className="p2p-success-field"><span>Account:</span><strong>{successDetails.account}</strong></div>
@@ -1751,7 +1732,65 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </div>
               )}
             </div>
-            <button className="send-btn" onClick={() => { setShowSuccess(false); }} style={{ marginTop: '1rem' }}>
+            <button className="send-btn" onClick={() => { setShowSuccess(false); setSuccessDetails(null); }} style={{ marginTop: '1rem' }}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── History Detail Pop-up (clicking a history entry) ── */}
+      {selectedLog && (
+        <div className="p2p-success-overlay">
+          <div className="p2p-success-card">
+            <div className="p2p-success-icon-wrap">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </div>
+            <p style={{
+              fontSize: '18px', fontWeight: '700', margin: '0 0 1.25rem 0', textAlign: 'center',
+              color: selectedLog.status === 'SUCCESSFUL' ? 'var(--lime)' : 'rgba(255,255,255,0.45)',
+            }}>
+              {selectedLog.status === 'SUCCESSFUL' ? 'Confirmed' : 'Pending'}
+            </p>
+            <div className="p2p-success-fields">
+              {selectedLog.amount != null && (
+                <div className="p2p-success-field"><span>Action:</span><strong>{selectedLog.cryptoAmount || selectedLog.amount} {selectedLog.tokenSymbol || ''}</strong></div>
+              )}
+              {(selectedLog.fiatAmount || selectedLog.fiat) && (
+                <div className="p2p-success-field"><span>Fiat Value:</span><strong>{selectedCountry.symbol}{(selectedLog.fiatAmount || selectedLog.fiat)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></div>
+              )}
+              {selectedLog.bank && (
+                <div className="p2p-success-field"><span>Bank:</span><strong>{selectedLog.bank}</strong></div>
+              )}
+              {(selectedLog.accountNumber || selectedLog.account) && (
+                <div className="p2p-success-field"><span>Account:</span><strong>{selectedLog.accountNumber || selectedLog.account}</strong></div>
+              )}
+              {(selectedLog.recipient || selectedLog.name) && (
+                <div className="p2p-success-field"><span>Recipient:</span><strong>{selectedLog.recipient || selectedLog.name}</strong></div>
+              )}
+              {(selectedLog.id || selectedLog._id) && (
+                <div className="p2p-success-field">
+                  <span>Order ID:</span>
+                  <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '11px' }}>{selectedLog.id || selectedLog._id}</strong>
+                </div>
+              )}
+              {selectedLog.sig && (
+                <div className="p2p-success-field">
+                  <span>Tx Sig:</span>
+                  <a
+                    href={`https://solscan.io/tx/${selectedLog.sig}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--lime)', fontFamily: 'var(--mono)', fontSize: '10px', wordBreak: 'break-all' }}
+                  >
+                    {selectedLog.sig.slice(0, 16)}...
+                  </a>
+                </div>
+              )}
+            </div>
+            <button className="send-btn" onClick={() => setSelectedLog(null)} style={{ marginTop: '1rem' }}>
               Done
             </button>
           </div>
