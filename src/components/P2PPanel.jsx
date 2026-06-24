@@ -142,29 +142,6 @@ const formatTransactionDate = (dateStr) => {
   }
 };
 
-const getDeterministicFallback = (apiLog) => {
-  const id = apiLog.id || apiLog._id || '';
-  if (!id) return { bank: 'Opay', accountNumber: '8140321635', name: 'AUGUSTINE ONIMISI' };
-  
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) {
-    hash = id.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  hash = Math.abs(hash);
-  
-  const banks = ['Opay', 'Kuda Bank', 'Moniepoint', 'GTBank', 'Access Bank', 'Zenith Bank'];
-  const names = ['AUGUSTINE ONIMISI', 'MUHAMMED SULE', 'ODUNAYO COMFORT', 'EBUBE CHUKWU', 'JOHN DOE'];
-  
-  const bank = banks[hash % banks.length];
-  const name = names[(hash >> 2) % names.length];
-  const acctPrefixes = ['81', '90', '70', '30', '01'];
-  const prefix = acctPrefixes[(hash >> 4) % acctPrefixes.length];
-  const suffix = String((hash >> 6) % 100000000).padStart(8, '0');
-  const accountNumber = prefix + suffix;
-  
-  return { bank, accountNumber, name };
-};
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -384,30 +361,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
         const destString = apiLog.destination || apiLog.recipient;
         const parsedDest = parseDestination(destString);
 
-        // Parse description if it contains pipe separator
-        let descBank = null;
-        let descAccount = null;
-        let descName = null;
-        if (apiLog.description && typeof apiLog.description === 'string' && apiLog.description.includes('|')) {
-          const parts = apiLog.description.split('|');
-          if (parts.length >= 3) {
-            descBank = parts[0];
-            descAccount = parts[1];
-            descName = parts[2];
-          }
-        }
-
-        let bankVal = apiLog.bank || apiLog.bankName || apiLog.bank_name || descBank || (parsedDest ? parsedDest.bank : null) || (localMatch ? localMatch.bank : null);
-        let accountVal = apiLog.accountNumber || apiLog.account_number || apiLog.account || descAccount || (parsedDest ? parsedDest.account : null) || (localMatch ? localMatch.account : null);
-        let nameVal = apiLog.accountName || apiLog.account_name || apiLog.name || descName || (parsedDest ? parsedDest.name : null) || (localMatch ? localMatch.name : null);
-
-        // Fall back to deterministic mock metadata if details are missing
-        if (!bankVal || bankVal === '—' || !accountVal || accountVal === '—' || !nameVal || nameVal === '—' || nameVal.toUpperCase() === 'PAYOUT') {
-          const fallback = getDeterministicFallback(apiLog);
-          if (!bankVal || bankVal === '—') bankVal = fallback.bank;
-          if (!accountVal || accountVal === '—') accountVal = fallback.accountNumber;
-          if (!nameVal || nameVal === '—' || nameVal.toUpperCase() === 'PAYOUT') nameVal = fallback.name;
-        }
+        const bankVal = apiLog.bank || apiLog.bankName || apiLog.bank_name || (parsedDest ? parsedDest.bank : null) || (localMatch ? localMatch.bank : null);
+        const accountVal = apiLog.accountNumber || apiLog.account_number || apiLog.account || (parsedDest ? parsedDest.account : null) || (localMatch ? localMatch.account : null);
+        const nameVal = apiLog.accountName || apiLog.account_name || apiLog.name || (parsedDest ? parsedDest.name : null) || (localMatch ? localMatch.name : null);
 
         return {
           ...apiLog,
@@ -1104,7 +1060,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
           amount: Number(amount) / ngnRate,
           mint: liveSelectedToken.mint,
           chain: 'SOLANA',
-          description: `${displayBank}|${accountNumber.trim()}|${accountName || 'Account Holder'}`,
           webhookURL: import.meta.env.VITE_PAJCASH_WEBHOOK_URL || undefined,
         },
         sessionToken
