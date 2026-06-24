@@ -87,7 +87,7 @@ const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfc
 // PAID      = crypto received, fiat payout in progress
 // INIT      = order created, waiting for crypto
 const isConfirmed = (status) =>
-  status === 'COMPLETED' || status === 'SUCCESSFUL'; // guard legacy value too
+  status === 'COMPLETED' || status === 'SUCCESSFUL' || status === 'CONFIRMED'; // guard legacy value too
 
 const isSettling = (status) => status === 'PAID';
 
@@ -312,15 +312,36 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
     const parseDestination = (dest) => {
       if (!dest || typeof dest !== 'string') return null;
-      // Format is usually: "Bank Name - Account Number - Account Name"
-      const parts = dest.split(' - ').map(p => p.trim());
+
+      // Find any sequence of 5 to 20 digits representing the account number
+      const acctMatch = dest.match(/\b\d{5,20}\b/);
+      if (acctMatch) {
+        const account = acctMatch[0];
+        const acctIndex = dest.indexOf(account);
+
+        // Bank name is everything before the account number
+        let bank = dest.substring(0, acctIndex).trim();
+        // Remove trailing dashes, bullets, or spaces from bank name
+        bank = bank.replace(/[-•–—\s]+$/, '').trim();
+
+        // Recipient name is everything after the account number
+        let name = dest.substring(acctIndex + account.length).trim();
+        // Remove leading dashes, bullets, or spaces from recipient name
+        name = name.replace(/^[-•–—\s]+/, '').trim();
+
+        return { bank, account, name };
+      }
+
+      // Fallback: split by hyphens/bullets with optional spaces
+      const parts = dest.split(/\s*[-•–—]\s*/).map(p => p.trim());
       if (parts.length >= 3) {
-        return { bank: parts[0], account: parts[1], name: parts[2] };
+        return {
+          bank: parts[0],
+          account: parts[1],
+          name: parts.slice(2).join(' - ')
+        };
       }
-      const parts2 = dest.split(' • ').map(p => p.trim());
-      if (parts2.length >= 3) {
-        return { bank: parts2[0], account: parts2[1], name: parts2[2] };
-      }
+
       return null;
     };
 
@@ -337,11 +358,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
     if (payoutLogs.length > 0) {
       const merged = payoutLogs.map(apiLog => {
         const localMatch = getLocalMeta(apiLog);
-        const parsedDest = parseDestination(apiLog.destination);
+        const destString = apiLog.destination || apiLog.recipient;
+        const parsedDest = parseDestination(destString);
 
-        const bankVal = apiLog.bank || (parsedDest ? parsedDest.bank : null) || (localMatch ? localMatch.bank : null);
-        const accountVal = apiLog.accountNumber || apiLog.account || (parsedDest ? parsedDest.account : null) || (localMatch ? localMatch.account : null);
-        const nameVal = apiLog.accountName || apiLog.name || (parsedDest ? parsedDest.name : null) || (localMatch ? localMatch.name : null);
+        const bankVal = apiLog.bank || apiLog.bankName || apiLog.bank_name || (parsedDest ? parsedDest.bank : null) || (localMatch ? localMatch.bank : null);
+        const accountVal = apiLog.accountNumber || apiLog.account_number || apiLog.account || (parsedDest ? parsedDest.account : null) || (localMatch ? localMatch.account : null);
+        const nameVal = apiLog.accountName || apiLog.account_name || apiLog.name || (parsedDest ? parsedDest.name : null) || (localMatch ? localMatch.name : null);
 
         return {
           ...apiLog,
@@ -1263,32 +1285,28 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   const formattedCrypto = `${cryptoAmt.toFixed(4)} ${tokenSymbol}`;
 
                   // Determine display name
-                  let displayName = 'Pending Confirmation…';
-                  if (log.status !== 'INIT' && log.status !== 'PENDING') {
-                    let name = '';
-                    if (log.accountName && typeof log.accountName === 'string') {
-                      name = log.accountName;
-                    } else if (log.name && typeof log.name === 'string') {
-                      name = log.name;
-                    } else if (log.recipient && typeof log.recipient === 'string') {
-                      const isSol = log.recipient.length >= 32 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(log.recipient);
-                      if (!isSol) {
-                        name = log.recipient;
-                      }
+                  let displayName = '';
+                  let name = '';
+                  if (log.accountName && typeof log.accountName === 'string') {
+                    name = log.accountName;
+                  } else if (log.name && typeof log.name === 'string') {
+                    name = log.name;
+                  } else if (log.recipient && typeof log.recipient === 'string') {
+                    const isSol = log.recipient.length >= 32 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(log.recipient);
+                    if (!isSol) {
+                      name = log.recipient;
                     }
-                    const cleanName = name.trim();
-                    if (cleanName) {
-                      displayName = cleanName;
-                    } else if (log.bank) {
-                      displayName = log.bank;
-                    } else {
-                      displayName = 'Payout';
-                    }
+                  }
+                  const cleanName = name.trim();
+                  if (cleanName) {
+                    displayName = cleanName;
+                  } else if (log.bank) {
+                    displayName = log.bank;
                   } else {
-                    displayName = 'Pending Confirmation…';
+                    displayName = 'Payout';
                   }
 
-                  const upperName = displayName !== 'Pending Confirmation…' ? displayName.toUpperCase() : displayName;
+                  const upperName = displayName.toUpperCase();
 
                   return (
                     <div 
@@ -1405,7 +1423,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                           color: isConfirmed(log.status) ? 'var(--lime)' : isSettling(log.status) ? '#eab308' : log.status === 'FAILED' ? '#ef4444' : 'rgba(255,255,255,0.4)', 
                           fontSize: '11px', fontWeight: 'bold'
                         }}>
-                          {isConfirmed(log.status) ? 'Successful' : isSettling(log.status) ? 'Settling…' : log.status === 'FAILED' ? 'Failed' : 'Pending'}
+                          {isConfirmed(log.status) ? 'Confirmed' : isSettling(log.status) ? 'Settling…' : log.status === 'FAILED' ? 'Failed' : 'Pending'}
                         </span>
                       </div>
                     </div>
@@ -1940,7 +1958,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         const accountNumber = successDetails.account || '—';
         const bankName = successDetails.bank || '—';
         const dateStr = formatTransactionDate(successDetails.createdAt || new Date().toISOString());
-        const statusVal = isConfirmed(successDetails.status) ? 'Successful' : isSettling(successDetails.status) ? 'Settling…' : 'Pending';
+        const statusVal = isConfirmed(successDetails.status) ? 'Confirmed' : isSettling(successDetails.status) ? 'Settling…' : 'Pending';
         const statusHeader = `TRANSFER ${statusVal.toUpperCase()}`;
         const bankMeta = bankName !== '—' ? getBankMetadata(bankName) : null;
         const orderId = successDetails.orderId || successDetails.id || successDetails._id || '—';
@@ -1966,15 +1984,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   width: '56px',
                   height: '56px',
                   borderRadius: '50%',
-                  background: statusVal === 'Successful' ? 'rgba(34, 197, 94, 0.1)' : statusVal === 'Settling…' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-                  border: statusVal === 'Successful' ? '2px solid rgba(34, 197, 94, 0.4)' : statusVal === 'Settling…' ? '2px solid rgba(234, 179, 8, 0.4)' : '2px solid rgba(255, 255, 255, 0.15)',
+                  background: statusVal === 'Confirmed' ? 'rgba(34, 197, 94, 0.1)' : statusVal === 'Settling…' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                  border: statusVal === 'Confirmed' ? '2px solid rgba(34, 197, 94, 0.4)' : statusVal === 'Settling…' ? '2px solid rgba(234, 179, 8, 0.4)' : '2px solid rgba(255, 255, 255, 0.15)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   margin: '0 auto 20px auto'
                 }}
               >
-                {statusVal === 'Successful' ? (
+                {statusVal === 'Confirmed' ? (
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
@@ -2160,7 +2178,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         const accountNumber = selectedLog.accountNumber || selectedLog.account || '—';
         const bankName = selectedLog.bank || '—';
         const dateStr = formatTransactionDate(selectedLog.createdAt);
-        const statusVal = isConfirmed(selectedLog.status) ? 'Successful' : isSettling(selectedLog.status) ? 'Settling…' : 'Pending';
+        const statusVal = isConfirmed(selectedLog.status) ? 'Confirmed' : isSettling(selectedLog.status) ? 'Settling…' : 'Pending';
         const statusHeader = `TRANSFER ${statusVal.toUpperCase()}`;
         const bankMeta = bankName !== '—' ? getBankMetadata(bankName) : null;
         const orderId = selectedLog.orderId || selectedLog.id || selectedLog._id || selectedLog.reference || '—';
@@ -2186,15 +2204,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   width: '56px',
                   height: '56px',
                   borderRadius: '50%',
-                  background: statusVal === 'Successful' ? 'rgba(34, 197, 94, 0.1)' : statusVal === 'Settling…' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(255, 255, 255, 0.05)',
-                  border: statusVal === 'Successful' ? '2px solid rgba(34, 197, 94, 0.4)' : statusVal === 'Settling…' ? '2px solid rgba(234, 179, 8, 0.4)' : '2px solid rgba(255, 255, 255, 0.15)',
+                  background: statusVal === 'Confirmed' ? 'rgba(34, 197, 94, 0.1)' : statusVal === 'Settling…' ? 'rgba(234, 179, 8, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                  border: statusVal === 'Confirmed' ? '2px solid rgba(34, 197, 94, 0.4)' : statusVal === 'Settling…' ? '2px solid rgba(234, 179, 8, 0.4)' : '2px solid rgba(255, 255, 255, 0.15)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   margin: '0 auto 20px auto'
                 }}
               >
-                {statusVal === 'Successful' ? (
+                {statusVal === 'Confirmed' ? (
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
