@@ -711,6 +711,7 @@ export default function SwapWidget({
         userAddress: publicKey.toBase58(),
         type: 'swap',
         symbol: inputToken?.symbol || 'UNKNOWN',
+        tokenAmount: n,
         usdValue: n * inputPrice,
       });
 

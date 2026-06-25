@@ -10,9 +10,14 @@ CREATE TABLE IF NOT EXISTS public.transactions (
   user_address  text NOT NULL,
   transaction_type text NOT NULL,
   token_symbol  text NOT NULL DEFAULT 'SOL',
+  token_amount  numeric(28, 8) NOT NULL DEFAULT 0,
   usd_value     numeric(18, 2) NOT NULL DEFAULT 0,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
+
+-- Alter table to add column if it already exists
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS token_amount numeric(28, 8) NOT NULL DEFAULT 0;
+
 
 CREATE INDEX IF NOT EXISTS idx_transactions_user_address ON public.transactions (user_address);
 CREATE INDEX IF NOT EXISTS idx_transactions_type ON public.transactions (transaction_type);
@@ -141,9 +146,72 @@ ORDER BY created_at DESC;
 -- LIMIT 100;
 
 -- 7. Grant schema privileges for anon/authenticated/service_role roles to prevent "permission denied" on upsert
+-- 7. Grant schema privileges for anon/authenticated/service_role roles to prevent "permission denied" on upsert
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.transactions TO anon, authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.p2p_transactions TO anon, authenticated, service_role;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
+
+-- 8. Analytics and reporting Views
+
+-- 8.1. P2P App-card / General transaction details
+CREATE OR REPLACE VIEW public.p2p_app_card_transactions AS
+SELECT 
+  user_address,
+  transaction_type,
+  token_symbol AS token,
+  token_amount AS token_quantity,
+  usd_value AS amount_in_usd_value,
+  created_at AS timestamp
+FROM public.transactions
+ORDER BY created_at DESC;
+
+-- 8.2. User activity summary
+CREATE OR REPLACE VIEW public.user_transaction_summary AS
+SELECT 
+  user_address,
+  COUNT(*) AS total_transactions,
+  SUM(usd_value) AS amount_in_usd_value
+FROM public.transactions
+GROUP BY user_address
+ORDER BY amount_in_usd_value DESC;
+
+-- 8.3. Daily users and volume
+CREATE OR REPLACE VIEW public.daily_activity_metrics AS
+SELECT 
+  created_at::date AS day,
+  COUNT(DISTINCT user_address) AS daily_users_count,
+  SUM(usd_value) AS daily_usd_volume
+FROM public.transactions
+GROUP BY created_at::date
+ORDER BY day DESC;
+
+-- 8.4. Weekly users and volume
+CREATE OR REPLACE VIEW public.weekly_activity_metrics AS
+SELECT 
+  date_trunc('week', created_at)::date AS week,
+  COUNT(DISTINCT user_address) AS weekly_users_count,
+  SUM(usd_value) AS weekly_usd_volume
+FROM public.transactions
+GROUP BY date_trunc('week', created_at)
+ORDER BY week DESC;
+
+-- 8.5. Monthly users and volume
+CREATE OR REPLACE VIEW public.monthly_activity_metrics AS
+SELECT 
+  date_trunc('month', created_at)::date AS month,
+  COUNT(DISTINCT user_address) AS monthly_users_count,
+  SUM(usd_value) AS monthly_usd_volume
+FROM public.transactions
+GROUP BY date_trunc('month', created_at)
+ORDER BY month DESC;
+
+-- Grant permissions for views
+GRANT SELECT ON public.p2p_app_card_transactions TO anon, authenticated, service_role;
+GRANT SELECT ON public.user_transaction_summary TO anon, authenticated, service_role;
+GRANT SELECT ON public.daily_activity_metrics TO anon, authenticated, service_role;
+GRANT SELECT ON public.weekly_activity_metrics TO anon, authenticated, service_role;
+GRANT SELECT ON public.monthly_activity_metrics TO anon, authenticated, service_role;
+
 

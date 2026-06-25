@@ -933,6 +933,7 @@ export default function App() {
           userAddress: publicKey.toBase58(),
           type: 'send',
           symbol: tokLive.symbol,
+          tokenAmount: tokAmt,
           usdValue: tokAmt * (tokLive.price || 0),
         });
 

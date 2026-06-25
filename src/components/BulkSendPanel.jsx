@@ -553,6 +553,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
           userAddress: publicKey.toBase58(),
           type: 'bulk_send',
           symbol: tok?.symbol || 'UNKNOWN',
+          tokenAmount: totalRequested,
           usdValue: totalUSD,
         });
       }

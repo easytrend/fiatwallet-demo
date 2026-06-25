@@ -10,7 +10,7 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
 /**
  * Log a general on-chain transaction (send, swap, bulk_send, claims).
  */
-export async function logTransaction({ signature, userAddress, type, symbol, usdValue }) {
+export async function logTransaction({ signature, userAddress, type, symbol, tokenAmount, usdValue }) {
   if (!supabase || !signature) return;
 
   try {
@@ -22,6 +22,7 @@ export async function logTransaction({ signature, userAddress, type, symbol, usd
           user_address: userAddress,
           transaction_type: type,
           token_symbol: symbol,
+          token_amount: parseFloat(tokenAmount) || 0,
           usd_value: parseFloat(usdValue) || 0,
         },
         { onConflict: 'signature' }
@@ -82,6 +83,7 @@ export async function logP2PTransaction({
           user_address: userAddress,
           transaction_type: 'p2p_offramp',
           token_symbol: tokenSymbol,
+          token_amount: parseFloat(cryptoAmount) || 0,
           usd_value: parseFloat(usdValue) || 0,
         },
         { onConflict: 'signature' }

@@ -245,6 +245,7 @@ async function main() {
                 user_address: wallet,
                 transaction_type: type,
                 token_symbol: symbol,
+                token_amount: amount,
                 usd_value: parseFloat(usdValue.toFixed(2)),
                 created_at: fullTimestamp
               }, { onConflict: 'signature' });

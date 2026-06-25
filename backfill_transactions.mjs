@@ -119,7 +119,7 @@ function classifyTransaction(tx, walletAddress) {
 function extractTokenInfo(tx, walletAddress) {
   const SOL_PRICE = 148.5; // fallback static price
 
-  if (!tx?.meta) return { symbol: 'SOL', usdValue: 0 };
+  if (!tx?.meta) return { symbol: 'SOL', amount: 0, usdValue: 0 };
 
   const accountKeys = tx.transaction.message.accountKeys.map(k =>
     typeof k === 'string' ? k : k.toBase58()
@@ -143,7 +143,7 @@ function extractTokenInfo(tx, walletAddress) {
       const known    = KNOWN_MINTS[post.mint];
       const symbol   = known?.symbol   ?? post.mint.slice(0, 6) + '…';
       const price    = known?.price    ?? 0;
-      return { symbol, usdValue: Math.round(diff * price * 100) / 100 };
+      return { symbol, amount: diff, usdValue: Math.round(diff * price * 100) / 100 };
     }
   }
 
@@ -155,11 +155,11 @@ function extractTokenInfo(tx, walletAddress) {
     const fee     = tx.meta.fee ?? 0;
     const solSent = (preBal - postBal - fee) / LAMPORTS_PER_SOL;
     if (solSent > 0) {
-      return { symbol: 'SOL', usdValue: Math.round(solSent * SOL_PRICE * 100) / 100 };
+      return { symbol: 'SOL', amount: solSent, usdValue: Math.round(solSent * SOL_PRICE * 100) / 100 };
     }
   }
 
-  return { symbol: 'UNKNOWN', usdValue: 0 };
+  return { symbol: 'UNKNOWN', amount: 0, usdValue: 0 };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -240,7 +240,7 @@ async function main() {
 
       // Classify and extract info
       const type            = classifyTransaction(tx, walletAddress) ?? 'unknown';
-      const { symbol, usdValue } = extractTokenInfo(tx, walletAddress);
+      const { symbol, amount, usdValue } = extractTokenInfo(tx, walletAddress);
 
       // Skip truly unknown/unclassifiable transactions (e.g. program deployments)
       if (type === 'unknown' && usdValue === 0) {
@@ -254,6 +254,7 @@ async function main() {
         user_address:      walletAddress,
         transaction_type:  type,
         token_symbol:      symbol,
+        token_amount:      amount,
         usd_value:         usdValue,
       }]);
 
