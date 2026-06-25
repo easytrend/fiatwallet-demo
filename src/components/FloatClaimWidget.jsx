@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, SystemProgram, SystemInstruction, Connection, VersionedTransaction, TransactionMessage, TransactionInstruction } from '@solana/web3.js';
 import { createCloseAccountInstruction } from '@solana/spl-token';
+import { logTransaction } from '../services/supabase';
 
 
 const PUMP_PROGRAM_ID = new PublicKey("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
@@ -410,7 +411,15 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
       setRentClaimed(true);
 
-
+      if (signatures[0]) {
+        logTransaction({
+          signature: signatures[0],
+          userAddress: publicKey.toBase58(),
+          type: 'rent_claim',
+          symbol: 'SOL',
+          usdValue: netSOL * (liveSolPrice || 72.70),
+        });
+      }
 
       setEmptyAccounts([]);
       setToast({
@@ -620,7 +629,15 @@ export default function FloatClaimWidget({ liveSolPrice, onClaimSuccess }) {
 
       setCashbackClaimed(true);
 
-
+      if (signature) {
+        logTransaction({
+          signature,
+          userAddress: publicKey.toBase58(),
+          type: 'cashback_claim',
+          symbol: 'SOL',
+          usdValue: netCashbackAmount * (liveSolPrice || 72.70),
+        });
+      }
 
       setToast({
         type: 'success',

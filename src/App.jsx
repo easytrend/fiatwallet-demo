@@ -17,6 +17,7 @@ import Toast from './components/Toast';
 import FloatClaimWidget from './components/FloatClaimWidget';
 import SwapWidget from './components/SwapWidget';
 import P2PPanel from './components/P2PPanel';
+import { logTransaction } from './services/supabase';
 
 
 // SNS_LINK must not embed referral/tracking parameters.
@@ -927,7 +928,13 @@ export default function App() {
       if (confirmed) {
         setWalletError(null);
 
-
+        logTransaction({
+          signature,
+          userAddress: publicKey.toBase58(),
+          type: 'send',
+          symbol: tokLive.symbol,
+          usdValue: tokAmt * (tokLive.price || 0),
+        });
 
         setToast({
           type: 'success',

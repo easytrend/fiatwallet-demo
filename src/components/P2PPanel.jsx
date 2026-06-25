@@ -12,6 +12,7 @@ import {
   initiateSession,
   verifySession,
 } from '../services/pajcashService';
+import { logP2PTransaction, syncP2PTransactionStatuses } from '../services/supabase';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram } from '@solana/web3.js';
 import {
@@ -548,6 +549,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         console.log('Local orders in storage:', localOrders);
         console.groupEnd();
 
+        syncP2PTransactionStatuses(txs);
         setPayoutLogs(txs);
       })
       .catch(e => {
@@ -1160,6 +1162,29 @@ export default function P2PPanel({ connected, walletTokenList }) {
         name: accountName || 'Account Holder'
       });
       localStorage.setItem(`paj_user_orders_${walletKey}`, JSON.stringify(existing.slice(0, 50)));
+
+      const cryptoLogged = order.amount || estCryptoAmount;
+      const fiatLogged = Number(amount);
+      const usdLogged = selectedCountry.currency === 'USD'
+        ? fiatLogged
+        : fiatLogged / (ngnRate || 1);
+
+      logP2PTransaction({
+        signature: sig,
+        userAddress: walletKey,
+        orderId: order.id,
+        tokenSymbol: liveSelectedToken.symbol,
+        cryptoAmount: cryptoLogged,
+        fiatCurrency: selectedCountry.currency,
+        fiatAmount: fiatLogged,
+        usdValue: usdLogged,
+        bankName: displayBank,
+        accountNumber: accountNumber.trim(),
+        accountName: accountName || 'Account Holder',
+        status: 'INIT',
+        userEmail: sessionEmail || undefined,
+        depositAddress: order.address,
+      });
 
       setSuccessDetails({
         amount: `${estCryptoAmount.toFixed(4)} ${liveSelectedToken.symbol}`,

@@ -25,6 +25,7 @@ import {
   JUP_MINT,
   WIF_MINT,
 } from '../services/swapService';
+import { logTransaction } from '../services/supabase';
 import { fmtTok, fmtFiat } from '../utils';
 import CurrDrop from './CurrDrop';
 
@@ -704,7 +705,14 @@ export default function SwapWidget({
       }
       if (!confirmed) throw new Error('Swap submitted but confirmation timed out.');
 
-
+      const inputPrice = inputToken?.price || 0;
+      logTransaction({
+        signature: sig,
+        userAddress: publicKey.toBase58(),
+        type: 'swap',
+        symbol: inputToken?.symbol || 'UNKNOWN',
+        usdValue: n * inputPrice,
+      });
 
       setSwapSuccess({ sig, from: `${n} ${inputToken.symbol}`, to: `${outputAmount?.toFixed(4) ?? '?'} ${outputToken.symbol}` });
       setInputAmount('');
