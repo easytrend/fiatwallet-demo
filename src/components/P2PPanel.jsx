@@ -2107,7 +2107,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                       </span>
                     ) : (
                       amount && Number(amount) > 0
-                        ? `≈ ${estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} (fee: ${platformFee.toFixed(4)})`
+                        ? `≈ ${estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} (fee: ${platformFee.toFixed(4)} ${liveSelectedToken.symbol})`
                         : `≈ ${liveSelectedToken.symbol}`
                     )}
                   </span>
@@ -2315,7 +2315,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px', marginTop: '8px' }}>
                 <span className="amount-converted" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.38)', fontFamily: 'var(--ff)' }}>
                   {parsedOnrampAmt > 0
-                    ? `≈ ${estOnrampCrypto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} (fee: ${onrampFee.toFixed(4)})`
+                    ? `≈ ${(estOnrampCrypto - onrampFee).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} (fee: ${onrampFee.toFixed(4)} ${liveSelectedToken.symbol})`
                     : `≈ ${liveSelectedToken.symbol}`
                   }
                 </span>
