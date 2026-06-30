@@ -1032,13 +1032,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const onrampNgnRate = pajRates?.onRampRate?.rate || pajRates?.rate || 1500;
   const ngnRate = tokenPriceUsd * activeNgnRate;
   const parsedAmt = parseFloat(amount) || 0;
-  const estCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
+  const baseCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
   const platformFee = parsedAmt > 0 ? 0.1 : 0;
+  const estCryptoAmount = baseCryptoAmount > 0 ? (baseCryptoAmount + platformFee) : 0;
   const fiatAmountText = parsedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
-  const estOnrampCrypto = onrampNgnRate > 0 ? (parsedOnrampAmt / onrampNgnRate) : 0;
+  const grossOnrampCrypto = onrampNgnRate > 0 ? (parsedOnrampAmt / onrampNgnRate) : 0;
   const onrampFee = parsedOnrampAmt > 0 ? 0.1 : 0;
+  const estOnrampCrypto = grossOnrampCrypto > 0 ? Math.max(0, grossOnrampCrypto - onrampFee) : 0;
 
   const allBankNames = useMemo(() => {
     return apiBanks.map(b => (typeof b === 'string' ? b : b.name || b.bank_name || ''));
@@ -1114,7 +1116,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       const order = await createOnrampOrder(
         {
           currency: 'NGN',
-          amount: estOnrampCrypto,
+          amount: grossOnrampCrypto,
           recipient: publicKey.toBase58(),
           chain: 'SOLANA',
           fee: onrampFee,
@@ -1181,7 +1183,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           bank: bankId,
           accountNumber: accountNumber.trim(),
           currency: selectedCountry.currency,
-          amount: Number(amount) / ngnRate,
+          amount: estCryptoAmount,
           mint: liveSelectedToken.mint,
           chain: 'SOLANA',
           fee: platformFee,
