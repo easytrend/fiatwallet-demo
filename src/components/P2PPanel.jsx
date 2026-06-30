@@ -124,7 +124,11 @@ const getCleanNameForLog = (log) => {
     }
   }
   const clean = name.trim();
-  return clean || log.bank || 'Payout';
+  // Prefer resolved account name, then bank name, then account number, then generic label
+  if (clean) return clean;
+  if (log.bank) return log.bank;
+  if (log.accountNumber || log.account_number || log.account) return `Acct ${log.accountNumber || log.account_number || log.account}`;
+  return 'Payout';
 };
 
 const formatTransactionDate = (dateStr) => {
@@ -311,6 +315,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
       catch { return []; }
     })();
 
+    // Helper: detect cancelled status
+    const isCancelled = (status) => {
+      if (!status) return false;
+      const s = status.toUpperCase();
+      return s === 'CANCELLED' || s === 'CANCELED' || s === 'CANCEL';
+    };
+
     const parseDestination = (dest) => {
       if (!dest || typeof dest !== 'string') return null;
 
@@ -330,7 +341,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         // Remove leading dashes, bullets, or spaces from recipient name
         name = name.replace(/^[-•–—\s]+/, '').trim();
 
-        return { bank, account, name };
+        return { bank: bank || null, account, name: name || null };
       }
 
       // Fallback: split by hyphens/bullets with optional spaces
@@ -343,6 +354,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
         };
       }
 
+      // Last resort: if the whole string is a digit sequence, treat it as account number
+      if (/^\d{5,20}$/.test(dest.trim())) {
+        return { bank: null, account: dest.trim(), name: null };
+      }
+
       return null;
     };
 
@@ -351,29 +367,42 @@ export default function P2PPanel({ connected, walletTokenList }) {
       return localOrders.find(entry => {
         const localId = entry.id || (typeof entry === 'string' ? entry : null);
         return (apiId && localId && String(apiId) === String(localId)) || 
-               (apiLog.sig && entry.sig && apiLog.sig === entry.sig);
+               (apiLog.sig && entry.sig && apiLog.sig === entry.sig) ||
+               // Match by order id in reference fields
+               (apiLog.reference && entry.id && String(apiLog.reference) === String(entry.id));
       });
     };
 
     // If the API returned transactions, use them as the primary source, but merge local metadata and parse destination fallbacks
     if (payoutLogs.length > 0) {
-      const merged = payoutLogs.map(apiLog => {
-        const localMatch = getLocalMeta(apiLog);
-        const destString = apiLog.destination || apiLog.recipient;
-        const parsedDest = parseDestination(destString);
+      const merged = payoutLogs
+        .filter(apiLog => !isCancelled(apiLog.status)) // hide cancelled
+        .map(apiLog => {
+          const localMatch = getLocalMeta(apiLog);
+          const destString = apiLog.destination || apiLog.recipient;
+          const parsedDest = parseDestination(destString);
 
-        const bankVal = apiLog.bank || apiLog.bankName || apiLog.bank_name || (parsedDest ? parsedDest.bank : null) || (localMatch ? localMatch.bank : null);
-        const accountVal = apiLog.accountNumber || apiLog.account_number || apiLog.account || (parsedDest ? parsedDest.account : null) || (localMatch ? localMatch.account : null);
-        const nameVal = apiLog.accountName || apiLog.account_name || apiLog.name || (parsedDest ? parsedDest.name : null) || (localMatch ? localMatch.name : null);
+          const bankVal = apiLog.bank || apiLog.bankName || apiLog.bank_name ||
+            (parsedDest ? parsedDest.bank : null) ||
+            (localMatch ? localMatch.bank : null);
+          const accountVal = apiLog.accountNumber || apiLog.account_number || apiLog.account ||
+            (parsedDest ? parsedDest.account : null) ||
+            (localMatch ? localMatch.account : null);
+          const nameVal = apiLog.accountName || apiLog.account_name || apiLog.name ||
+            (parsedDest ? parsedDest.name : null) ||
+            (localMatch ? localMatch.name : null);
+          // Merge on-chain signature from localStorage if the API didn't return it
+          const sigVal = apiLog.sig || apiLog.signature || (localMatch ? localMatch.sig : null);
 
-        return {
-          ...apiLog,
-          bank: bankVal,
-          accountNumber: accountVal,
-          accountName: nameVal,
-          name: nameVal,
-        };
-      });
+          return {
+            ...apiLog,
+            bank: bankVal,
+            accountNumber: accountVal,
+            accountName: nameVal,
+            name: nameVal,
+            sig: sigVal,
+          };
+        });
 
       // Sort newest-first
       return merged.sort((a, b) => {
@@ -383,21 +412,25 @@ export default function P2PPanel({ connected, walletTokenList }) {
       });
     }
 
-    // API returned nothing yet — fall back to localStorage placeholders
-    return localOrders.map(entry => ({
-      id: entry.id || entry,
-      status: 'INIT',
-      createdAt: entry.ts ? new Date(entry.ts).toISOString() : null,
-      amount: null,
-      recipient: entry.name || null,
-      bank: entry.bank || null,
-      accountNumber: entry.account || null,
-      sig: entry.sig,
-      mint: null,
-    }));
+    // API returned nothing yet — fall back to localStorage placeholders, excluding cancelled
+    return localOrders
+      .filter(entry => !isCancelled(entry.status))
+      .map(entry => ({
+        id: entry.id || entry,
+        status: 'INIT',
+        createdAt: entry.ts ? new Date(entry.ts).toISOString() : null,
+        amount: null,
+        recipient: entry.name || null,
+        bank: entry.bank || null,
+        accountNumber: entry.account || null,
+        accountName: entry.name || null,
+        name: entry.name || null,
+        sig: entry.sig,
+        mint: null,
+      }));
   }, [payoutLogs, publicKey]);
 
-  const itemsPerPage = 5;
+  const itemsPerPage = 10;
   const totalPages = Math.ceil(displayLogs.length / itemsPerPage);
   const paginatedLogs = useMemo(() => {
     return displayLogs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -428,6 +461,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   // ── Restore bank and session details from localStorage on wallet connect ──
   useEffect(() => {
+    // Always clear history when wallet changes so a newly connected wallet
+    // never sees transactions from the previously connected wallet.
+    setPayoutLogs([]);
+
     if (publicKey) {
       const key = publicKey.toBase58();
       
@@ -645,16 +682,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }
   }, [authError]);
 
-  useEffect(() => {
-    if (showSuccess) {
-      const timer = setTimeout(() => {
-        setShowSuccess(false);
-        // Clear amount only (bank/account details stay cached for autofill)
-        setAmount('');
-      }, 10000);
-      return () => clearTimeout(timer);
-    }
-  }, [showSuccess]);
+  // NOTE: Success card is intentionally NOT auto-closed.
+  // It stays visible until the user clicks "Done".
 
   // ── Autofill from previous details ──────────────────────────────────────
   // When user types first 4+ digits of account number, check if it matches
@@ -807,7 +836,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   useEffect(() => {
     const available = selectableTokens.some(t => t.symbol === selectedToken.symbol || t.mint === selectedToken.mint);
-    if (!available && selectableTokens.length > 0) setSelectedToken(selectableTokens[0]);
+    const isLiveToken = selectedToken.symbol === 'USDC' || selectedToken.symbol === 'USDT';
+    // Reset to USDC if the currently selected token is unavailable OR is not a live (USDC/USDT) token
+    if ((!available || !isLiveToken) && selectableTokens.length > 0) {
+      const usdc = selectableTokens.find(t => t.symbol === 'USDC') || selectableTokens[0];
+      setSelectedToken(usdc);
+    }
   }, [connected, walletTokenList, pajTokens]);
 
   // ── Camera Scanner (QR + OCR for 10-digit account numbers) ────────────────
@@ -1000,6 +1034,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
       return aLower.localeCompare(bLower);
     });
   }, [allBankNames, bankSearch]);
+
+  // Nigeria is the only live country; all others show "Coming Soon"
+  const LIVE_COUNTRY_CODES = new Set(['NGA']);
 
   const filteredCountries = COUNTRIES.filter(c =>
     c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
@@ -1518,17 +1555,41 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 />
               </div>
               <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                {filteredCountries.map(c => (
-                  <div
-                    key={c.code}
-                    className={`drop-item ${selectedCountry.code === c.code ? 'sel' : ''}`}
-                    onClick={() => { setSelectedCountry(c); setCountryOpen(false); setCountrySearch(''); }}
-                  >
-                    <span className="curr-flag">{c.flag}</span>
-                    <span className="di-code" style={{ marginLeft: '8px' }}>{c.code}</span>
-                    <span className="di-name">{c.name}</span>
-                  </div>
-                ))}
+                {filteredCountries.map(c => {
+                  const isLiveCountry = LIVE_COUNTRY_CODES.has(c.code);
+                  return (
+                    <div
+                      key={c.code}
+                      className={`drop-item ${selectedCountry.code === c.code ? 'sel' : ''} ${!isLiveCountry ? 'country-coming-soon' : ''}`}
+                      onClick={() => {
+                        if (!isLiveCountry) return; // block non-Nigeria selection
+                        setSelectedCountry(c);
+                        setCountryOpen(false);
+                        setCountrySearch('');
+                      }}
+                      style={{ opacity: isLiveCountry ? 1 : 0.55, cursor: isLiveCountry ? 'pointer' : 'not-allowed' }}
+                    >
+                      <span className="curr-flag">{c.flag}</span>
+                      <span className="di-code" style={{ marginLeft: '8px' }}>{c.code}</span>
+                      <span className="di-name">{c.name}</span>
+                      {!isLiveCountry && (
+                        <span style={{
+                          marginLeft: 'auto',
+                          fontSize: '9px',
+                          fontWeight: '700',
+                          color: '#f59e0b',
+                          background: 'rgba(245,158,11,0.12)',
+                          border: '1px solid rgba(245,158,11,0.3)',
+                          borderRadius: '4px',
+                          padding: '1px 5px',
+                          letterSpacing: '0.03em',
+                          textTransform: 'uppercase',
+                          flexShrink: 0,
+                        }}>Soon</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1831,28 +1892,55 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
                     {tokenOpen && (
                       <div className="drop-menu" style={{ right: 0, minWidth: '220px', zIndex: 100 }}>
-                        {selectableTokens.map(t => (
-                          <div
-                            key={t.mint || t.symbol}
-                            className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
-                            onClick={() => { setSelectedToken(t); setTokenOpen(false); }}
-                            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px' }}
-                          >
-                            {t.logoURI ? (
-                              <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
-                            ) : (
-                              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                                {t.symbol.slice(0, 2)}
-                              </div>
-                            )}
-                            <span className="di-code" style={{ marginLeft: 0 }}>{t.symbol}</span>
-                            {t.balance > 0 && (
-                              <span className="di-name" style={{ marginLeft: 'auto' }}>
-                                {t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-                              </span>
-                            )}
-                          </div>
-                        ))}
+                        {selectableTokens.map(t => {
+                          const isLiveToken = t.symbol === 'USDC' || t.symbol === 'USDT';
+                          return (
+                            <div
+                              key={t.mint || t.symbol}
+                              className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                              onClick={() => {
+                                if (!isLiveToken) return; // block non-USDC/USDT
+                                setSelectedToken(t);
+                                setTokenOpen(false);
+                              }}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px',
+                                opacity: isLiveToken ? 1 : 0.55,
+                                cursor: isLiveToken ? 'pointer' : 'not-allowed',
+                              }}
+                            >
+                              {t.logoURI ? (
+                                <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                              ) : (
+                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                                  {t.symbol.slice(0, 2)}
+                                </div>
+                              )}
+                              <span className="di-code" style={{ marginLeft: 0 }}>{t.symbol}</span>
+                              {isLiveToken ? (
+                                t.balance > 0 && (
+                                  <span className="di-name" style={{ marginLeft: 'auto' }}>
+                                    {t.balance.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                                  </span>
+                                )
+                              ) : (
+                                <span style={{
+                                  marginLeft: 'auto',
+                                  fontSize: '9px',
+                                  fontWeight: '700',
+                                  color: '#f59e0b',
+                                  background: 'rgba(245,158,11,0.12)',
+                                  border: '1px solid rgba(245,158,11,0.3)',
+                                  borderRadius: '4px',
+                                  padding: '1px 5px',
+                                  letterSpacing: '0.03em',
+                                  textTransform: 'uppercase',
+                                  flexShrink: 0,
+                                }}>Coming Soon</span>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
