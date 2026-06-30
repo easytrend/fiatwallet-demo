@@ -1656,8 +1656,14 @@ footer a { color:var(--lime); text-decoration:none; }
 }
 
 /* Desktop Card Switching & Layout Logic (>= 1100px) */
+.fiatpay-card {
+  display: none;
+}
 @media (min-width: 1100px) {
   .bottom-nav {
+    display: none !important;
+  }
+  .fiatpay-card {
     display: none !important;
   }
   .send-card {
@@ -1721,13 +1727,16 @@ footer a { color:var(--lime); text-decoration:none; }
   .nav-links {
     display: none !important;
   }
-  .send-card, .p2p-card {
+  .send-card, .p2p-card, .fiatpay-card {
     display: none;
   }
   .main.tab-send .send-card {
     display: block;
   }
   .main.tab-p2p .p2p-card {
+    display: block;
+  }
+  .main.tab-fiatpay .fiatpay-card {
     display: block;
   }
   .swp-float-pill {

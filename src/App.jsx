@@ -5,6 +5,7 @@ import { PublicKey, Transaction, SystemProgram, Connection, Keypair, SystemInstr
 import { getDomainKeySync, NameRegistryState, performReverseLookup, getPrimaryDomain, getFavoriteDomain, resolve } from '@bonfida/spl-name-service';
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
 import logoImg from './assets/logo.png';
+import fiatpayLogo from './assets/fiatpay.png';
 import { TOKENS, KNOWN_MINTS } from './data/tokens';
 import { CURRENCIES } from './data/currencies';
 import { useLiveRates } from './hooks/useLiveRates';
@@ -1057,6 +1058,17 @@ export default function App() {
           </div>
         </div>
 
+        {/* FiatPay Card (Mobile Only Tab) */}
+        <div className="app-card fiatpay-card" style={{ animation: 'fadeIn 0.2s ease-in-out' }}>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', textAlign: 'center', padding: '30px 24px' }}>
+            <img src={fiatpayLogo} alt="FiatPay" style={{ width: '64px', height: '64px', objectFit: 'contain', marginBottom: '16px' }} />
+            <h2 className="card-title" style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'white', marginBottom: '6px' }}>FiatPay</h2>
+            <p className="card-sub" style={{ fontSize: '11px', color: 'var(--text3)', maxWidth: '280px', lineHeight: '1.6', margin: 0 }}>
+              FiatPay payment gateway and billing widget is coming soon.
+            </p>
+          </div>
+        </div>
+
         <div className="app-card send-card">
           <div className="card-body">
 
@@ -1242,6 +1254,10 @@ export default function App() {
             <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
           </svg>
           <span className="bnav-label">P2P</span>
+        </button>
+        <button className={`bnav-item ${activeTab === 'fiatpay' ? 'active' : ''}`} onClick={() => setActiveTab('fiatpay')}>
+          <img src={fiatpayLogo} alt="FiatPay" className="bnav-icon" style={{ width: '22px', height: '22px', objectFit: 'contain' }} />
+          <span className="bnav-label">FiatPay</span>
         </button>
         <button className={`bnav-item ${activeTab === 'send' ? 'active' : ''}`} onClick={() => setActiveTab('send')}>
           <svg className="bnav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
