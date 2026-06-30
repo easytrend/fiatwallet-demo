@@ -1114,7 +1114,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       const order = await createOnrampOrder(
         {
           currency: 'NGN',
-          amount: parsedOnrampAmt,
+          amount: estOnrampCrypto,
           recipient: publicKey.toBase58(),
           chain: 'SOLANA',
           fee: onrampFee,
