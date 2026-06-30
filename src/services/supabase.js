@@ -35,7 +35,7 @@ export async function logTransaction({ signature, userAddress, type, symbol, tok
 }
 
 /**
- * Log a live P2P off-ramp transaction with full payout metadata.
+ * Log a live P2P transaction (onramp or offramp) with full metadata.
  */
 export async function logP2PTransaction({
   signature,
@@ -52,14 +52,17 @@ export async function logP2PTransaction({
   status = 'INIT',
   userEmail,
   depositAddress,
+  type = 'p2p_offramp',
 }) {
-  if (!supabase || !signature || !orderId) return;
+  if (!supabase || !orderId) return;
+
+  const actualSignature = signature || `pending_${type}_${orderId}`;
 
   const payload = {
-    signature,
+    signature: actualSignature,
     user_address: userAddress,
     order_id: String(orderId),
-    transaction_type: 'p2p_offramp',
+    transaction_type: type,
     token_symbol: tokenSymbol,
     crypto_amount: parseFloat(cryptoAmount) || 0,
     fiat_currency: fiatCurrency,
@@ -79,9 +82,9 @@ export async function logP2PTransaction({
       supabase.from('p2p_transactions').upsert(payload, { onConflict: 'signature' }),
       supabase.from('transactions').upsert(
         {
-          signature,
+          signature: actualSignature,
           user_address: userAddress,
-          transaction_type: 'p2p_offramp',
+          transaction_type: type,
           token_symbol: tokenSymbol,
           token_amount: parseFloat(cryptoAmount) || 0,
           usd_value: parseFloat(usdValue) || 0,
@@ -94,6 +97,27 @@ export async function logP2PTransaction({
     if (txError) console.warn('[Supabase] logP2PTransaction (transactions) failed:', txError.message);
   } catch (err) {
     console.warn('[Supabase] logP2PTransaction error:', err.message);
+  }
+}
+
+/**
+ * Update P2P transaction status (and optional actual signature) in Supabase.
+ */
+export async function updateP2PTransactionStatus(orderId, status, signature = null) {
+  if (!supabase || !orderId) return;
+  try {
+    const patch = { status: status.toUpperCase(), updated_at: new Date().toISOString() };
+    if (signature) {
+      patch.signature = signature;
+    }
+    const { error } = await supabase
+      .from('p2p_transactions')
+      .update(patch)
+      .eq('order_id', String(orderId));
+
+    if (error) console.warn('[Supabase] updateP2PTransactionStatus failed:', error.message);
+  } catch (err) {
+    console.warn('[Supabase] updateP2PTransactionStatus error:', err.message);
   }
 }
 

@@ -15,7 +15,7 @@ import {
   initiateSession,
   verifySession,
 } from '../services/pajcashService';
-import { logP2PTransaction, syncP2PTransactionStatuses } from '../services/supabase';
+import { logP2PTransaction, syncP2PTransactionStatuses, updateP2PTransactionStatus, supabase } from '../services/supabase';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair } from '@solana/web3.js';
 import {
@@ -313,6 +313,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [onrampStatus, setOnrampStatus] = useState(null); // 'pending'|'processing'|'completed'|'failed'
   const onrampSocketRef = useRef(null);
   const [copiedOnrampAcct, setCopiedOnrampAcct] = useState(false);
+  const [userOrderIds, setUserOrderIds] = useState(new Set());
 
   // ── QR Scanner Refs ──────────────────────────────────────────────────────
   const [scannerActive, setScannerActive] = useState(false);
@@ -395,7 +396,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
     // If the API returned transactions, use them as the primary source, but merge local metadata and parse destination fallbacks
     if (payoutLogs.length > 0) {
       const merged = payoutLogs
-        .filter(apiLog => !isCancelled(apiLog.status)) // hide cancelled
+        .filter(apiLog => {
+          if (isCancelled(apiLog.status)) return false;
+          // Filter: only show if order belongs to current wallet (in Supabase or local storage)
+          const apiId = String(apiLog.id || apiLog._id || apiLog.orderId);
+          const localMatch = getLocalMeta(apiLog);
+          return userOrderIds.has(apiId) || !!localMatch;
+        })
         .map(apiLog => {
           const localMatch = getLocalMeta(apiLog);
           const destString = apiLog.destination || apiLog.recipient;
@@ -447,7 +454,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         sig: entry.sig,
         mint: null,
       }));
-  }, [payoutLogs, publicKey]);
+  }, [payoutLogs, publicKey, userOrderIds]);
 
   const itemsPerPage = 10;
   const totalPages = Math.ceil(displayLogs.length / itemsPerPage);
@@ -487,6 +494,21 @@ export default function P2PPanel({ connected, walletTokenList }) {
     if (publicKey) {
       const key = publicKey.toBase58();
       
+      // Query Supabase for this user's order IDs
+      if (supabase) {
+        supabase
+          .from('p2p_transactions')
+          .select('order_id')
+          .eq('user_address', key)
+          .then(({ data, error }) => {
+            if (!error && data) {
+              const ids = new Set(data.map(item => String(item.order_id)));
+              setUserOrderIds(ids);
+            }
+          })
+          .catch(() => {});
+      }
+
       // Restore session
       const cachedToken = localStorage.getItem(`paj_sessionToken_${key}`);
       const cachedEmail = localStorage.getItem(`paj_sessionEmail_${key}`);
@@ -512,6 +534,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setSessionToken('');
       setSessionEmail('');
       setAuthStep('input_email');
+      setUserOrderIds(new Set());
     }
   }, [publicKey]);
 
@@ -1127,6 +1150,30 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setOnrampOrder(order);
       setOnrampStatus('pending');
 
+      const walletKey = publicKey.toBase58();
+      // Add to local state filter Set immediately
+      setUserOrderIds(prev => {
+        const next = new Set(prev);
+        next.add(String(order.id));
+        return next;
+      });
+
+      // Log onramp order to Supabase
+      const fiatLogged = Number(parsedOnrampAmt);
+      const usdLogged = onrampNgnRate > 0 ? (fiatLogged / onrampNgnRate) : 0;
+      logP2PTransaction({
+        userAddress: walletKey,
+        orderId: order.id,
+        tokenSymbol: liveSelectedToken.symbol,
+        cryptoAmount: estOnrampCrypto,
+        fiatCurrency: 'NGN',
+        fiatAmount: fiatLogged,
+        usdValue: usdLogged,
+        status: 'PENDING',
+        userEmail: sessionEmail || undefined,
+        type: 'p2p_onramp',
+      });
+
       // Disconnect previous socket if any
       if (onrampSocketRef.current) {
         try { onrampSocketRef.current.disconnect(); } catch { /* ignore */ }
@@ -1139,6 +1186,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
         onOrderUpdate: (data) => {
           const status = (data?.status || '').toLowerCase();
           setOnrampStatus(status);
+
+          // Update Supabase status and signature when completed/updated
+          if (data) {
+            const sig = data.signature || data.txSignature || data.tx_hash || null;
+            updateP2PTransactionStatus(order.id, status, sig);
+          }
         },
         onError: (err) => {
           console.warn('Onramp socket error:', err);
@@ -1323,6 +1376,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
         name: accountName || 'Account Holder'
       });
       localStorage.setItem(`paj_user_orders_${walletKey}`, JSON.stringify(existing.slice(0, 50)));
+
+      // Add to local state filter Set immediately
+      setUserOrderIds(prev => {
+        const next = new Set(prev);
+        next.add(String(order.id));
+        return next;
+      });
 
       const cryptoLogged = order.amount || estCryptoAmount;
       const fiatLogged = Number(amount);
