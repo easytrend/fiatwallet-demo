@@ -1032,9 +1032,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const onrampNgnRate = pajRates?.onRampRate?.rate || pajRates?.rate || 1500;
   const ngnRate = tokenPriceUsd * activeNgnRate;
   const parsedAmt = parseFloat(amount) || 0;
-  const baseCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
+  const estCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
   const platformFee = parsedAmt > 0 ? 0.1 : 0;
-  const estCryptoAmount = baseCryptoAmount > 0 ? (baseCryptoAmount + platformFee) : 0;
+  const baseCryptoAmount = estCryptoAmount > 0 ? Math.max(0, estCryptoAmount - platformFee) : 0;
   const fiatAmountText = parsedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
