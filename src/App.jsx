@@ -278,6 +278,41 @@ export default function App() {
   // rate-limited public endpoint. Show a UI warning in this case.
   const isUsingPublicRpc = !import.meta.env.VITE_RPC_URL;
   const [rpcWarnDismissed, setRpcWarnDismissed] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  // ── App Update Detection ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    // Extract a short fingerprint from the current page's script tags
+    const getPageHash = async () => {
+      try {
+        const res = await fetch('/', { cache: 'no-store' });
+        const html = await res.text();
+        // Pull all /assets/*.js src values as fingerprint
+        const matches = html.match(/\/assets\/[^"']+\.js/g) || [];
+        return matches.sort().join(',');
+      } catch {
+        return null;
+      }
+    };
+
+    let knownHash = null;
+    let intervalId = null;
+
+    const check = async () => {
+      const hash = await getPageHash();
+      if (!hash) return;
+      if (knownHash === null) {
+        knownHash = hash; // Store initial fingerprint
+      } else if (hash !== knownHash) {
+        setUpdateAvailable(true);
+        clearInterval(intervalId); // Stop polling once update is found
+      }
+    };
+
+    check(); // Run immediately on mount
+    intervalId = setInterval(check, 5 * 60 * 1000); // Then every 5 minutes
+    return () => clearInterval(intervalId);
+  }, []);
 
   const [bulkMode, setBulkMode] = useState(false);
   const [activeTab, setActiveTab] = useState('p2p');
@@ -961,6 +996,37 @@ export default function App() {
   return (
     <div className="page">
       <div className="hex-bg" />
+
+      {/* ── App Update Notification Banner ── */}
+      {updateAvailable && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+          background: 'linear-gradient(90deg, #0d9488, #065f46)',
+          color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: '14px', padding: '10px 20px', fontSize: '13px', fontWeight: '500',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
+        }}>
+          <span>🆕 A new version of Fiatwallet is available — refresh to get the latest features and fixes.</span>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              background: 'white', color: '#065f46', border: 'none', borderRadius: '6px',
+              padding: '5px 14px', fontWeight: '700', fontSize: '12px', cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          >
+            Refresh
+          </button>
+          <button
+            onClick={() => setUpdateAvailable(false)}
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', fontSize: '18px', padding: '0 4px', lineHeight: 1 }}
+            title="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <nav>
         <div className="nav-logo-wrap">
           <img src={logoImg} alt="Fiatwallet Logo" className="nav-logo" />

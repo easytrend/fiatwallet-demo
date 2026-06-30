@@ -13,10 +13,15 @@ import {
   getBanks as sdkGetBanks,
   resolveBankAccount as sdkResolveBankAccount,
   createOfframpOrder as sdkCreateOfframpOrder,
+  createOnrampOrder as sdkCreateOnrampOrder,
+  getOnrampValue as sdkGetOnrampValue,
+  observeOrder,
   getAllRate as sdkGetAllRate,
   getAllTransactions as sdkGetAllTransactions,
   Environment
 } from 'paj_ramp';
+
+export { observeOrder };
 
 // Base URL resolved from env var; defaults to production
 let BASE_URL = 'https://api.paj.cash';
@@ -147,6 +152,35 @@ export async function getAllRate() {
  * Fetch all transactions for the session account.
  * @param {string} sessionToken - User JWT Session Token
  */
+/**
+ * Create an on-ramp order (Buy).
+ * PajCash returns bank account details; user transfers fiat to receive crypto.
+ * @param {Object} order  - { currency, amount, wallet, chain, fee? }
+ * @param {string} sessionToken
+ */
+export async function createOnrampOrder(order, sessionToken) {
+  try {
+    return await sdkCreateOnrampOrder(order, sessionToken);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
+  }
+}
+
+/**
+ * Get the estimated crypto value for a given fiat amount (onramp direction).
+ * @param {{ currency: string, amount: number }} query
+ * @param {string} sessionToken
+ */
+export async function getOnrampValue(query, sessionToken) {
+  try {
+    return await sdkGetOnrampValue(query, sessionToken);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
+  }
+}
+
 export async function getTransactionHistory(sessionToken) {
   try {
     return await sdkGetAllTransactions(sessionToken);

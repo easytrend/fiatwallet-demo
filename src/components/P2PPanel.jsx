@@ -7,6 +7,9 @@ import {
   getBanks,
   resolveBankAccount,
   createOfframpOrder,
+  createOnrampOrder,
+  getOnrampValue,
+  observeOrder,
   getAllRate,
   getTransactionHistory,
   initiateSession,
@@ -14,7 +17,7 @@ import {
 } from '../services/pajcashService';
 import { logP2PTransaction, syncP2PTransactionStatuses } from '../services/supabase';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, TransactionInstruction, SystemProgram } from '@solana/web3.js';
+import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair } from '@solana/web3.js';
 import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
@@ -192,11 +195,16 @@ const getBankMetadata = (bankName) => {
  * - Transfers to the expected deposit address
  * - Correct token mint and amount
  */
-function verifyOfframpTransaction(transaction, expectedRecipient, expectedToken, expectedSignerPublicKey) {
+function verifyOfframpTransaction(transaction, expectedRecipient, expectedToken, expectedSignerPublicKey, relayerPublicKey = null) {
   if (!transaction.instructions || transaction.instructions.length === 0)
     throw new Error('Transaction integrity violation: no instructions.');
 
-  if (!transaction.feePayer || !transaction.feePayer.equals(expectedSignerPublicKey))
+  // Allow either user or relayer as fee payer
+  const validFeePayer = transaction.feePayer && (
+    transaction.feePayer.equals(expectedSignerPublicKey) ||
+    (relayerPublicKey && transaction.feePayer.equals(relayerPublicKey))
+  );
+  if (!validFeePayer)
     throw new Error('Transaction integrity violation: fee payer mismatch.');
 
   let hasTransfer = false;
@@ -241,7 +249,7 @@ function verifyOfframpTransaction(transaction, expectedRecipient, expectedToken,
 
 export default function P2PPanel({ connected, walletTokenList }) {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signTransaction } = useWallet();
 
   // ── Env config ──────────────────────────────────────────────────────────
   const PAJCASH_API_KEY = import.meta.env.VITE_PAJCASH_API_KEY;
@@ -294,6 +302,17 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedLog, setSelectedLog] = useState(null); // log detail pop-up
   const [copiedAccount, setCopiedAccount] = useState(false);
+  const [showAmountTooltip, setShowAmountTooltip] = useState(false);
+  const [relayerActive, setRelayerActive] = useState(false);
+
+  // ── Onramp (Buy) State ───────────────────────────────────────────────────
+  const [onrampAmount, setOnrampAmount] = useState(''); // NGN amount user wants to send
+  const [onrampOrder, setOnrampOrder] = useState(null); // PajCash order response with bank details
+  const [onrampLoading, setOnrampLoading] = useState(false);
+  const [onrampError, setOnrampError] = useState(null);
+  const [onrampStatus, setOnrampStatus] = useState(null); // 'pending'|'processing'|'completed'|'failed'
+  const onrampSocketRef = useRef(null);
+  const [copiedOnrampAcct, setCopiedOnrampAcct] = useState(false);
 
   // ── QR Scanner Refs ──────────────────────────────────────────────────────
   const [scannerActive, setScannerActive] = useState(false);
@@ -936,7 +955,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'attemptBoth' });
         if (code?.data) {
           const m = code.data.replace(/\D/g, '').match(/\d{10}/);
-          if (m) { setAccountNumber(m[0]); stopScanner(); return; }
+          if (m) { setAccountNumber(m[0]); setBankOpen(true); stopScanner(); return; }
         }
 
         // ② Native BarcodeDetector API (supported on Android Chrome / Safari)
@@ -952,7 +971,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           }).then(results => {
             for (const r of results) {
               const m = r.rawValue.replace(/\D/g, '').match(/\d{10}/);
-              if (m && active) { setAccountNumber(m[0]); stopScanner(); return; }
+              if (m && active) { setAccountNumber(m[0]); setBankOpen(true); stopScanner(); return; }
             }
           }).catch(() => {});
         }
@@ -970,6 +989,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
               const m = digits.match(/\d{10}/);
               if (m && active) {
                 setAccountNumber(m[0]);
+                setBankOpen(true); // auto-open bank dropdown after scan
                 stopScanner();
               }
             } catch { /* ignore */ }
@@ -993,11 +1013,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const handlePaste = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      if (/^\d+$/.test(text.trim())) setAccountNumber(text.trim());
-      else setP2pError('Clipboard content is not a valid account number.');
+      const cleaned = text.trim().replace(/\D/g, '');
+      if (cleaned.length >= 8) {
+        setAccountNumber(cleaned.slice(0, 10));
+        setBankOpen(true); // auto-open bank dropdown for quick selection
+      } else {
+        setP2pError('Clipboard does not contain a valid account number (minimum 8 digits).');
+      }
     } catch {
-      const fb = prompt('Paste your account number here:');
-      if (fb && /^\d+$/.test(fb.trim())) setAccountNumber(fb.trim());
+      setP2pError('Clipboard access denied. Please paste directly into the account number field.');
     }
   };
 
@@ -1068,7 +1092,61 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }
   };
 
-  // ── Submit handler ────────────────────────────────────────────────────────
+  // ── Onramp (Buy) submit handler ──────────────────────────────────────────
+  const handleOnrampSubmit = async () => {
+    setOnrampError(null);
+    setOnrampOrder(null);
+    setOnrampStatus(null);
+    if (!sessionToken) { setOnrampError('Please verify your email OTP session first.'); return; }
+    if (!publicKey) { setOnrampError('Please connect your Solana wallet.'); return; }
+    if (!parsedOnrampAmt || parsedOnrampAmt <= 0) { setOnrampError('Please enter a valid NGN amount.'); return; }
+    if (!PAJCASH_API_KEY) { setOnrampError('PajCash API Key is not configured.'); return; }
+
+    setOnrampLoading(true);
+    try {
+      const order = await createOnrampOrder(
+        {
+          currency: 'NGN',
+          amount: parsedOnrampAmt,
+          wallet: publicKey.toBase58(),
+          chain: 'SOLANA',
+          fee: onrampFee,
+          mint: liveSelectedToken.mint,
+        },
+        sessionToken
+      );
+
+      if (!order?.id) throw new Error('PajCash did not return a valid onramp order.');
+      setOnrampOrder(order);
+      setOnrampStatus('pending');
+
+      // Disconnect previous socket if any
+      if (onrampSocketRef.current) {
+        try { onrampSocketRef.current.disconnect(); } catch { /* ignore */ }
+        onrampSocketRef.current = null;
+      }
+
+      // Watch order status via WebSocket
+      const observer = observeOrder({
+        orderId: order.id,
+        onOrderUpdate: (data) => {
+          const status = (data?.status || '').toLowerCase();
+          setOnrampStatus(status);
+        },
+        onError: (err) => {
+          console.warn('Onramp socket error:', err);
+        },
+      });
+      onrampSocketRef.current = observer;
+      observer.connect().catch(() => { /* socket unavailable */ });
+    } catch (err) {
+      setOnrampError(err.message || 'Failed to create onramp order.');
+    } finally {
+      setOnrampLoading(false);
+    }
+  };
+
+  // ── Submit handler (Offramp / Sell) ──────────────────────────────────────
   const handleSubmit = async () => {
     setP2pError(null);
     if (!isLiveRoute) { setP2pError('This region/mode is not currently supported.'); return; }
@@ -1099,6 +1177,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           amount: Number(amount) / ngnRate,
           mint: liveSelectedToken.mint,
           chain: 'SOLANA',
+          fee: platformFee,
           webhookURL: import.meta.env.VITE_PAJCASH_WEBHOOK_URL || undefined,
         },
         sessionToken
@@ -1159,14 +1238,52 @@ export default function P2PPanel({ connected, walletTokenList }) {
       );
 
       // 4. Verify transaction integrity before signing
-      verifyOfframpTransaction(transaction, order.address, liveSelectedToken, publicKey);
+      // ── Relayer fee sponsorship ───────────────────────────────────────────────────
+      let relayerKp = null;
+      let usingRelayer = false;
+
+      const relayerSecretEnv = import.meta.env.VITE_RELAYER_SECRET_KEY;
+      if (relayerSecretEnv) {
+        try {
+          const keyArray = JSON.parse(relayerSecretEnv);
+          relayerKp = Keypair.fromSecretKey(new Uint8Array(keyArray));
+          const relayerLamports = await connection.getBalance(relayerKp.publicKey).catch(() => 0);
+          usingRelayer = relayerLamports >= 5000; // need at least ~5000 lamports
+        } catch {
+          relayerKp = null;
+          usingRelayer = false;
+        }
+      }
+
+      if (usingRelayer && relayerKp && signTransaction) {
+        // Relayer pays gas — set relayer as fee payer
+        transaction.feePayer = relayerKp.publicKey;
+      } else {
+        // User pays gas (default)
+        transaction.feePayer = publicKey;
+      }
+
+      verifyOfframpTransaction(transaction, order.address, liveSelectedToken, publicKey,
+        usingRelayer ? relayerKp.publicKey : null);
 
       // 5. Pre-flight simulation
       const sim = await connection.simulateTransaction(transaction);
       if (sim.value.err) throw new Error(`Simulation failed: ${JSON.stringify(sim.value.err)}`);
 
-      // 6. Sign & send via wallet adapter
-      const sig = await sendTransaction(transaction, connection);
+      // 6. Sign & send
+      let sig;
+      if (usingRelayer && relayerKp && signTransaction) {
+        // User signs first, then relayer co-signs as fee payer
+        const signedTx = await signTransaction(transaction);
+        signedTx.partialSign(relayerKp);
+        sig = await connection.sendRawTransaction(signedTx.serialize(), {
+          skipPreflight: false, preflightCommitment: 'confirmed',
+        });
+        setRelayerActive(true);
+      } else {
+        sig = await sendTransaction(transaction, connection);
+        setRelayerActive(false);
+      }
 
       // 7. Poll for confirmation
       let confirmed = false;
@@ -1346,29 +1463,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   const cryptoAmt = log.cryptoAmount || log.amount || 0;
                   const formattedCrypto = `${cryptoAmt.toFixed(4)} ${tokenSymbol}`;
 
-                  // Determine display name
-                  let displayName = '';
-                  let name = '';
-                  if (log.accountName && typeof log.accountName === 'string') {
-                    name = log.accountName;
-                  } else if (log.name && typeof log.name === 'string') {
-                    name = log.name;
-                  } else if (log.recipient && typeof log.recipient === 'string') {
-                    const isSol = log.recipient.length >= 32 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(log.recipient);
-                    if (!isSol) {
-                      name = log.recipient;
-                    }
-                  }
-                  const cleanName = name.trim();
-                  if (cleanName) {
-                    displayName = cleanName;
-                  } else if (log.bank) {
-                    displayName = log.bank;
-                  } else {
-                    displayName = 'Payout';
-                  }
-
-                  const upperName = displayName.toUpperCase();
+                  // Determine display name using shared helper (same logic as receipt)
+                  const displayName = getCleanNameForLog(log).toUpperCase();
 
                   return (
                     <div 
@@ -1448,9 +1544,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
                               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                               maxWidth: '160px', display: 'block' 
                             }}
-                            title={upperName}
+                            title={displayName}
                           >
-                            {upperName}
+                            {displayName}
                           </span>
                           <span style={{ color: 'var(--text3)', fontSize: '11px' }}>
                             {log.createdAt ? getRelativeTime(log.createdAt) : 'Recent'}
@@ -1493,23 +1589,49 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 })}
               </div>
               
-              {/* Pagination Controls */}
+              {/* Pagination Controls — numbered buttons */}
               {totalPages > 1 && (
-                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '12px', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
-                  <button 
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                  <button
                     onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     disabled={currentPage === 1}
-                    style={{ background: 'none', border: 'none', color: currentPage === 1 ? 'var(--text3)' : 'white', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+                    style={{ background: 'none', border: 'none', color: currentPage === 1 ? 'var(--text3)' : 'white', cursor: currentPage === 1 ? 'not-allowed' : 'pointer', fontSize: '12px', padding: '4px 8px' }}
                   >
-                    Prev
+                    ‹
                   </button>
-                  <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Page {currentPage} of {totalPages}</span>
-                  <button 
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+                    .reduce((acc, p, idx, arr) => {
+                      if (idx > 0 && p - arr[idx - 1] > 1) acc.push('…');
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((p, i) =>
+                      p === '…' ? (
+                        <span key={`ellipsis-${i}`} style={{ color: 'var(--text3)', fontSize: '12px', padding: '4px 2px' }}>…</span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => setCurrentPage(p)}
+                          style={{
+                            minWidth: '28px', height: '28px', borderRadius: '6px', fontSize: '12px',
+                            background: currentPage === p ? 'var(--lime)' : 'rgba(255,255,255,0.05)',
+                            color: currentPage === p ? '#000' : 'white',
+                            border: currentPage === p ? 'none' : '1px solid var(--border)',
+                            cursor: 'pointer', fontWeight: currentPage === p ? '700' : '400',
+                          }}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )
+                  }
+                  <button
                     onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                     disabled={currentPage === totalPages}
-                    style={{ background: 'none', border: 'none', color: currentPage === totalPages ? 'var(--text3)' : 'white', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontSize: '12px' }}
+                    style={{ background: 'none', border: 'none', color: currentPage === totalPages ? 'var(--text3)' : 'white', cursor: currentPage === totalPages ? 'not-allowed' : 'pointer', fontSize: '12px', padding: '4px 8px' }}
                   >
-                    Next
+                    ›
                   </button>
                 </div>
               )}
@@ -1814,11 +1936,33 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 <div className="field-label" style={{ marginBottom: 0, textTransform: 'none', fontSize: '13px', fontWeight: '500', color: 'rgba(255,255,255,0.6)', letterSpacing: 'normal' }}>
                   Amount
                 </div>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'rgba(255,255,255,0.4)', cursor: 'help' }} title="P2P Settlement Off-ramp amount">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="16" x2="12" y2="12" />
-                  <line x1="12" y1="8" x2="12.01" y2="8" />
-                </svg>
+                {/* Clickable tooltip */}
+                <div style={{ position: 'relative', display: 'inline-flex' }}>
+                  <svg
+                    width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                    style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }}
+                    onClick={() => setShowAmountTooltip(v => !v)}
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="16" x2="12" y2="12" />
+                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                  </svg>
+                  {showAmountTooltip && (
+                    <div
+                      onClick={() => setShowAmountTooltip(false)}
+                      style={{
+                        position: 'absolute', bottom: '18px', left: '50%', transform: 'translateX(-50%)',
+                        background: 'rgba(20,20,30,0.97)', border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '8px', padding: '8px 12px', fontSize: '11px', color: 'rgba(255,255,255,0.85)',
+                        width: '220px', lineHeight: '1.5', zIndex: 200, cursor: 'pointer',
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                      }}
+                    >
+                      ℹ️ Please note that Fiatwallet charges <strong>1% fee</strong> on all off-ramp transactions.
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="amount-block" style={{ marginTop: '4px', opacity: canTransact ? 1 : 0.6, padding: '14px 16px' }}>
                 {/* Top Row: Input & Token Selector */}
@@ -1946,7 +2090,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   </div>
                 </div>
 
-                {/* Bottom Row: Estimated & Wallet Balance */}
+                {/* ── Estimated display with 1% fee note ── */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   {/* Estimated crypto quantity */}
                   <span className="amount-converted" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.38)', fontFamily: 'var(--ff)' }}>
@@ -1956,7 +2100,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                       </span>
                     ) : (
                       amount && Number(amount) > 0
-                        ? `≈ ${estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol}`
+                        ? `≈ ${estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} (fee: ${platformFee.toFixed(4)})`
                         : `≈ ${liveSelectedToken.symbol}`
                     )}
                   </span>
@@ -2023,7 +2167,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
               </div>
             )}
 
-            {/* Submit button */}
+            {/* Submit button + Relayer badge */}
             <button
               className="send-btn"
               onClick={handleSubmit}
@@ -2033,9 +2177,109 @@ export default function P2PPanel({ connected, walletTokenList }) {
               {submitting && <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />}
               {submitting ? 'Processing...' : (!isLiveRoute || apiError ? 'Payout Gateway Offline' : 'Send')}
             </button>
+            {relayerActive && (
+              <div style={{ textAlign: 'center', marginTop: '6px', fontSize: '10px', color: 'var(--lime)', opacity: 0.75 }}>
+                ⚡ Gas fee sponsored by relayer
+              </div>
+            )}
         </>
       ) ) : (
-        /* ── Coming soon ── */
+        /* ── Buy (Onramp) Mode — Nigeria only ── */
+        selectedCountry.code === 'NGA' && authStep === 'logged_in' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <p style={{ fontSize: '11px', color: 'var(--text3)', margin: 0, lineHeight: '1.5' }}>
+            Enter the NGN amount you want to pay. PajCash will provide a Nigerian bank account to receive your payment. Once confirmed, USDC/USDT will be sent to your connected wallet.
+          </p>
+
+          {/* NGN Amount Input */}
+          <div>
+            <div className="field-label" style={{ marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: 'rgba(255,255,255,0.6)' }}>Amount (NGN)</div>
+            <input
+              type="number"
+              placeholder="e.g. 10000"
+              value={onrampAmount}
+              onChange={e => { setOnrampAmount(e.target.value); setOnrampOrder(null); setOnrampStatus(null); }}
+              style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '10px', color: 'white', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }}
+            />
+            {parsedOnrampAmt > 0 && (
+              <div style={{ marginTop: '6px', fontSize: '11px', color: 'rgba(255,255,255,0.38)' }}>
+                ≈ {estOnrampCrypto.toFixed(4)} {liveSelectedToken.symbol} (after 1% fee: {onrampFee.toFixed(4)})
+              </div>
+            )}
+          </div>
+
+          {onrampError && (
+            <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#f87171' }}>
+              ✕ {onrampError}
+            </div>
+          )}
+
+          {/* Bank Details Card (after order created) */}
+          {onrampOrder && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(6,78,59,0.12) 100%)',
+              border: '1px solid rgba(16,185,129,0.25)', borderRadius: '14px', padding: '16px',
+            }}>
+              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Transfer Fiat To</div>
+              {[['Bank', onrampOrder.bankName || onrampOrder.bank || '—'],
+                ['Account No.', onrampOrder.accountNumber || onrampOrder.account || '—'],
+                ['Account Name', onrampOrder.accountName || onrampOrder.name || '—'],
+                ['Amount (NGN)', `₦${parsedOnrampAmt.toLocaleString()}`],
+                ['Reference', onrampOrder.reference || onrampOrder.id],
+              ].map(([label, val]) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '11px', color: 'var(--text3)' }}>{label}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '12px', color: 'white', fontWeight: '600', fontFamily: 'monospace' }}>{val}</span>
+                    {(label === 'Account No.' || label === 'Reference') && (
+                      <button
+                        onClick={() => { navigator.clipboard?.writeText(String(val)); setCopiedOnrampAcct(label); setTimeout(() => setCopiedOnrampAcct(false), 1500); }}
+                        style={{ background: 'none', border: 'none', color: copiedOnrampAcct === label ? 'var(--lime)' : 'var(--text3)', cursor: 'pointer', fontSize: '10px', padding: '2px' }}
+                      >
+                        {copiedOnrampAcct === label ? '✓' : '📋'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {/* Status indicator */}
+              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Status</span>
+                <span style={{
+                  fontSize: '11px', fontWeight: '700',
+                  color: onrampStatus === 'completed' ? 'var(--lime)' : onrampStatus === 'failed' ? '#ef4444' : '#eab308',
+                  textTransform: 'uppercase',
+                }}>
+                  {onrampStatus === 'completed' ? '✓ Completed' : onrampStatus === 'failed' ? '✕ Failed' : '⏳ Awaiting Payment'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Get Bank Details Button */}
+          {!onrampOrder && (
+            <button
+              className="send-btn"
+              onClick={handleOnrampSubmit}
+              disabled={onrampLoading || !parsedOnrampAmt || parsedOnrampAmt <= 0 || !sessionToken}
+              style={{ opacity: (onrampLoading || !parsedOnrampAmt || !sessionToken) ? 0.6 : 1, cursor: 'pointer' }}
+            >
+              {onrampLoading && <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />}
+              {onrampLoading ? 'Getting Bank Details...' : '🏦 Get Bank Details'}
+            </button>
+          )}
+          {onrampOrder && onrampStatus !== 'completed' && (
+            <button
+              className="send-btn"
+              onClick={() => { setOnrampOrder(null); setOnrampStatus(null); setOnrampAmount(''); }}
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', fontSize: '12px', opacity: 0.7 }}
+            >
+              Start New Order
+            </button>
+          )}
+        </div>
+        ) : (
+        /* ── Coming soon for non-Nigeria Buy ── */
         <div style={{
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           minHeight: '320px', textAlign: 'center', padding: '20px 24px',
@@ -2044,15 +2288,16 @@ export default function P2PPanel({ connected, walletTokenList }) {
         }}>
           <div style={{ fontSize: '38px', marginBottom: '14px' }}>🚀</div>
           <h4 style={{ fontSize: '15px', fontWeight: 'bold', color: 'white', marginBottom: '10px' }}>
-            {mode === 'buy' ? 'Buy Coming Soon' : `${selectedCountry.name} Payouts Coming Soon`}
+            {mode === 'buy' ? 'Buy Coming Soon for this Region' : `${selectedCountry.name} Payouts Coming Soon`}
           </h4>
           <p style={{ fontSize: '11px', color: 'var(--text3)', maxWidth: '300px', lineHeight: '1.5' }}>
             {mode === 'buy'
-              ? 'Direct crypto purchases will be activated shortly.'
+              ? 'Switch to Nigeria (NGA) to use the live Buy gateway.'
               : `Off-ramp for ${selectedCountry.name} is in development. Select Nigeria (NGA) in Sell mode to use the live PajCash gateway.`
             }
           </p>
         </div>
+        )
       )}
       </>
       )}
