@@ -1183,7 +1183,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           bank: bankId,
           accountNumber: accountNumber.trim(),
           currency: selectedCountry.currency,
-          amount: estCryptoAmount,
+          amount: baseCryptoAmount,
           mint: liveSelectedToken.mint,
           chain: 'SOLANA',
           fee: platformFee,
