@@ -1033,14 +1033,14 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const ngnRate = tokenPriceUsd * activeNgnRate;
   const parsedAmt = parseFloat(amount) || 0;
   const estCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
-  const platformFee = parsedAmt > 0 ? 0.1 : 0;
-  const baseCryptoAmount = estCryptoAmount > 0 ? Math.max(0, estCryptoAmount - platformFee) : 0;
+  const platformFee = 0;
+  const baseCryptoAmount = estCryptoAmount;
   const fiatAmountText = parsedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
   const grossOnrampCrypto = onrampNgnRate > 0 ? (parsedOnrampAmt / onrampNgnRate) : 0;
-  const onrampFee = parsedOnrampAmt > 0 ? 0.1 : 0;
-  const estOnrampCrypto = grossOnrampCrypto > 0 ? Math.max(0, grossOnrampCrypto - onrampFee) : 0;
+  const onrampFee = 0;
+  const estOnrampCrypto = grossOnrampCrypto;
 
   const allBankNames = useMemo(() => {
     return apiBanks.map(b => (typeof b === 'string' ? b : b.name || b.bank_name || ''));
