@@ -15,7 +15,7 @@ import {
   initiateSession,
   verifySession,
 } from '../services/pajcashService';
-import { logP2PTransaction, syncP2PTransactionStatuses } from '../services/supabase';
+import { logP2PTransaction, syncP2PTransactionStatuses, updateP2PTransactionStatus } from '../services/supabase';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair } from '@solana/web3.js';
 import {
@@ -1129,6 +1129,24 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setOnrampOrder(order);
       setOnrampStatus('pending');
 
+      // Log Onramp order in Supabase
+      const usdVal = parsedOnrampAmt / (onrampNgnRate || 1);
+      logP2PTransaction({
+        userAddress: publicKey.toBase58(),
+        orderId: order.id,
+        tokenSymbol: liveSelectedToken.symbol,
+        cryptoAmount: estOnrampCrypto,
+        fiatCurrency: 'NGN',
+        fiatAmount: parsedOnrampAmt,
+        usdValue: usdVal,
+        bankName: order.bankName || order.bank || '—',
+        accountNumber: order.accountNumber || order.account || '—',
+        accountName: order.accountName || order.name || '—',
+        status: 'PENDING',
+        userEmail: sessionEmail || undefined,
+        type: 'p2p_onramp',
+      });
+
       // Disconnect previous socket if any
       if (onrampSocketRef.current) {
         try { onrampSocketRef.current.disconnect(); } catch { /* ignore */ }
@@ -1141,6 +1159,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
         onOrderUpdate: (data) => {
           const status = (data?.status || '').toLowerCase();
           setOnrampStatus(status);
+          // Sync status back to Supabase
+          updateP2PTransactionStatus(order.id, status, data?.txHash || data?.signature);
         },
         onError: (err) => {
           console.warn('Onramp socket error:', err);
