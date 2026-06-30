@@ -2200,7 +2200,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
           {/* NGN Amount & Target Token Block */}
           <div className="field">
-            <div className="field-label" style={{ marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: 'rgba(255,255,255,0.6)' }}>Amount & Target Token</div>
+            <div className="field-label" style={{ marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: 'rgba(255,255,255,0.6)' }}>Amount</div>
             <div className="amount-block" style={{ marginTop: '4px', padding: '14px 16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 {/* Left Part: NGN Input */}
@@ -2321,6 +2321,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </span>
               </div>
             </div>
+
+            {/* Exchange rate — shown below Amount input block */}
+            {pajRates?.onRampRate?.rate && (
+              <div style={{ marginTop: '6px', fontSize: '11px' }}>
+                <span style={{ color: 'rgba(255,255,255,0.38)' }}>
+                  1 {liveSelectedToken.symbol} = {selectedCountry.symbol}{onrampNgnRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Session notice if not yet logged in */}
@@ -2342,7 +2351,24 @@ export default function P2PPanel({ connected, walletTokenList }) {
               background: 'linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(6,78,59,0.12) 100%)',
               border: '1px solid rgba(16,185,129,0.25)', borderRadius: '14px', padding: '16px',
             }}>
-              <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', marginBottom: '12px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Transfer Fiat To</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Transfer Fiat To</div>
+                <button
+                  onClick={() => {
+                    setOnrampOrder(null);
+                    setOnrampStatus(null);
+                    setOnrampAmount('');
+                    if (onrampSocketRef.current) {
+                      try { onrampSocketRef.current.disconnect(); } catch {}
+                      onrampSocketRef.current = null;
+                    }
+                  }}
+                  style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: '16px', padding: 0 }}
+                  title="Cancel Order"
+                >
+                  ✕
+                </button>
+              </div>
               {[['Bank', onrampOrder.bankName || onrampOrder.bank || '—'],
                 ['Account No.', onrampOrder.accountNumber || onrampOrder.account || '—'],
                 ['Account Name', onrampOrder.accountName || onrampOrder.name || '—'],
