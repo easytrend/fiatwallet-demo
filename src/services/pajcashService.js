@@ -189,3 +189,59 @@ export async function getTransactionHistory(sessionToken) {
     throw new Error(msg);
   }
 }
+
+/**
+ * Notify PajCash API that the onramp transaction has been cancelled.
+ */
+export async function cancelOnrampOrder(orderId, sessionToken) {
+  try {
+    // Try REST endpoint options
+    const res = await fetch(`${BASE_URL}/pub/onramp/${orderId}/cancel`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sessionToken}`
+      }
+    });
+    if (!res.ok) {
+      await fetch(`${BASE_URL}/pub/onramp/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({ orderId })
+      });
+    }
+  } catch (error) {
+    console.warn('cancelOnrampOrder API error:', error);
+  }
+}
+
+/**
+ * Notify PajCash API that the user has completed the fiat payment.
+ */
+export async function paidOnrampOrder(orderId, sessionToken) {
+  try {
+    // Try REST endpoint options
+    const res = await fetch(`${BASE_URL}/pub/onramp/${orderId}/paid`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${sessionToken}`
+      }
+    });
+    if (!res.ok) {
+      await fetch(`${BASE_URL}/pub/onramp/paid`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionToken}`
+        },
+        body: JSON.stringify({ orderId })
+      });
+    }
+  } catch (error) {
+    console.warn('paidOnrampOrder API error:', error);
+  }
+}

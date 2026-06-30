@@ -14,6 +14,8 @@ import {
   getTransactionHistory,
   initiateSession,
   verifySession,
+  cancelOnrampOrder,
+  paidOnrampOrder,
 } from '../services/pajcashService';
 import { logP2PTransaction, syncP2PTransactionStatuses, updateP2PTransactionStatus } from '../services/supabase';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
@@ -2469,14 +2471,126 @@ export default function P2PPanel({ connected, walletTokenList }) {
               {onrampLoading ? 'Getting Bank Details...' : '🏦 Get Bank Details'}
             </button>
           )}
-          {onrampOrder && onrampStatus !== 'completed' && (
-            <button
-              className="send-btn"
-              onClick={() => { setOnrampOrder(null); setOnrampStatus(null); setOnrampAmount(''); }}
-              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', fontSize: '12px', opacity: 0.7 }}
-            >
-              Start New Order
-            </button>
+          {onrampOrder && (
+            <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {/* If order is completed */}
+              {onrampStatus === 'completed' ? (
+                <button
+                  className="send-btn"
+                  onClick={() => { setOnrampOrder(null); setOnrampStatus(null); setOnrampAmount(''); }}
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', fontSize: '13px' }}
+                >
+                  Start New Order
+                </button>
+              ) : (
+                /* If order is pending / not yet completed */
+                <>
+                  {onrampStatus !== 'paid' && onrampStatus !== 'processing' ? (
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      <button
+                        onClick={async () => {
+                          const orderId = onrampOrder.id;
+                          setOnrampLoading(true);
+                          try {
+                            await cancelOnrampOrder(orderId, sessionToken);
+                            updateP2PTransactionStatus(orderId, 'CANCELLED');
+                          } catch {}
+                          // Clean up UI & socket
+                          if (onrampSocketRef.current) {
+                            try { onrampSocketRef.current.disconnect(); } catch {}
+                            onrampSocketRef.current = null;
+                          }
+                          setOnrampOrder(null);
+                          setOnrampStatus(null);
+                          setOnrampAmount('');
+                          setOnrampLoading(false);
+                        }}
+                        disabled={onrampLoading}
+                        style={{
+                          flex: 1,
+                          padding: '12px',
+                          borderRadius: '12px',
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          border: '1px solid rgba(239, 68, 68, 0.4)',
+                          color: '#f87171',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '13px',
+                          outline: 'none'
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const orderId = onrampOrder.id;
+                          setOnrampLoading(true);
+                          try {
+                            await paidOnrampOrder(orderId, sessionToken);
+                            updateP2PTransactionStatus(orderId, 'PAID');
+                          } catch {}
+                          setOnrampStatus('paid');
+                          setOnrampLoading(false);
+                        }}
+                        disabled={onrampLoading}
+                        style={{
+                          flex: 1,
+                          padding: '12px',
+                          borderRadius: '12px',
+                          background: 'rgba(16, 185, 129, 0.15)',
+                          border: '1px solid rgba(16, 185, 129, 0.4)',
+                          color: 'var(--lime)',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '13px',
+                          outline: 'none'
+                        }}
+                      >
+                        Paid
+                      </button>
+                    </div>
+                  ) : (
+                    /* Once they click Paid (status changes to 'paid' or 'processing') */
+                    <button
+                      className="send-btn"
+                      disabled={true}
+                      style={{
+                        background: 'rgba(16, 185, 129, 0.08)',
+                        border: '1px solid rgba(16, 185, 129, 0.25)',
+                        color: 'var(--lime)',
+                        fontSize: '13px',
+                        cursor: 'not-allowed',
+                        opacity: 0.8
+                      }}
+                    >
+                      ⏳ Confirming Payment...
+                    </button>
+                  )}
+
+                  {/* Start New Order button showing under the action buttons (discreetly) */}
+                  <button
+                    onClick={() => {
+                      if (onrampSocketRef.current) {
+                        try { onrampSocketRef.current.disconnect(); } catch {}
+                        onrampSocketRef.current = null;
+                      }
+                      setOnrampOrder(null);
+                      setOnrampStatus(null);
+                      setOnrampAmount('');
+                    }}
+                    style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: '11px', marginTop: '6px', textAlign: 'center', width: '100%', outline: 'none' }}
+                  >
+                    Start New Order
+                  </button>
+                </>
+              )}
+            </div>
           )}
         </div>
         ) : (
