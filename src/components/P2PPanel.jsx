@@ -2185,7 +2185,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         </>
       ) ) : (
         /* ── Buy (Onramp) Mode — Nigeria only ── */
-        selectedCountry.code === 'NGA' && authStep === 'logged_in' ? (
+        selectedCountry.code === 'NGA' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <p style={{ fontSize: '11px', color: 'var(--text3)', margin: 0, lineHeight: '1.5' }}>
             Enter the NGN amount you want to pay. PajCash will provide a Nigerian bank account to receive your payment. Once confirmed, USDC/USDT will be sent to your connected wallet.
@@ -2195,10 +2195,16 @@ export default function P2PPanel({ connected, walletTokenList }) {
           <div>
             <div className="field-label" style={{ marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: 'rgba(255,255,255,0.6)' }}>Amount (NGN)</div>
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               placeholder="e.g. 10000"
               value={onrampAmount}
-              onChange={e => { setOnrampAmount(e.target.value); setOnrampOrder(null); setOnrampStatus(null); }}
+              onChange={e => {
+                const val = e.target.value.replace(/[^0-9.]/g, '');
+                setOnrampAmount(val);
+                setOnrampOrder(null);
+                setOnrampStatus(null);
+              }}
               style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '10px', color: 'white', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }}
             />
             {parsedOnrampAmt > 0 && (
@@ -2207,6 +2213,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
               </div>
             )}
           </div>
+
+          {/* Session notice if not yet logged in */}
+          {authStep !== 'logged_in' && (
+            <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: '8px', padding: '10px 14px', fontSize: '11px', color: '#facc15', lineHeight: '1.5' }}>
+              🔒 Please verify your email (above) to activate the Buy gateway.
+            </div>
+          )}
 
           {onrampError && (
             <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '8px', padding: '10px 12px', fontSize: '11px', color: '#f87171' }}>
