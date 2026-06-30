@@ -1028,10 +1028,17 @@ export default function P2PPanel({ connected, walletTokenList }) {
   // ── Derived values ────────────────────────────────────────────────────────
   const tokenPriceUsd = liveSelectedToken.price || (liveSelectedToken.symbol === 'SOL' ? 145.20 : 1.00);
   const activeNgnRate = pajRates?.offRampRate?.rate || pajRates?.rate || 1550;
+  const onrampNgnRate = pajRates?.onRampRate?.rate || pajRates?.rate || 1500;
   const ngnRate = tokenPriceUsd * activeNgnRate;
   const parsedAmt = parseFloat(amount) || 0;
   const estCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
+  const FEE_PERCENT = 0.01;
+  const platformFee = estCryptoAmount * FEE_PERCENT;
   const fiatAmountText = parsedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
+  const estOnrampCrypto = onrampNgnRate > 0 ? (parsedOnrampAmt / onrampNgnRate) : 0;
+  const onrampFee = estOnrampCrypto * FEE_PERCENT;
 
   const allBankNames = useMemo(() => {
     return apiBanks.map(b => (typeof b === 'string' ? b : b.name || b.bank_name || ''));
