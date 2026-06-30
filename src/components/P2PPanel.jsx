@@ -1115,7 +1115,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         {
           currency: 'NGN',
           amount: parsedOnrampAmt,
-          wallet: publicKey.toBase58(),
+          recipient: publicKey.toBase58(),
           chain: 'SOLANA',
           fee: onrampFee,
           mint: liveSelectedToken.mint,
@@ -2198,27 +2198,129 @@ export default function P2PPanel({ connected, walletTokenList }) {
             Enter the NGN amount you want to pay. PajCash will provide a Nigerian bank account to receive your payment. Once confirmed, USDC/USDT will be sent to your connected wallet.
           </p>
 
-          {/* NGN Amount Input */}
-          <div>
-            <div className="field-label" style={{ marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: 'rgba(255,255,255,0.6)' }}>Amount (NGN)</div>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="e.g. 10000"
-              value={onrampAmount}
-              onChange={e => {
-                const val = e.target.value.replace(/[^0-9.]/g, '');
-                setOnrampAmount(val);
-                setOnrampOrder(null);
-                setOnrampStatus(null);
-              }}
-              style={{ width: '100%', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '10px', color: 'white', fontSize: '14px', outline: 'none', boxSizing: 'border-box' }}
-            />
-            {parsedOnrampAmt > 0 && (
-              <div style={{ marginTop: '6px', fontSize: '11px', color: 'rgba(255,255,255,0.38)' }}>
-                ≈ {estOnrampCrypto.toFixed(4)} {liveSelectedToken.symbol} (after 1% fee: {onrampFee.toFixed(4)})
+          {/* NGN Amount & Target Token Block */}
+          <div className="field">
+            <div className="field-label" style={{ marginBottom: '6px', fontSize: '13px', fontWeight: '500', color: 'rgba(255,255,255,0.6)' }}>Amount & Target Token</div>
+            <div className="amount-block" style={{ marginTop: '4px', padding: '14px 16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                {/* Left Part: NGN Input */}
+                <div style={{ display: 'flex', flex: 1, flexDirection: 'row', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ color: onrampAmount ? 'white' : 'rgba(255, 255, 255, 0.38)', fontWeight: '500', fontSize: '32px', fontFamily: 'var(--ff)', lineHeight: 1, userSelect: 'none' }}>
+                    ₦
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={onrampAmount}
+                    onChange={e => {
+                      const val = e.target.value.replace(/[^0-9.]/g, '');
+                      setOnrampAmount(val);
+                      setOnrampOrder(null);
+                      setOnrampStatus(null);
+                    }}
+                    style={{ fontSize: '32px', fontWeight: '500', fontFamily: 'var(--ff)', width: '100%', flex: 1, color: 'white', padding: 0, lineHeight: 1, background: 'transparent', border: 'none', outline: 'none' }}
+                  />
+                </div>
+
+                {/* Right Part: Token selector dropdown */}
+                <div className="drop-wrap" style={{ position: 'relative' }}>
+                  <div
+                    className="input-wrap"
+                    onClick={() => setTokenOpen(!tokenOpen)}
+                    style={{
+                      cursor: 'pointer',
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '24px',
+                      padding: '6px 12px',
+                      fontWeight: 600,
+                      color: 'white',
+                      userSelect: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'background 0.2s, border-color 0.2s',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+                  >
+                    {liveSelectedToken.logoURI ? (
+                      <img src={liveSelectedToken.logoURI} alt={liveSelectedToken.symbol} style={{ width: '18px', height: '18px', borderRadius: '50%' }} />
+                    ) : (
+                      <div style={{ width: '18px', height: '18px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                        {liveSelectedToken.symbol.slice(0, 2)}
+                      </div>
+                    )}
+                    <span style={{ fontSize: '13px', fontWeight: '500' }}>{liveSelectedToken.symbol}</span>
+                    <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ color: 'rgba(255,255,255,0.6)', marginLeft: '2px' }}>
+                      <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
+
+                  {tokenOpen && (
+                    <div className="drop-menu" style={{ right: 0, minWidth: '220px', zIndex: 100 }}>
+                      {selectableTokens.map(t => {
+                        const isLiveToken = t.symbol === 'USDC' || t.symbol === 'USDT';
+                        return (
+                          <div
+                            key={t.mint || t.symbol}
+                            className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                            onClick={() => {
+                              if (!isLiveToken) return; // block non-USDC/USDT
+                              setSelectedToken(t);
+                              setTokenOpen(false);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              padding: '10px 12px',
+                              opacity: isLiveToken ? 1 : 0.55,
+                              cursor: isLiveToken ? 'pointer' : 'not-allowed',
+                            }}
+                          >
+                            {t.logoURI ? (
+                              <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                            ) : (
+                              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                                {t.symbol.slice(0, 2)}
+                              </div>
+                            )}
+                            <span className="di-code" style={{ marginLeft: 0 }}>{t.symbol}</span>
+                            {!isLiveToken && (
+                              <span style={{
+                                marginLeft: 'auto',
+                                fontSize: '9px',
+                                fontWeight: '700',
+                                color: '#f59e0b',
+                                background: 'rgba(245,158,11,0.12)',
+                                border: '1px solid rgba(245,158,11,0.3)',
+                                borderRadius: '4px',
+                                padding: '1px 5px',
+                                letterSpacing: '0.03em',
+                                textTransform: 'uppercase',
+                                flexShrink: 0,
+                              }}>Coming Soon</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
+
+              {/* Bottom Row of block: Estimation preview */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px', marginTop: '8px' }}>
+                <span className="amount-converted" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.38)', fontFamily: 'var(--ff)' }}>
+                  {parsedOnrampAmt > 0
+                    ? `≈ ${estOnrampCrypto.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} (fee: ${onrampFee.toFixed(4)})`
+                    : `≈ ${liveSelectedToken.symbol}`
+                  }
+                </span>
+              </div>
+            </div>
           </div>
 
           {/* Session notice if not yet logged in */}
