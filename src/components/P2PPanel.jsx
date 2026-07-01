@@ -1213,6 +1213,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
     setOnrampLoading(true);
     try {
+      // If user is buying a custom token, we must onramp USDC via PajCash, then swap it to the target token.
+      const onrampMint = (liveSelectedToken.symbol === 'USDC' || liveSelectedToken.symbol === 'USDT')
+        ? liveSelectedToken.mint
+        : 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // Default to USDC mint
+
       const order = await createOnrampOrder(
         {
           currency: 'NGN',
@@ -1220,7 +1225,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           recipient: publicKey.toBase58(),
           chain: 'SOLANA',
           fee: onrampFee,
-          mint: liveSelectedToken.mint,
+          mint: onrampMint,
         },
         sessionToken
       );
@@ -1235,7 +1240,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         userAddress: publicKey.toBase58(),
         orderId: order.id,
         tokenSymbol: liveSelectedToken.symbol,
-        cryptoAmount: estOnrampCrypto,
+        cryptoAmount: displayOnrampAmount > 0 ? displayOnrampAmount : estOnrampCrypto,
         fiatCurrency: 'NGN',
         fiatAmount: parsedOnrampAmt,
         usdValue: usdVal,
