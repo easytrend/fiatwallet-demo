@@ -18,6 +18,7 @@ import {
   observeOrder,
   getAllRate as sdkGetAllRate,
   getAllTransactions as sdkGetAllTransactions,
+  getTransaction as sdkGetTransaction,
   Environment
 } from 'paj_ramp';
 
@@ -243,5 +244,17 @@ export async function paidOnrampOrder(orderId, sessionToken) {
     }
   } catch (error) {
     console.warn('paidOnrampOrder API error:', error);
+  }
+}
+
+/**
+ * Fetch a single transaction detail to poll its latest status.
+ */
+export async function getTransaction(sessionToken, orderId) {
+  try {
+    return await sdkGetTransaction(sessionToken, orderId);
+  } catch (error) {
+    const msg = error.response?.data?.message || error.message || String(error);
+    throw new Error(msg);
   }
 }

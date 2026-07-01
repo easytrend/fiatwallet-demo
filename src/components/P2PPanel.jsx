@@ -16,6 +16,7 @@ import {
   verifySession,
   cancelOnrampOrder,
   paidOnrampOrder,
+  getTransaction,
 } from '../services/pajcashService';
 import { getQuote, buildSwapTransaction } from '../services/swapService';
 import { logP2PTransaction, syncP2PTransactionStatuses, updateP2PTransactionStatus } from '../services/supabase';
@@ -1294,7 +1295,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
     }
   };
 
-  const triggerJupiterSwap = async () => {
+  const triggerJupiterSwap = useCallback(async () => {
     if (!publicKey || !signTransaction) {
       throw new Error("Wallet not fully connected.");
     }
@@ -1345,7 +1346,51 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setOnrampStatus('completed');
       throw new Error(e.message || e);
     }
-  };
+  }, [publicKey, signTransaction, pajRates, onrampAmount, liveSelectedToken, connection]);
+
+  // ── Polling Fallback for Onramp Order Status ──────────────────────────────
+  useEffect(() => {
+    if (!onrampOrder?.id || !sessionToken || onrampStatus === 'completed' || onrampStatus === 'failed') {
+      return;
+    }
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await getTransaction(sessionToken, onrampOrder.id);
+        const data = res?.data || res;
+        
+        if (data && isMounted) {
+          const status = (data.status || '').toLowerCase();
+          
+          if (status && status !== onrampStatus.toLowerCase()) {
+            setOnrampStatus(status);
+            updateP2PTransactionStatus(onrampOrder.id, status, data.txHash || data.signature);
+            
+            const orderSuccess = status === 'completed' || status === 'successful' || status === 'confirmed';
+            if (orderSuccess && liveSelectedToken.symbol !== 'USDC' && liveSelectedToken.symbol !== 'USDT') {
+               setTimeout(async () => {
+                 try {
+                   await triggerJupiterSwap();
+                 } catch (swapErr) {
+                   console.error("Auto-swap trigger failed:", swapErr);
+                   setOnrampError(`Onramp succeeded, but automatic swap to ${liveSelectedToken.symbol} failed: ${swapErr.message || swapErr}`);
+                   setOnrampStatus('completed');
+                 }
+               }, 2000);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Onramp polling status fetch failed:', err);
+      }
+    }, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [onrampOrder, onrampStatus, sessionToken, liveSelectedToken, triggerJupiterSwap]);
 
   // ── Submit handler (Offramp / Sell) ──────────────────────────────────────
   const handleSubmit = async () => {
