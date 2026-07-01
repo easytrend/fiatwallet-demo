@@ -21,7 +21,7 @@ import {
 import { getQuote, buildSwapTransaction } from '../services/swapService';
 import { logP2PTransaction, syncP2PTransactionStatuses, updateP2PTransactionStatus } from '../services/supabase';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair } from '@solana/web3.js';
+import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair, VersionedTransaction } from '@solana/web3.js';
 import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
@@ -1329,7 +1329,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
         throw new Error("Failed to construct swap transaction.");
       }
 
-      const { VersionedTransaction } = await import('@solana/web3.js');
       const rawTx = Uint8Array.from(atob(base64Tx), c => c.charCodeAt(0));
       const transaction = VersionedTransaction.deserialize(rawTx);
 
@@ -1362,8 +1361,9 @@ export default function P2PPanel({ connected, walletTokenList }) {
         
         if (data && isMounted) {
           const status = (data.status || '').toLowerCase();
+          const currentStatus = (onrampStatus || '').toLowerCase();
           
-          if (status && status !== onrampStatus.toLowerCase()) {
+          if (status && status !== currentStatus) {
             setOnrampStatus(status);
             updateP2PTransactionStatus(onrampOrder.id, status, data.txHash || data.signature);
             
