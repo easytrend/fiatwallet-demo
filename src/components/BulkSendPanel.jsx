@@ -6,7 +6,7 @@ import { CURRENCIES } from '../data/currencies';
 import { fmtTok, fmtFiat, fmtRate, parseCSV, dlTemplate, isValidEntry, robustResolve } from '../utils';
 import CurrDrop from './CurrDrop';
 import Toast from './Toast';
-import { logTransaction } from '../services/supabase';
+
 
 
 // Frozen constants prevent re-instantiation per render
@@ -546,17 +546,7 @@ export default function BulkSendPanel({ tok, connected, getLiveRate, connection,
       // Build Solscan link: single tx or first batch tx
       const firstSig = signatures[0];
 
-      if (firstSig) {
-        const totalUSD = totalRequested * (tok?.price || 1);
-        logTransaction({
-          signature: firstSig,
-          userAddress: publicKey.toBase58(),
-          type: 'bulk_send',
-          symbol: tok?.symbol || 'UNKNOWN',
-          tokenAmount: totalRequested,
-          usdValue: totalUSD,
-        });
-      }
+
 
       setToast({
         type: 'success',

@@ -17,7 +17,7 @@ import {
   cancelOnrampOrder,
   paidOnrampOrder,
 } from '../services/pajcashService';
-import { logP2PTransaction, syncP2PTransactionStatuses, updateP2PTransactionStatus } from '../services/supabase';
+
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair } from '@solana/web3.js';
 import {
@@ -608,7 +608,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         console.log('Local orders in storage:', localOrders);
         console.groupEnd();
 
-        syncP2PTransactionStatuses(txs);
+
         setPayoutLogs(txs);
       })
       .catch(e => {
@@ -1131,23 +1131,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setOnrampOrder(order);
       setOnrampStatus('pending');
 
-      // Log Onramp order in Supabase
-      const usdVal = parsedOnrampAmt / (onrampNgnRate || 1);
-      logP2PTransaction({
-        userAddress: publicKey.toBase58(),
-        orderId: order.id,
-        tokenSymbol: liveSelectedToken.symbol,
-        cryptoAmount: estOnrampCrypto,
-        fiatCurrency: 'NGN',
-        fiatAmount: parsedOnrampAmt,
-        usdValue: usdVal,
-        bankName: order.bankName || order.bank || '—',
-        accountNumber: order.accountNumber || order.account || '—',
-        accountName: order.accountName || order.name || '—',
-        status: 'PENDING',
-        userEmail: sessionEmail || undefined,
-        type: 'p2p_onramp',
-      });
+
 
       // Disconnect previous socket if any
       if (onrampSocketRef.current) {
@@ -1161,8 +1145,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         onOrderUpdate: (data) => {
           const status = (data?.status || '').toLowerCase();
           setOnrampStatus(status);
-          // Sync status back to Supabase
-          updateP2PTransactionStatus(order.id, status, data?.txHash || data?.signature);
+
         },
         onError: (err) => {
           console.warn('Onramp socket error:', err);
@@ -1354,22 +1337,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         ? fiatLogged
         : fiatLogged / (ngnRate || 1);
 
-      logP2PTransaction({
-        signature: sig,
-        userAddress: walletKey,
-        orderId: order.id,
-        tokenSymbol: liveSelectedToken.symbol,
-        cryptoAmount: cryptoLogged,
-        fiatCurrency: selectedCountry.currency,
-        fiatAmount: fiatLogged,
-        usdValue: usdLogged,
-        bankName: displayBank,
-        accountNumber: accountNumber.trim(),
-        accountName: accountName || 'Account Holder',
-        status: 'INIT',
-        userEmail: sessionEmail || undefined,
-        depositAddress: order.address,
-      });
+
 
       setSuccessDetails({
         amount: `${estCryptoAmount.toFixed(4)} ${liveSelectedToken.symbol}`,
@@ -2493,7 +2461,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                           setOnrampLoading(true);
                           try {
                             await cancelOnrampOrder(orderId, sessionToken);
-                            updateP2PTransactionStatus(orderId, 'CANCELLED');
+
                           } catch {}
                           // Clean up UI & socket
                           if (onrampSocketRef.current) {
@@ -2530,7 +2498,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                           setOnrampLoading(true);
                           try {
                             await paidOnrampOrder(orderId, sessionToken);
-                            updateP2PTransactionStatus(orderId, 'PAID');
+
                           } catch {}
                           setOnrampStatus('paid');
                           setOnrampLoading(false);
