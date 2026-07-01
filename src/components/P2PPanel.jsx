@@ -556,20 +556,16 @@ export default function P2PPanel({ connected, walletTokenList }) {
     const fetchTokens = async () => {
       setSearchingTokens(true);
       try {
-        const res = await fetch('https://tokens.jup.ag/tokens?tags=verified');
+        const query = encodeURIComponent(tokenSearchQuery.trim());
+        const res = await fetch(`https://lite-api.jup.ag/tokens/v2/search?query=${query}`);
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
         const data = await res.json();
         
-        const query = tokenSearchQuery.toLowerCase();
-        const matches = data.filter(t => 
-          t.symbol.toLowerCase().includes(query) || 
-          t.address.toLowerCase() === query
-        ).slice(0, 50);
-        
-        setTokenSearchResults(matches.map(t => ({
+        setTokenSearchResults(data.map(t => ({
           symbol: t.symbol,
           name: t.name,
-          mint: t.address,
-          logoURI: t.logoURI,
+          mint: t.id,
+          logoURI: t.icon,
           decimals: t.decimals,
           balance: 0,
         })));
