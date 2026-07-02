@@ -2731,7 +2731,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
               {[['Bank', onrampOrder.bankName || onrampOrder.bank || '—'],
                 ['Account No.', onrampOrder.accountNumber || onrampOrder.account || '—'],
                 ['Account Name', onrampOrder.accountName || onrampOrder.name || '—'],
-                ['Amount (NGN)', `₦${(onrampOrder.fiatAmount || parsedOnrampAmt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
+                ['Amount (NGN)', `₦${parsedOnrampAmt.toLocaleString()}`],
                 ['Reference', onrampOrder.reference || onrampOrder.id],
               ].map(([label, val]) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
