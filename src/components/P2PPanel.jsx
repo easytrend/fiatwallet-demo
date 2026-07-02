@@ -1111,14 +1111,19 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const ngnRate = tokenPriceUsd * activeNgnRate;
   const parsedAmt = parseFloat(amount) || 0;
   const estCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
-  const platformFee = 0;
-  const baseCryptoAmount = estCryptoAmount;
+
+  // ── Platform Fee: $0.10 USDC on every On/Offramp ──────────────────────────
+  const PLATFORM_FEE_USD = 0.10;
+  // Offramp: convert $0.10 fee into the selected token units so the user sends crypto = trade amount + fee
+  const platformFeeInToken = tokenPriceUsd > 0 ? PLATFORM_FEE_USD / tokenPriceUsd : 0;
+  const platformFee = PLATFORM_FEE_USD; // passed to PajCash as businessUSDCFee
+  const baseCryptoAmount = estCryptoAmount + platformFeeInToken;
   const fiatAmountText = parsedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
   const grossOnrampCrypto = onrampNgnRate > 0 ? (parsedOnrampAmt / onrampNgnRate) : 0;
-  const onrampFee = 0;
-  const estOnrampCrypto = grossOnrampCrypto;
+  const onrampFee = PLATFORM_FEE_USD; // $0.10 deducted from received USDC
+  const estOnrampCrypto = Math.max(0, grossOnrampCrypto - onrampFee);
 
   const displayOnrampAmount = useMemo(() => {
     if (parsedOnrampAmt <= 0) return 0;
@@ -2356,7 +2361,41 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   </span>
                 </div>
               )}
+
+              {/* Fee Breakdown Row — Offramp */}
+              {parsedAmt > 0 && (
+                <div style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  marginTop: '8px', padding: '8px 12px',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '10px',
+                  fontSize: '11px',
+                }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'rgba(255,255,255,0.45)' }}>Trade amount</span>
+                      <span style={{ color: 'rgba(255,255,255,0.7)' }}>
+                        {estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'rgba(255,255,255,0.45)' }}>Platform fee</span>
+                      <span style={{ color: '#f59e0b' }}>
+                        +{platformFeeInToken.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol} ($0.10)
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '5px', marginTop: '2px' }}>
+                      <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>You send</span>
+                      <span style={{ color: 'white', fontWeight: 700 }}>
+                        {baseCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
+
 
             {p2pError && (
               <div style={{
@@ -2373,6 +2412,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 ✕ {p2pError}
               </div>
             )}
+
 
             {/* Submit button + Relayer badge */}
             <button
@@ -2600,10 +2640,42 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </span>
               </div>
             )}
+
+            {/* Fee Breakdown Row — Onramp */}
+            {parsedOnrampAmt > 0 && (
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                marginTop: '8px', padding: '8px 12px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: '10px',
+                fontSize: '11px',
+              }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.45)' }}>Gross amount</span>
+                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>
+                      {grossOnrampCrypto.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} USDC
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.45)' }}>Platform fee</span>
+                    <span style={{ color: '#f59e0b' }}>−$0.10 (0.10 USDC)</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '5px', marginTop: '2px' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>You receive</span>
+                    <span style={{ color: 'white', fontWeight: 700 }}>
+                      {estOnrampCrypto.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol === 'USDC' || liveSelectedToken.symbol === 'USDT' ? liveSelectedToken.symbol : 'USDC → ' + liveSelectedToken.symbol}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Session notice if not yet logged in */}
           {authStep !== 'logged_in' && (
+
             <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)', borderRadius: '8px', padding: '10px 14px', fontSize: '11px', color: '#facc15', lineHeight: '1.5' }}>
               🔒 Please verify your email (above) to activate the Buy gateway.
             </div>
