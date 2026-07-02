@@ -1393,8 +1393,8 @@ export default function P2PPanel({ connected, walletTokenList }) {
     setSubmitting(true);
     try {
       const balance = liveSelectedToken.balance || 0;
-      if (estCryptoAmount > balance) {
-        throw new Error(`Insufficient ${liveSelectedToken.symbol} balance. You have ${balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} but need ${estCryptoAmount.toFixed(4)} ${liveSelectedToken.symbol}.`);
+      if (baseCryptoAmount > balance) {
+        throw new Error(`Insufficient ${liveSelectedToken.symbol} balance. You have ${balance.toLocaleString(undefined, { maximumFractionDigits: 4 })} ${liveSelectedToken.symbol} but need ${baseCryptoAmount.toFixed(4)} ${liveSelectedToken.symbol}.`);
       }
 
       const bankObj = apiBanks.find(b => (b.name || b.bank_name || b) === selectedBank);
@@ -1406,7 +1406,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           bank: bankId,
           accountNumber: accountNumber.trim(),
           currency: selectedCountry.currency,
-          amount: baseCryptoAmount,
+          amount: estCryptoAmount,
           mint: liveSelectedToken.mint,
           chain: 'SOLANA',
           fee: platformFee,
