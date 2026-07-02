@@ -1225,10 +1225,22 @@ export default function P2PPanel({ connected, walletTokenList }) {
         ? liveSelectedToken.mint
         : 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // Default to USDC mint
 
+      // Fetch fresh rates to get the absolute latest rate for accurate fee deduction
+      let latestRate = onrampNgnRate;
+      try {
+        const r = await getAllRate();
+        if (r?.onRampRate?.rate) {
+          latestRate = r.onRampRate.rate;
+          setPajRates(r);
+        }
+      } catch (rateErr) {
+        console.warn('Could not fetch fresh rate before submit, using cached:', rateErr);
+      }
+
       const order = await createOnrampOrder(
         {
           currency: 'NGN',
-          fiatAmount: Math.max(0, parsedOnrampAmt - (onrampFee * onrampNgnRate)),
+          fiatAmount: Math.max(0, parsedOnrampAmt - (onrampFee * latestRate)),
           recipient: publicKey.toBase58(),
           chain: 'SOLANA',
           fee: onrampFee,
@@ -2715,7 +2727,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
               {[['Bank', onrampOrder.bankName || onrampOrder.bank || '—'],
                 ['Account No.', onrampOrder.accountNumber || onrampOrder.account || '—'],
                 ['Account Name', onrampOrder.accountName || onrampOrder.name || '—'],
-                ['Amount (NGN)', `₦${parsedOnrampAmt.toLocaleString()}`],
+                ['Amount (NGN)', `₦${(onrampOrder.fiatAmount || parsedOnrampAmt).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`],
                 ['Reference', onrampOrder.reference || onrampOrder.id],
               ].map(([label, val]) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
