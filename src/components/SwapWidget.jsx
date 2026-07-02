@@ -785,12 +785,6 @@ export default function SwapWidget({
                 <h2 className="swp-modal-title">
                   <span className="swp-modal-title-icon">⇄</span> Swap Tokens
                 </h2>
-                <p className="swp-modal-sub">Best-price routing via
-                  <a href={TITAN_REFERRAL} target="_blank" rel="noopener noreferrer" className="swp-titan-link" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', verticalAlign: 'middle' }}>
-                    <img src="/titan-logo.jpg" alt="Titan" style={{ width: '15px', height: '15px', borderRadius: '50%', objectFit: 'cover' }} />
-                    <span>Titan</span>
-                  </a>
-                </p>
               </div>
               <button className="swp-modal-close" onClick={() => setIsOpen(false)} aria-label="Close">✕</button>
             </div>
@@ -994,11 +988,6 @@ export default function SwapWidget({
             {/* Modal footer */}
             <div className="swp-modal-footer">
               <button className="swp-back-btn" onClick={() => setIsOpen(false)}>← Back</button>
-              <a href={TITAN_REFERRAL} target="_blank" rel="noopener noreferrer" className="swp-footer-titan" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', verticalAlign: 'middle' }}>
-                <span>Powered by</span>
-                <img src="/titan-logo.jpg" alt="Titan" style={{ width: '13px', height: '13px', borderRadius: '50%', objectFit: 'cover' }} />
-                <span style={{ fontWeight: 600 }}>Titan</span>
-              </a>
             </div>
 
           </div>
