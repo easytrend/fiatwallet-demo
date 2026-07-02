@@ -1229,7 +1229,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
         {
           currency: 'NGN',
           fiatAmount: parsedOnrampAmt,
-          amount: grossOnrampCrypto,
           recipient: publicKey.toBase58(),
           chain: 'SOLANA',
           fee: onrampFee,
@@ -1407,7 +1406,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
           accountNumber: accountNumber.trim(),
           currency: selectedCountry.currency,
           fiatAmount: parsedAmt,
-          amount: estCryptoAmount,
           mint: liveSelectedToken.mint,
           chain: 'SOLANA',
           fee: platformFee,
