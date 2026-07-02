@@ -1228,6 +1228,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
       const order = await createOnrampOrder(
         {
           currency: 'NGN',
+          fiatAmount: parsedOnrampAmt,
           amount: grossOnrampCrypto,
           recipient: publicKey.toBase58(),
           chain: 'SOLANA',
@@ -1400,12 +1401,12 @@ export default function P2PPanel({ connected, walletTokenList }) {
       const bankObj = apiBanks.find(b => (b.name || b.bank_name || b) === selectedBank);
       const bankId = bankObj ? (bankObj.id || bankObj.code || bankObj.name) : selectedBank;
 
-      // 1. Create paj_ramp off-ramp order
       const order = await createOfframpOrder(
         {
           bank: bankId,
           accountNumber: accountNumber.trim(),
           currency: selectedCountry.currency,
+          fiatAmount: parsedAmt,
           amount: estCryptoAmount,
           mint: liveSelectedToken.mint,
           chain: 'SOLANA',
