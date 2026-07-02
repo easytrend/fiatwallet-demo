@@ -1112,23 +1112,24 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const parsedAmt = parseFloat(amount) || 0;
   const estCryptoAmount = ngnRate > 0 ? (parsedAmt / ngnRate) : 0;
 
-  // ── Platform Fee: $0.10 USDC on every On/Offramp ──────────────────────────
+  // ── Platform Fee: fixed $0.10 on every On/Offramp ────────────────────────────
+  // PajCash receives this as `businessUSDCFee` and deducts it from the settlement.
+  // Offramp: user sends estCryptoAmount; PajCash deducts $0.10 from the NGN payout.
+  // Onramp:  user pays NGN; PajCash deducts $0.10 USDC from the crypto they receive.
   const PLATFORM_FEE_USD = 0.10;
-  // Offramp: convert $0.10 fee into the selected token units so the user sends crypto = trade amount + fee
-  const platformFeeInToken = tokenPriceUsd > 0 ? PLATFORM_FEE_USD / tokenPriceUsd : 0;
-  const platformFee = PLATFORM_FEE_USD; // passed to PajCash as businessUSDCFee
-  const baseCryptoAmount = estCryptoAmount + platformFeeInToken;
+  const platformFee = PLATFORM_FEE_USD; // passed to PajCash as businessUSDCFee (always fixed)
+  const baseCryptoAmount = estCryptoAmount; // user sends exactly this — fee is on settlement side
   const fiatAmountText = parsedAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
   const grossOnrampCrypto = onrampNgnRate > 0 ? (parsedOnrampAmt / onrampNgnRate) : 0;
-  const onrampFee = PLATFORM_FEE_USD; // $0.10 deducted from received USDC
+  const onrampFee = PLATFORM_FEE_USD; // $0.10 USDC fixed, deducted from received USDC
   const estOnrampCrypto = Math.max(0, grossOnrampCrypto - onrampFee);
 
   const displayOnrampAmount = useMemo(() => {
     if (parsedOnrampAmt <= 0) return 0;
     if (liveSelectedToken.symbol === 'USDC' || liveSelectedToken.symbol === 'USDT') {
-      return estOnrampCrypto - onrampFee;
+      return estOnrampCrypto; // already has fee deducted via estOnrampCrypto
     }
     if (jupiterQuote && jupiterQuote.outAmount) {
       return Number(jupiterQuote.outAmount) / Math.pow(10, liveSelectedToken.decimals);
@@ -2362,7 +2363,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 </div>
               )}
 
-              {/* Fee Breakdown Row — Offramp */}
+              {/* Fee Breakdown Row — Offramp: fixed $0.10 deducted from NGN payout */}
               {parsedAmt > 0 && (
                 <div style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -2374,21 +2375,19 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'rgba(255,255,255,0.45)' }}>Trade amount</span>
+                      <span style={{ color: 'rgba(255,255,255,0.45)' }}>You send</span>
                       <span style={{ color: 'rgba(255,255,255,0.7)' }}>
                         {estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'rgba(255,255,255,0.45)' }}>Platform fee</span>
-                      <span style={{ color: '#f59e0b' }}>
-                        +{platformFeeInToken.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol} ($0.10)
-                      </span>
+                      <span style={{ color: '#f59e0b' }}>−$0.10 (deducted from payout)</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '5px', marginTop: '2px' }}>
-                      <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>You send</span>
+                      <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>You receive</span>
                       <span style={{ color: 'white', fontWeight: 700 }}>
-                        {baseCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol}
+                        {selectedCountry.symbol}{Math.max(0, parsedAmt - (PLATFORM_FEE_USD * (activeNgnRate || 1550))).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </span>
                     </div>
                   </div>
