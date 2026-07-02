@@ -1658,9 +1658,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         <h2 className="card-title" style={{ margin: 0, fontSize: '1.25rem' }}>P2P Trade</h2>
         {canTransact && publicKey && (
           <button 
-            onClick={() => setShowHistoryView(true)}
-            style={{ background: 'none', border: 'none', color: 'var(--text2)', cursor: 'pointer', padding: '4px' }}
-            title="Transaction History"
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.25)', cursor: 'default', padding: '4px' }}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"></circle>
@@ -2187,8 +2185,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   <svg
                     width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                     strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                    style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }}
-                    onClick={() => setShowAmountTooltip(v => !v)}
+                    style={{ color: 'rgba(255,255,255,0.15)', cursor: 'default' }}
                   >
                     <circle cx="12" cy="12" r="10" />
                     <line x1="12" y1="16" x2="12" y2="12" />
@@ -2433,9 +2430,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
         /* ── Buy (Onramp) Mode — Nigeria only ── */
         selectedCountry.code === 'NGA' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <p style={{ fontSize: '11px', color: 'var(--text3)', margin: 0, lineHeight: '1.5' }}>
-            Enter the NGN amount you want to pay. PajCash will provide a Nigerian bank account to receive your payment. Once confirmed, USDC/USDT will be sent to your connected wallet.
-          </p>
 
           {/* NGN Amount & Target Token Block */}
           <div className="field">
@@ -2448,8 +2442,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 <svg
                   width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                   strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                  style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }}
-                  onClick={() => setShowOnrampTooltip(v => !v)}
+                  style={{ color: 'rgba(255,255,255,0.15)', cursor: 'default' }}
                 >
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="16" x2="12" y2="12" />
