@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import jsQR from 'jsqr';
 import { createWorker } from 'tesseract.js';
 import {
@@ -16,10 +16,11 @@ import {
   verifySession,
   cancelOnrampOrder,
   paidOnrampOrder,
+  getTransaction,
 } from '../services/pajcashService';
-
+import { getQuote, buildSwapTransaction } from '../services/swapService';
 import { useWallet, useConnection } from '@solana/wallet-adapter-react';
-import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair } from '@solana/web3.js';
+import { PublicKey, Transaction, TransactionInstruction, SystemProgram, Keypair, VersionedTransaction } from '@solana/web3.js';
 import {
   getAssociatedTokenAddressSync,
   createAssociatedTokenAccountIdempotentInstruction,
@@ -297,6 +298,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const [tokenOpen, setTokenOpen] = useState(false);
   const [bankSearch, setBankSearch] = useState('');
   const [countrySearch, setCountrySearch] = useState('');
+  const [tokenSearchQuery, setTokenSearchQuery] = useState('');
+  const [tokenSearchResults, setTokenSearchResults] = useState([]);
+  const [searchingTokens, setSearchingTokens] = useState(false);
+  const [jupiterQuote, setJupiterQuote] = useState(null);
   const [routingState, setRoutingState] = useState('idle'); // 'routing' | 'loading_market' | 'resolved'
   const [showSuccess, setShowSuccess] = useState(false);
   const [successDetails, setSuccessDetails] = useState(null);
@@ -540,6 +545,76 @@ export default function P2PPanel({ connected, walletTokenList }) {
       })
       .catch(e => console.warn('Could not load PajCash tokens:', e));
   }, [isPajcashLive]);
+
+  // ── Token Search via Jupiter API ──────────────────────────────────────────
+  useEffect(() => {
+    if (tokenSearchQuery.length < 2) {
+      setTokenSearchResults([]);
+      return;
+    }
+
+    const fetchTokens = async () => {
+      setSearchingTokens(true);
+      try {
+        const query = encodeURIComponent(tokenSearchQuery.trim());
+        const res = await fetch(`https://lite-api.jup.ag/tokens/v2/search?query=${query}`);
+        if (!res.ok) throw new Error(`HTTP error ${res.status}`);
+        const data = await res.json();
+        
+        setTokenSearchResults(data.map(t => ({
+          symbol: t.symbol,
+          name: t.name,
+          mint: t.id,
+          logoURI: t.icon,
+          decimals: t.decimals,
+          balance: 0,
+        })));
+      } catch (err) {
+        console.warn('Jupiter token search failed', err);
+      } finally {
+        setSearchingTokens(false);
+      }
+    };
+
+    const timerId = setTimeout(fetchTokens, 500);
+    return () => clearTimeout(timerId);
+  }, [tokenSearchQuery]);
+
+  // ── Dynamic Quote for non-native tokens ──────────────────────────────────
+  useEffect(() => {
+    const onrampNgnRate = pajRates?.onRampRate?.rate || pajRates?.rate || 1500;
+    const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
+    
+    if (mode === 'buy' && parsedOnrampAmt > 0 && selectedToken && selectedToken.symbol !== 'USDC' && selectedToken.symbol !== 'USDT') {
+      const fetchJupiterQuote = async () => {
+        try {
+          const usdcAmount = Math.max(0, parsedOnrampAmt / onrampNgnRate);
+          const amountLamports = Math.floor(usdcAmount * 1_000_000); // USDC has 6 decimals
+          
+          if (amountLamports <= 0) {
+             setJupiterQuote(null);
+             return;
+          }
+
+          const quote = await getQuote({
+            inputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+            outputMint: selectedToken.mint,
+            amount: amountLamports,
+            slippageBps: 100 // 1%
+          });
+          setJupiterQuote(quote);
+        } catch (e) {
+          console.error("Jupiter Quote Error:", e);
+          setJupiterQuote(null);
+        }
+      };
+      
+      const timer = setTimeout(fetchJupiterQuote, 500);
+      return () => clearTimeout(timer);
+    } else {
+      setJupiterQuote(null);
+    }
+  }, [mode, onrampAmount, selectedToken, pajRates]);
 
   // ── Load banks ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -857,14 +932,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
   }, [selectableTokens, selectedToken]);
 
   useEffect(() => {
-    const available = selectableTokens.some(t => t.symbol === selectedToken.symbol || t.mint === selectedToken.mint);
-    const isLiveToken = selectedToken.symbol === 'USDC' || selectedToken.symbol === 'USDT';
-    // Reset to USDC if the currently selected token is unavailable OR is not a live (USDC/USDT) token
-    if ((!available || !isLiveToken) && selectableTokens.length > 0) {
-      const usdc = selectableTokens.find(t => t.symbol === 'USDC') || selectableTokens[0];
-      setSelectedToken(usdc);
+    if (mode === 'sell') {
+      const available = selectableTokens.some(t => t.symbol === selectedToken.symbol || t.mint === selectedToken.mint);
+      const isLiveToken = selectedToken.symbol === 'USDC' || selectedToken.symbol === 'USDT';
+      if ((!available || !isLiveToken) && selectableTokens.length > 0) {
+        const usdc = selectableTokens.find(t => t.symbol === 'USDC') || selectableTokens[0];
+        setSelectedToken(usdc);
+      }
     }
-  }, [connected, walletTokenList, pajTokens]);
+  }, [connected, walletTokenList, pajTokens, mode, selectedToken]);
 
   // ── Camera Scanner (QR + OCR for 10-digit account numbers) ────────────────
   const [ocrStatus, setOcrStatus] = useState('');
@@ -1044,6 +1120,28 @@ export default function P2PPanel({ connected, walletTokenList }) {
   const onrampFee = 0;
   const estOnrampCrypto = grossOnrampCrypto;
 
+  const displayOnrampAmount = useMemo(() => {
+    if (parsedOnrampAmt <= 0) return 0;
+    if (liveSelectedToken.symbol === 'USDC' || liveSelectedToken.symbol === 'USDT') {
+      return estOnrampCrypto - onrampFee;
+    }
+    if (jupiterQuote && jupiterQuote.outAmount) {
+      return Number(jupiterQuote.outAmount) / Math.pow(10, liveSelectedToken.decimals);
+    }
+    return 0;
+  }, [parsedOnrampAmt, liveSelectedToken, estOnrampCrypto, onrampFee, jupiterQuote]);
+
+  const displayOnrampRate = useMemo(() => {
+    if (liveSelectedToken.symbol === 'USDC' || liveSelectedToken.symbol === 'USDT') {
+      return onrampNgnRate;
+    }
+    if (displayOnrampAmount > 0) {
+      return parsedOnrampAmt / displayOnrampAmount;
+    }
+    const price = liveSelectedToken.price || 1.0;
+    return onrampNgnRate / price;
+  }, [liveSelectedToken, onrampNgnRate, displayOnrampAmount, parsedOnrampAmt]);
+
   const allBankNames = useMemo(() => {
     return apiBanks.map(b => (typeof b === 'string' ? b : b.name || b.bank_name || ''));
   }, [apiBanks]);
@@ -1115,6 +1213,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
     setOnrampLoading(true);
     try {
+      // If user is buying a custom token, we must onramp USDC via PajCash, then swap it to the target token.
+      const onrampMint = (liveSelectedToken.symbol === 'USDC' || liveSelectedToken.symbol === 'USDT')
+        ? liveSelectedToken.mint
+        : 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // Default to USDC mint
+
       const order = await createOnrampOrder(
         {
           currency: 'NGN',
@@ -1122,7 +1225,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
           recipient: publicKey.toBase58(),
           chain: 'SOLANA',
           fee: onrampFee,
-          mint: liveSelectedToken.mint,
+          mint: onrampMint,
         },
         sessionToken
       );
@@ -1142,10 +1245,22 @@ export default function P2PPanel({ connected, walletTokenList }) {
       // Watch order status via WebSocket
       const observer = observeOrder({
         orderId: order.id,
-        onOrderUpdate: (data) => {
+        onOrderUpdate: async (data) => {
           const status = (data?.status || '').toLowerCase();
           setOnrampStatus(status);
-
+          const orderSuccess = status === 'completed' || status === 'successful' || status === 'confirmed';
+          if (orderSuccess && liveSelectedToken.symbol !== 'USDC' && liveSelectedToken.symbol !== 'USDT') {
+             // Delay 2s to allow on-chain USDC to settle, then run auto-swap
+             setTimeout(async () => {
+               try {
+                 await triggerJupiterSwap();
+               } catch (swapErr) {
+                 console.error("Auto-swap trigger failed:", swapErr);
+                 setOnrampError(`Onramp succeeded, but automatic swap to ${liveSelectedToken.symbol} failed: ${swapErr.message || swapErr}`);
+                 setOnrampStatus('completed');
+               }
+             }, 2000);
+          }
         },
         onError: (err) => {
           console.warn('Onramp socket error:', err);
@@ -1159,6 +1274,102 @@ export default function P2PPanel({ connected, walletTokenList }) {
       setOnrampLoading(false);
     }
   };
+
+  const triggerJupiterSwap = useCallback(async () => {
+    if (!publicKey || !signTransaction) {
+      throw new Error("Wallet not fully connected.");
+    }
+    
+    const onrampNgnRate = pajRates?.onRampRate?.rate || pajRates?.rate || 1500;
+    const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
+    const usdcAmount = Math.max(0, parsedOnrampAmt / onrampNgnRate);
+    const amountLamports = Math.floor(usdcAmount * 1_000_000);
+    
+    if (amountLamports <= 0) {
+      throw new Error("Invalid USDC amount for swap.");
+    }
+
+    setOnrampStatus('swapping');
+    setOnrampError(null);
+    
+    try {
+      const freshQuote = await getQuote({
+        inputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
+        outputMint: liveSelectedToken.mint,
+        amount: amountLamports,
+        slippageBps: 100 // 1%
+      });
+
+      if (!freshQuote) {
+        throw new Error("Failed to retrieve quote from Jupiter.");
+      }
+
+      const base64Tx = await buildSwapTransaction(freshQuote, publicKey.toBase58());
+      if (!base64Tx) {
+        throw new Error("Failed to construct swap transaction.");
+      }
+
+      const rawTx = Uint8Array.from(atob(base64Tx), c => c.charCodeAt(0));
+      const transaction = VersionedTransaction.deserialize(rawTx);
+
+      const signedTx = await signTransaction(transaction);
+      const txSignature = await connection.sendRawTransaction(signedTx.serialize(), {
+        skipPreflight: false,
+        maxRetries: 3,
+      });
+
+      await connection.confirmTransaction(txSignature, 'confirmed');
+      setOnrampStatus('completed');
+    } catch (e) {
+      console.error("Jupiter auto-swap execution failed:", e);
+      setOnrampStatus('completed');
+      throw new Error(e.message || e);
+    }
+  }, [publicKey, signTransaction, pajRates, onrampAmount, liveSelectedToken, connection]);
+
+  // ── Polling Fallback for Onramp Order Status ──────────────────────────────
+  useEffect(() => {
+    if (!onrampOrder?.id || !sessionToken || onrampStatus === 'completed' || onrampStatus === 'failed') {
+      return;
+    }
+
+    let isMounted = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await getTransaction(sessionToken, onrampOrder.id);
+        const data = res?.data || res;
+        
+        if (data && isMounted) {
+          const status = (data.status || '').toLowerCase();
+          const currentStatus = (onrampStatus || '').toLowerCase();
+          
+          if (status && status !== currentStatus) {
+            setOnrampStatus(status);
+            
+            const orderSuccess = status === 'completed' || status === 'successful' || status === 'confirmed';
+            if (orderSuccess && liveSelectedToken.symbol !== 'USDC' && liveSelectedToken.symbol !== 'USDT') {
+               setTimeout(async () => {
+                 try {
+                   await triggerJupiterSwap();
+                 } catch (swapErr) {
+                   console.error("Auto-swap trigger failed:", swapErr);
+                   setOnrampError(`Onramp succeeded, but automatic swap to ${liveSelectedToken.symbol} failed: ${swapErr.message || swapErr}`);
+                   setOnrampStatus('completed');
+                 }
+               }, 2000);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Onramp polling status fetch failed:', err);
+      }
+    }, 5000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [onrampOrder, onrampStatus, sessionToken, liveSelectedToken, triggerJupiterSwap]);
 
   // ── Submit handler (Offramp / Sell) ──────────────────────────────────────
   const handleSubmit = async () => {
@@ -1411,9 +1622,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
         <h2 className="card-title" style={{ margin: 0, fontSize: '1.25rem' }}>P2P Trade</h2>
         {canTransact && publicKey && (
           <button 
-            onClick={() => setShowHistoryView(true)}
-            style={{ background: 'none', border: 'none', color: 'var(--text2)', cursor: 'pointer', padding: '4px' }}
-            title="Transaction History"
+            style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.25)', cursor: 'default', padding: '4px' }}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="10"></circle>
@@ -1940,8 +2149,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   <svg
                     width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                     strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                    style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }}
-                    onClick={() => setShowAmountTooltip(v => !v)}
+                    style={{ color: 'rgba(255,255,255,0.15)', cursor: 'default' }}
                   >
                     <circle cx="12" cy="12" r="10" />
                     <line x1="12" y1="16" x2="12" y2="12" />
@@ -2186,9 +2394,6 @@ export default function P2PPanel({ connected, walletTokenList }) {
         /* ── Buy (Onramp) Mode — Nigeria only ── */
         selectedCountry.code === 'NGA' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <p style={{ fontSize: '11px', color: 'var(--text3)', margin: 0, lineHeight: '1.5' }}>
-            Enter the NGN amount you want to pay. PajCash will provide a Nigerian bank account to receive your payment. Once confirmed, USDC/USDT will be sent to your connected wallet.
-          </p>
 
           {/* NGN Amount & Target Token Block */}
           <div className="field">
@@ -2201,8 +2406,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 <svg
                   width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                   strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                  style={{ color: 'rgba(255,255,255,0.4)', cursor: 'pointer' }}
-                  onClick={() => setShowOnrampTooltip(v => !v)}
+                  style={{ color: 'rgba(255,255,255,0.15)', cursor: 'default' }}
                 >
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="16" x2="12" y2="12" />
@@ -2282,53 +2486,96 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   </div>
 
                   {tokenOpen && (
-                    <div className="drop-menu" style={{ right: 0, minWidth: '220px', zIndex: 100 }}>
-                      {selectableTokens.map(t => {
-                        const isLiveToken = t.symbol === 'USDC' || t.symbol === 'USDT';
-                        return (
-                          <div
-                            key={t.mint || t.symbol}
-                            className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
-                            onClick={() => {
-                              if (!isLiveToken) return; // block non-USDC/USDT
-                              setSelectedToken(t);
-                              setTokenOpen(false);
-                            }}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '8px',
-                              padding: '10px 12px',
-                              opacity: isLiveToken ? 1 : 0.55,
-                              cursor: isLiveToken ? 'pointer' : 'not-allowed',
-                            }}
-                          >
-                            {t.logoURI ? (
-                              <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
-                            ) : (
-                              <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                                {t.symbol.slice(0, 2)}
-                              </div>
-                            )}
-                            <span className="di-code" style={{ marginLeft: 0 }}>{t.symbol}</span>
-                            {!isLiveToken && (
-                              <span style={{
-                                marginLeft: 'auto',
-                                fontSize: '9px',
-                                fontWeight: '700',
-                                color: '#f59e0b',
-                                background: 'rgba(245,158,11,0.12)',
-                                border: '1px solid rgba(245,158,11,0.3)',
-                                borderRadius: '4px',
-                                padding: '1px 5px',
-                                letterSpacing: '0.03em',
-                                textTransform: 'uppercase',
-                                flexShrink: 0,
-                              }}>Coming Soon</span>
-                            )}
-                          </div>
-                        );
-                      })}
+                    <div className="drop-menu" style={{ right: 0, minWidth: '240px', maxHeight: '300px', overflowY: 'auto', zIndex: 100 }}>
+                      <input
+                        type="text"
+                        placeholder="Search ticker or address..."
+                        value={tokenSearchQuery}
+                        onChange={(e) => setTokenSearchQuery(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          width: 'calc(100% - 16px)',
+                          margin: '8px',
+                          padding: '6px 10px',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          borderRadius: '12px',
+                          color: 'white',
+                          fontSize: '12px',
+                          outline: 'none',
+                        }}
+                        autoFocus
+                      />
+                      {searchingTokens ? (
+                        <div style={{ padding: '10px', textAlign: 'center', fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>Searching...</div>
+                      ) : tokenSearchQuery.trim() !== '' ? (
+                        tokenSearchResults.length === 0 ? (
+                          <div style={{ padding: '10px', textAlign: 'center', fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>No tokens found</div>
+                        ) : (
+                          tokenSearchResults.map(t => (
+                            <div
+                              key={t.mint || t.symbol}
+                              className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                              onClick={() => {
+                                setSelectedToken(t);
+                                setTokenOpen(false);
+                                setTokenSearchQuery('');
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '10px 12px',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {t.logoURI ? (
+                                <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                              ) : (
+                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                                  {t.symbol.slice(0, 2)}
+                                </div>
+                              )}
+                              <span className="di-code" style={{ marginLeft: 0 }}>{t.symbol}</span>
+                              <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginLeft: 'auto', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '80px' }}>
+                                {t.mint.slice(0, 4)}...{t.mint.slice(-4)}
+                              </span>
+                            </div>
+                          ))
+                        )
+                      ) : (
+                        selectableTokens.filter(t => t.symbol === 'USDC' || t.symbol === 'USDT').map(t => {
+                          const isLiveToken = t.symbol === 'USDC' || t.symbol === 'USDT';
+                          return (
+                            <div
+                              key={t.mint || t.symbol}
+                              className={`drop-item ${liveSelectedToken.symbol === t.symbol ? 'sel' : ''}`}
+                              onClick={() => {
+                                if (!isLiveToken) return;
+                                setSelectedToken(t);
+                                setTokenOpen(false);
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '10px 12px',
+                                opacity: isLiveToken ? 1 : 0.55,
+                                cursor: isLiveToken ? 'pointer' : 'not-allowed',
+                              }}
+                            >
+                              {t.logoURI ? (
+                                <img src={t.logoURI} alt={t.symbol} style={{ width: '20px', height: '20px', borderRadius: '50%' }} />
+                              ) : (
+                                <div style={{ width: '20px', height: '20px', borderRadius: '50%', background: 'rgba(255,255,255,0.1)', color: 'white', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                                  {t.symbol.slice(0, 2)}
+                                </div>
+                              )}
+                              <span className="di-code" style={{ marginLeft: 0 }}>{t.symbol}</span>
+                            </div>
+                          );
+                        })
+                      )}
                     </div>
                   )}
                 </div>
@@ -2338,7 +2585,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '10px', marginTop: '8px' }}>
                 <span className="amount-converted" style={{ fontSize: '12px', color: 'rgba(255,255,255,0.38)', fontFamily: 'var(--ff)' }}>
                   {parsedOnrampAmt > 0
-                    ? `≈ ${(estOnrampCrypto - onrampFee).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol}`
+                    ? `≈ ${displayOnrampAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${liveSelectedToken.symbol}`
                     : `≈ ${liveSelectedToken.symbol}`
                   }
                 </span>
@@ -2349,7 +2596,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
             {pajRates?.onRampRate?.rate && (
               <div style={{ marginTop: '6px', fontSize: '11px' }}>
                 <span style={{ color: 'rgba(255,255,255,0.38)' }}>
-                  1 {liveSelectedToken.symbol} = {selectedCountry.symbol}{onrampNgnRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  1 {liveSelectedToken.symbol} ≈ {selectedCountry.symbol}{displayOnrampRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
             )}
@@ -2418,10 +2665,10 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 <span style={{ fontSize: '11px', color: 'var(--text3)' }}>Status</span>
                 <span style={{
                   fontSize: '11px', fontWeight: '700',
-                  color: onrampStatus === 'completed' ? 'var(--lime)' : onrampStatus === 'failed' ? '#ef4444' : '#eab308',
+                  color: onrampStatus === 'completed' ? 'var(--lime)' : onrampStatus === 'failed' ? '#ef4444' : onrampStatus === 'swapping' ? '#3b82f6' : '#eab308',
                   textTransform: 'uppercase',
                 }}>
-                  {onrampStatus === 'completed' ? '✓ Completed' : onrampStatus === 'failed' ? '✕ Failed' : '⏳ Awaiting Payment'}
+                  {onrampStatus === 'completed' ? '✓ Completed' : onrampStatus === 'failed' ? '✕ Failed' : onrampStatus === 'swapping' ? '🔄 Swapping...' : '⏳ Awaiting Payment'}
                 </span>
               </div>
             </div>
@@ -2453,7 +2700,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
               ) : (
                 /* If order is pending / not yet completed */
                 <>
-                  {onrampStatus !== 'paid' && onrampStatus !== 'processing' ? (
+                  {onrampStatus !== 'paid' && onrampStatus !== 'processing' && onrampStatus !== 'swapping' ? (
                     <div style={{ display: 'flex', gap: '10px' }}>
                       <button
                         onClick={async () => {
@@ -2524,20 +2771,22 @@ export default function P2PPanel({ connected, walletTokenList }) {
                       </button>
                     </div>
                   ) : (
-                    /* Once they click Paid (status changes to 'paid' or 'processing') */
+                    /* Once they click Paid (status changes to 'paid', 'processing', 'swapping') */
                     <button
                       className="send-btn"
                       disabled={true}
                       style={{
-                        background: 'rgba(16, 185, 129, 0.08)',
-                        border: '1px solid rgba(16, 185, 129, 0.25)',
-                        color: 'var(--lime)',
+                        background: onrampStatus === 'swapping' ? 'rgba(59, 130, 246, 0.08)' : 'rgba(16, 185, 129, 0.08)',
+                        border: onrampStatus === 'swapping' ? '1px solid rgba(59, 130, 246, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)',
+                        color: onrampStatus === 'swapping' ? '#60a5fa' : 'var(--lime)',
                         fontSize: '13px',
                         cursor: 'not-allowed',
                         opacity: 0.8
                       }}
                     >
-                      ⏳ Confirming Payment...
+                      {onrampStatus === 'swapping' 
+                        ? `🔄 Swapping USDC to ${liveSelectedToken.symbol}...` 
+                        : '⏳ Confirming Payment...'}
                     </button>
                   )}
 
