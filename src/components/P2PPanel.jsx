@@ -1124,7 +1124,7 @@ export default function P2PPanel({ connected, walletTokenList }) {
 
   const parsedOnrampAmt = parseFloat(onrampAmount) || 0;
   const grossOnrampCrypto = onrampNgnRate > 0 ? (parsedOnrampAmt / onrampNgnRate) : 0;
-  const onrampFee = PLATFORM_FEE_USD; // $0.10 USDC fixed, deducted from received USDC
+  const onrampFee = 0; // No platform fee on Onramp
   const estOnrampCrypto = Math.max(0, grossOnrampCrypto - onrampFee);
 
   const displayOnrampAmount = useMemo(() => {
@@ -2665,17 +2665,21 @@ export default function P2PPanel({ connected, walletTokenList }) {
                 fontSize: '11px',
               }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.45)' }}>Gross amount</span>
-                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>
-                      {grossOnrampCrypto.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} USDC
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.45)' }}>Platform fee</span>
-                    <span style={{ color: '#f59e0b' }}>−$0.10 (0.10 USDC)</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '5px', marginTop: '2px' }}>
+                  {onrampFee > 0 ? (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'rgba(255,255,255,0.45)' }}>Gross amount</span>
+                        <span style={{ color: 'rgba(255,255,255,0.7)' }}>
+                          {grossOnrampCrypto.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} USDC
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'rgba(255,255,255,0.45)' }}>Platform fee</span>
+                        <span style={{ color: '#f59e0b' }}>−$0.10 (0.10 USDC)</span>
+                      </div>
+                    </>
+                  ) : null}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: onrampFee > 0 ? '1px solid rgba(255,255,255,0.08)' : 'none', paddingTop: onrampFee > 0 ? '5px' : '0', marginTop: onrampFee > 0 ? '2px' : '0' }}>
                     <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>You receive</span>
                     <span style={{ color: 'white', fontWeight: 700 }}>
                       {estOnrampCrypto.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol === 'USDC' || liveSelectedToken.symbol === 'USDT' ? liveSelectedToken.symbol : 'USDC → ' + liveSelectedToken.symbol}
