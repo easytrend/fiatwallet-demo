@@ -29,3 +29,6 @@ dist-ssr
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Generated build version file (written by buildVersionPlugin at build time)
+public/build-version.txt

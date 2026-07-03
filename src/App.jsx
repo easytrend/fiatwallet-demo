@@ -282,36 +282,32 @@ export default function App() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
 
   // ── App Update Detection ─────────────────────────────────────────────────────────────
+  // Polls /build-version.txt (written by buildVersionPlugin at build time) every 60s.
+  // A timestamp mismatch means a new deployment is live → show the update banner.
   useEffect(() => {
-    // Extract a short fingerprint from the current page's script tags
-    const getPageHash = async () => {
-      try {
-        const res = await fetch('/', { cache: 'no-store' });
-        const html = await res.text();
-        // Pull all /assets/*.js src values as fingerprint
-        const matches = html.match(/\/assets\/[^"']+\.js/g) || [];
-        return matches.sort().join(',');
-      } catch {
-        return null;
-      }
-    };
-
-    let knownHash = null;
+    let knownVersion = null;
     let intervalId = null;
 
     const check = async () => {
-      const hash = await getPageHash();
-      if (!hash) return;
-      if (knownHash === null) {
-        knownHash = hash; // Store initial fingerprint
-      } else if (hash !== knownHash) {
-        setUpdateAvailable(true);
-        clearInterval(intervalId); // Stop polling once update is found
+      try {
+        const res = await fetch(`/build-version.txt?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const version = (await res.text()).trim();
+        if (!version) return;
+        if (knownVersion === null) {
+          knownVersion = version; // capture version on first load
+        } else if (version !== knownVersion) {
+          setUpdateAvailable(true);
+          clearInterval(intervalId); // stop polling — banner is already showing
+        }
+      } catch (err) {
+        // Network blip — ignore and try again next tick
+        console.warn('Update check failed:', err);
       }
     };
 
-    check(); // Run immediately on mount
-    intervalId = setInterval(check, 5 * 60 * 1000); // Then every 5 minutes
+    check(); // run immediately on mount
+    intervalId = setInterval(check, 60 * 1000); // then every 60 seconds
     return () => clearInterval(intervalId);
   }, []);
 
