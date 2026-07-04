@@ -2362,44 +2362,13 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   </span>
                   {amount && Number(amount) > 0 && (
                     <span style={{ display: 'block', marginTop: '3px', color: 'var(--lime)', fontWeight: '600', fontSize: '10.5px', letterSpacing: '0.01em' }}>
-                      +{platformFeeInToken.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} {liveSelectedToken.symbol} platform fee ($0.10)
+                      +fee $0.10
                     </span>
                   )}
                 </div>
               )}
 
-              {/* Fee Breakdown Row — Offramp: fee collected in crypto, not from NGN */}
-              {parsedAmt > 0 && (
-                <div style={{
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  marginTop: '8px', padding: '8px 12px',
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '10px',
-                  fontSize: '11px',
-                }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', width: '100%' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'rgba(255,255,255,0.45)' }}>Trade amount</span>
-                      <span style={{ color: 'rgba(255,255,255,0.7)' }}>
-                        {estCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'rgba(255,255,255,0.45)' }}>Platform fee</span>
-                      <span style={{ color: '#f59e0b' }}>
-                        +{platformFeeInToken.toLocaleString(undefined, { minimumFractionDigits: 6, maximumFractionDigits: 8 })} {liveSelectedToken.symbol} <span style={{ opacity: 0.6 }}>($0.10)</span>
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '5px', marginTop: '2px' }}>
-                      <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 600 }}>Total you send</span>
-                      <span style={{ color: 'white', fontWeight: 700 }}>
-                        {baseCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} {liveSelectedToken.symbol}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
+
             </div>
 
 
