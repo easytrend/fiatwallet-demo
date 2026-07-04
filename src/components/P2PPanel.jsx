@@ -2360,6 +2360,11 @@ export default function P2PPanel({ connected, walletTokenList }) {
                   <span style={{ color: 'rgba(255,255,255,0.38)' }}>
                     1 {liveSelectedToken.symbol} = {selectedCountry.symbol}{ngnRate.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </span>
+                  {amount && Number(amount) > 0 && (
+                    <span style={{ display: 'block', marginTop: '3px', color: 'var(--lime)', fontWeight: '600', fontSize: '10.5px', letterSpacing: '0.01em' }}>
+                      +{platformFeeInToken.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} {liveSelectedToken.symbol} platform fee ($0.10)
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -2423,7 +2428,15 @@ export default function P2PPanel({ connected, walletTokenList }) {
               style={{ opacity: (submitting || !isFormValid) ? 0.6 : 1, cursor: (submitting || !isFormValid) ? 'not-allowed' : 'pointer' }}
             >
               {submitting && <span className="p2p-mini-spinner" style={{ marginRight: '6px' }} />}
-              {submitting ? 'Processing...' : (!isLiveRoute || apiError ? 'Payout Gateway Offline' : 'Send')}
+              {submitting
+                ? 'Processing...'
+                : (!isLiveRoute || apiError
+                  ? 'Payout Gateway Offline'
+                  : (amount && Number(amount) > 0 && baseCryptoAmount > 0
+                    ? `SEND ${baseCryptoAmount.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 })} ${liveSelectedToken.symbol}`
+                    : 'Send'
+                  )
+                )}
             </button>
             {relayerActive && (
               <div style={{ textAlign: 'center', marginTop: '6px', fontSize: '10px', color: 'var(--lime)', opacity: 0.75 }}>
