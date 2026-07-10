@@ -1876,7 +1876,7 @@ footer a { color:var(--lime); text-decoration:none; }
   -webkit-backdrop-filter: blur(8px);
   z-index: 501;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   animation: fadeIn 0.22s ease-out;
 }
@@ -1885,17 +1885,16 @@ footer a { color:var(--lime); text-decoration:none; }
 .brg-modal-sheet {
   position: relative;
   background: #0d1220;
-  border-radius: 24px 24px 0 0;
-  border-top: 1px solid rgba(34, 211, 238, 0.22);
-  border-left: 1px solid rgba(255,255,255,0.07);
-  border-right: 1px solid rgba(255,255,255,0.07);
-  width: 100%;
+  border-radius: 24px;
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  width: calc(100% - 32px);
   max-width: 520px;
+  margin: 16px;
   padding: 24px 24px 40px;
   max-height: 90vh;
   overflow-y: auto;
-  box-shadow: 0 -12px 50px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.04);
-  animation: brgSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04);
+  animation: brgPopIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .brg-sheet-accent {

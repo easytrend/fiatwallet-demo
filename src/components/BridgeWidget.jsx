@@ -148,6 +148,22 @@ function QRCard({ address, expiresAt }) {
   );
 }
 
+const COINGECKO_IDS = {
+  BTC: 'bitcoin',
+  ETH: 'ethereum',
+  AVAX: 'avalanche-2',
+  MATIC: 'matic-network',
+  OP: 'optimism',
+  ARB: 'arbitrum',
+  BASE: 'base',
+  BNB: 'binancecoin',
+  OSMO: 'osmosis',
+  ATOM: 'cosmos',
+  SUI: 'sui',
+  USDC: 'usd-coin',
+  USDT: 'tether',
+};
+
 // ── Main BridgeWidget ─────────────────────────────────────────────────────────
 export default function BridgeWidget() {
   const { publicKey, connected } = useWallet();
@@ -175,7 +191,57 @@ export default function BridgeWidget() {
 
   const solanaAddress = publicKey?.toBase58() || '';
 
+  // Dynamic asset price state for estimation
+  const [tokenPrice, setTokenPrice] = useState(null);
+
+  // Fetch token price from CoinGecko or fallback locally
+  useEffect(() => {
+    if (!amount || parseFloat(amount) <= 0) {
+      setTokenPrice(null);
+      return;
+    }
+    
+    let active = true;
+    const cgId = COINGECKO_IDS[sourceAsset] || COINGECKO_IDS[sourceChain.nativeSymbol] || 'ethereum';
+    
+    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=usd`)
+      .then(res => res.json())
+      .then(data => {
+        if (!active) return;
+        const price = data[cgId]?.usd;
+        if (price) {
+          setTokenPrice(price);
+        }
+      })
+      .catch(() => {
+        // Fallback prices if API is offline/rate-limited
+        const fallbackPrices = { BTC: 98000, ETH: 3120, SOL: 184, AVAX: 32, MATIC: 0.52, BNB: 590, SUI: 3.1, USDC: 1, USDT: 1 };
+        if (active) {
+          setTokenPrice(fallbackPrices[sourceAsset] || 1);
+        }
+      });
+      
+    return () => { active = false; };
+  }, [sourceAsset, sourceChain, amount]);
+
+  // Calculate receive amount after estimated bridge/relayer fee
+  const estimatedReceive = useMemo(() => {
+    if (!amount || parseFloat(amount) <= 0 || !tokenPrice) return '0.00';
+    const rawVal = parseFloat(amount) * tokenPrice;
+    // Deduct standard estimated cross-chain relayer fee (e.g. $1.50)
+    const relayerFee = 1.50; 
+    const finalVal = Math.max(0, rawVal - relayerFee);
+    return finalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }, [amount, tokenPrice]);
+
   // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  function resetInputs() {
+    setAmount('');
+    setSourceChain(SUPPORTED_SOURCE_CHAINS[0]);
+    setSourceAsset('BTC');
+    setErrorMsg('');
+  }
 
   function resetBridge() {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -395,7 +461,16 @@ export default function BridgeWidget() {
                 </div>
 
                 {/* Amount input */}
-                <div className="brg-field-label" style={{ marginTop: 14 }}>Amount to Bridge</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, marginBottom: 6 }}>
+                  <div className="brg-field-label" style={{ margin: 0 }}>Amount to Bridge</div>
+                  <button 
+                    onClick={resetInputs} 
+                    style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, padding: 0 }}
+                    title="Reset / Clear all fields"
+                  >
+                    <span style={{ fontSize: 12 }}>⟲</span> Reset
+                  </button>
+                </div>
                 <div className="input-wrap">
                   <input
                     type="number"
@@ -407,6 +482,25 @@ export default function BridgeWidget() {
                   />
                   <span style={{ fontSize: 12, color: 'var(--text3)', marginRight: 10, fontWeight: 600 }}>{sourceAsset}</span>
                 </div>
+
+                {/* You Receive display */}
+                {amount && parseFloat(amount) > 0 && (
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: 'rgba(255,255,255,0.03)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 10,
+                    padding: '8px 12px',
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: 'var(--text2)'
+                  }}>
+                    <span>You Receive (Estimated)</span>
+                    <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)' }}>~ {estimatedReceive} USDC</strong>
+                  </div>
+                )}
 
                 {/* Asset input */}
                 <div className="brg-field-label" style={{ marginTop: 14 }}>Source Asset Symbol</div>
