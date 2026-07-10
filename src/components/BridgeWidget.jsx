@@ -20,7 +20,7 @@
  * Fee model: Axelar Gas Service — user pays NO separate EVM gas.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useWallet }        from '@solana/wallet-adapter-react';
 import { useWalletModal }   from '@solana/wallet-adapter-react-ui';
 
