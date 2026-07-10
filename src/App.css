@@ -1794,3 +1794,467 @@ footer a { color:var(--lime); text-decoration:none; }
   -moz-appearance: textfield;
 }
 
+
+/* ================================================================
+   BRIDGE WIDGET — Axelar + Circle CCTP
+   Floating pill: right-middle (mobile-only)
+   Modal: bottom-sheet, same card style as SwapWidget/FloatClaimWidget
+   ================================================================ */
+
+/* ── Floating Pill ────────────────────────────────────────────────────────── */
+.brg-float-pill {
+  position: fixed;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  background: rgba(10, 22, 40, 0.78);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(34, 211, 238, 0.30);
+  border-radius: 9999px;
+  padding: 14px 9px;
+  cursor: pointer;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  animation: brgPillIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes brgPillIn {
+  from { opacity: 0; transform: translateY(-50%) translateX(20px); }
+  to   { opacity: 1; transform: translateY(-50%) translateX(0); }
+}
+
+.brg-float-pill:hover {
+  border-color: rgba(163, 230, 53, 0.50);
+  background: rgba(10, 22, 40, 0.92);
+  box-shadow: 0 10px 32px rgba(34,211,238,0.18), 0 8px 24px rgba(0,0,0,0.5);
+  transform: translateY(-50%) translateX(-2px);
+}
+
+.brg-pill-icon {
+  font-size: 18px;
+  line-height: 1;
+  background: linear-gradient(135deg, var(--cyan), var(--lime));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.brg-pill-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text2);
+  letter-spacing: 0.04em;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  font-family: var(--ff);
+}
+
+.brg-pill-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan);
+  animation: pulse 1.5s infinite;
+  flex-shrink: 0;
+}
+
+/* ── Modal Overlay ────────────────────────────────────────────────────────── */
+.brg-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 12, 28, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 501;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: fadeIn 0.22s ease-out;
+}
+
+/* ── Bottom Sheet ─────────────────────────────────────────────────────────── */
+.brg-modal-sheet {
+  position: relative;
+  background: #0d1220;
+  border-radius: 24px 24px 0 0;
+  border-top: 1px solid rgba(34, 211, 238, 0.22);
+  border-left: 1px solid rgba(255,255,255,0.07);
+  border-right: 1px solid rgba(255,255,255,0.07);
+  width: 100%;
+  max-width: 520px;
+  padding: 24px 24px 40px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 -12px 50px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.04);
+  animation: brgSlideUp 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.brg-sheet-accent {
+  position: absolute;
+  top: -1px;
+  left: 24px;
+  right: 24px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(34,211,238,0.40), rgba(163,230,53,0.25), transparent);
+}
+
+@keyframes brgSlideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+.brg-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.brg-modal-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brg-title-icon {
+  background: linear-gradient(135deg, var(--cyan), var(--lime));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 1.3rem;
+}
+
+.brg-modal-sub {
+  font-size: 12px;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.brg-powered-badge {
+  background: rgba(34, 211, 238, 0.10);
+  border: 1px solid rgba(34, 211, 238, 0.25);
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--cyan);
+  white-space: nowrap;
+}
+
+.brg-modal-close {
+  background: none;
+  border: none;
+  color: var(--text3);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 4px;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.brg-modal-close:hover { color: var(--red); }
+
+/* ── No Wallet State ──────────────────────────────────────────────────────── */
+.brg-no-wallet { text-align: center; padding: 2.5rem 1rem 1rem; }
+.brg-no-wallet-icon  { font-size: 36px; margin-bottom: 12px; }
+.brg-no-wallet-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+.brg-no-wallet-sub   { font-size: 12px; color: var(--text2); }
+
+/* ── Form Layout ──────────────────────────────────────────────────────────── */
+.brg-form { display: flex; flex-direction: column; gap: 0; }
+
+.brg-field-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+/* ── Address Row ──────────────────────────────────────────────────────────── */
+.brg-addr-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 13px;
+}
+
+.brg-chain-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--lime);
+  background: rgba(163,230,53,0.09);
+  border: 1px solid rgba(163,230,53,0.25);
+  border-radius: 8px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.brg-rcv-addr {
+  font-size: 12px;
+  font-family: var(--mono);
+  color: var(--text2);
+  word-break: break-all;
+}
+
+/* ── Source Chain Selector ────────────────────────────────────────────────── */
+.brg-chain-selector-wrap { position: relative; }
+
+.brg-chain-btn {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid var(--border);
+  border-radius: 11px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: var(--ff);
+  transition: border-color 0.2s;
+  text-align: left;
+}
+.brg-chain-btn:hover { border-color: rgba(34,211,238,0.40); }
+.brg-chain-name { flex: 1; }
+.brg-chain-chevron { color: var(--text3); font-size: 15px; }
+
+.brg-chain-drop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: #1b3060;
+  border: 1.5px solid rgba(34,211,238,0.25);
+  border-radius: 14px;
+  z-index: 600;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.7);
+  animation: fadeIn 0.15s ease-out;
+}
+
+.brg-chain-drop-item {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  font-family: var(--ff);
+  transition: background 0.12s;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  text-align: left;
+}
+.brg-chain-drop-item:last-child { border-bottom: none; }
+.brg-chain-drop-item:hover      { background: rgba(34,211,238,0.08); }
+.brg-chain-drop-item.sel        { background: rgba(163,230,53,0.10); color: var(--lime); }
+.brg-chain-sym { margin-left: auto; font-size: 11px; font-family: var(--mono); color: var(--text3); }
+
+/* ── Fee Notice ───────────────────────────────────────────────────────────── */
+.brg-fee-notice {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--green);
+  background: rgba(74,222,128,0.07);
+  border: 1px solid rgba(74,222,128,0.20);
+  border-radius: 9px;
+  padding: 8px 12px;
+}
+
+/* ── Notice Card ──────────────────────────────────────────────────────────── */
+.brg-notice-card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.brg-notice-row {
+  font-size: 11.5px;
+  color: var(--text2);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.brg-notice-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 3px; }
+.brg-notice-dot.cyan   { background: var(--cyan); }
+.brg-notice-dot.yellow { background: #fbbf24; }
+.brg-notice-dot.green  { background: var(--green); }
+
+/* ── Error Banner ─────────────────────────────────────────────────────────── */
+.brg-error-banner {
+  background: rgba(248,113,113,0.09);
+  border: 1px solid rgba(248,113,113,0.28);
+  border-radius: 10px;
+  padding: 10px 13px;
+  font-size: 12px;
+  color: var(--red);
+  line-height: 1.5;
+  margin-top: 10px;
+}
+
+/* ── Ghost / Back Button ──────────────────────────────────────────────────── */
+.brg-ghost-btn {
+  background: none; border: none;
+  color: var(--text2); font-size: 12px; font-weight: 600;
+  font-family: var(--ff); cursor: pointer; padding: 8px 0;
+  text-align: center; transition: color 0.15s; width: 100%;
+}
+.brg-ghost-btn:hover { color: var(--text); }
+
+/* ── QR Card ──────────────────────────────────────────────────────────────── */
+.brg-qr-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  text-align: center;
+}
+
+.brg-qr-title {
+  font-size: 11px; font-weight: 700; color: var(--text3);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px;
+}
+
+.brg-qr-img {
+  display: block; width: 160px; height: 160px;
+  margin: 0 auto 12px; border-radius: 10px; border: 2px solid var(--border);
+}
+
+.brg-qr-placeholder {
+  width: 160px; height: 160px; margin: 0 auto 12px;
+  background: rgba(255,255,255,0.04); border: 1px dashed rgba(255,255,255,0.12);
+  border-radius: 10px; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--text3);
+}
+
+.brg-addr-box {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+  border-radius: 9px; padding: 8px 11px; cursor: pointer;
+  transition: border-color 0.2s; margin-bottom: 6px;
+}
+.brg-addr-box:hover { border-color: rgba(163,230,53,0.40); }
+.brg-addr-text { flex: 1; font-size: 11px; font-family: var(--mono); color: var(--text2); word-break: break-all; text-align: left; }
+.brg-copy-icon { font-size: 14px; color: var(--text3); flex-shrink: 0; }
+.brg-expiry-label { font-size: 10px; color: #fbbf24; text-align: center; }
+
+/* ── Progress Stepper ─────────────────────────────────────────────────────── */
+.brg-stepper {
+  display: flex; flex-direction: column; gap: 0;
+  background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px; margin-bottom: 14px;
+}
+
+.brg-step-row {
+  display: grid;
+  grid-template-columns: 20px 2px 1fr;
+  align-items: center;
+  gap: 0 8px;
+  min-height: 28px;
+}
+
+.brg-step-dot {
+  width: 20px; height: 20px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; flex-shrink: 0;
+  border: 1.5px solid rgba(255,255,255,0.12);
+  color: var(--text3); background: rgba(255,255,255,0.04);
+  transition: all 0.3s;
+}
+.brg-step-dot.done   { background: rgba(163,230,53,0.15); border-color: rgba(163,230,53,0.50); color: var(--lime); }
+.brg-step-dot.active { background: rgba(34,211,238,0.15); border-color: rgba(34,211,238,0.55); color: var(--cyan); animation: pulse 2s infinite; }
+
+.brg-step-line {
+  width: 2px; height: 16px; background: rgba(255,255,255,0.08);
+  justify-self: center; transition: background 0.3s; grid-column: 2;
+}
+.brg-step-line.done { background: rgba(163,230,53,0.45); }
+
+.brg-step-label {
+  font-size: 11.5px; color: var(--text3); font-weight: 500;
+  grid-column: 3; grid-row: 1; padding-left: 4px; transition: color 0.3s;
+}
+.brg-step-label.done   { color: var(--lime);  font-weight: 600; }
+.brg-step-label.active { color: var(--cyan);  font-weight: 700; }
+
+/* ── Fallback Badge ───────────────────────────────────────────────────────── */
+.brg-fallback-badge {
+  margin-top: 12px;
+  background: rgba(251,191,36,0.09); border: 1px solid rgba(251,191,36,0.30);
+  border-radius: 10px; padding: 8px 12px;
+  font-size: 11.5px; font-weight: 700; color: #fde68a;
+  text-align: center; animation: fadeIn 0.3s ease-out;
+}
+
+/* ── Status Message ───────────────────────────────────────────────────────── */
+.brg-status-msg {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text2); padding: 10px 13px;
+  background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+/* ── Success State ────────────────────────────────────────────────────────── */
+.brg-success-wrap { text-align: center; padding: 1rem 0; display: flex; flex-direction: column; align-items: center; }
+.brg-success-icon-wrap {
+  width: 52px; height: 52px; border-radius: 50%;
+  background: rgba(163,230,53,0.14); border: 2px solid rgba(163,230,53,0.45);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 14px;
+  box-shadow: 0 0 20px rgba(163,230,53,0.20);
+}
+.brg-success-title { font-size: 1.35rem; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.brg-success-sub   { font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+
+/* ── Desktop: hide pill entirely (>= 1100px) ─────────────────────────────── */
+@media (min-width: 1100px) {
+  .brg-float-pill { display: none !important; }
+}
+
+/* ── Mobile responsive tweaks (< 768px) ──────────────────────────────────── */
+@media (max-width: 768px) {
+  .brg-float-pill { right: 10px; padding: 12px 7px; }
+  .brg-pill-icon { font-size: 15px; }
+  .brg-pill-label { font-size: 8px; }
+  .brg-modal-sheet { padding: 18px 18px 36px; }
+  .brg-modal-title { font-size: 1.2rem; }
+  .brg-qr-img { width: 140px; height: 140px; }
+  .brg-qr-placeholder { width: 140px; height: 140px; }
+}

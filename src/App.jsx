@@ -18,6 +18,7 @@ import Toast from './components/Toast';
 import FloatClaimWidget from './components/FloatClaimWidget';
 import SwapWidget from './components/SwapWidget';
 import P2PPanel from './components/P2PPanel';
+import BridgeWidget from './components/BridgeWidget';
 
 
 
@@ -1232,6 +1233,9 @@ export default function App() {
           duration={5000}
         />
       )}
+
+      {/* Bridge Widget — floating pill (mobile right-middle) + modal */}
+      <BridgeWidget />
 
       {/* Bottom Navigation for mobile view */}
       <div className="bottom-nav">
