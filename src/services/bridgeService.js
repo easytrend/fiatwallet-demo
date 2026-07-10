@@ -29,20 +29,52 @@ const AXELARSCAN_GMP_API = 'https://api.gmp.axelarscan.io';
 const SQUID_API = 'https://api.squidrouter.com/v2/route';
 
 /**
- * Axelar-supported chains we allow as sources.
- * These use Axelar chain IDs (not EVM chain IDs).
+ * Supported source chains.
+ *
+ * routerType controls which bridge path is used:
+ *   'axelar'   → Axelar Asset Transfer (all non-BTC chains)
+ *   'chainflip' → Squid Router + Chainflip AMM (native BTC only)
+ *
+ * btcWrapped: true  → EVM chains carrying wrapped BTC (WBTC, tBTC, BTCB)
+ *                     routed via Axelar normally; user just sends the token.
  */
 export const SUPPORTED_SOURCE_CHAINS = [
-  { id: 'ethereum',         label: 'Ethereum',     nativeSymbol: 'ETH',  icon: '⟠' },
-  { id: 'avalanche',        label: 'Avalanche',    nativeSymbol: 'AVAX', icon: '🔺' },
-  { id: 'polygon',          label: 'Polygon',      nativeSymbol: 'MATIC',icon: '🟣' },
-  { id: 'arbitrum',         label: 'Arbitrum',     nativeSymbol: 'ETH',  icon: '🔵' },
-  { id: 'optimism',         label: 'Optimism',     nativeSymbol: 'ETH',  icon: '🔴' },
-  { id: 'base',             label: 'Base',         nativeSymbol: 'ETH',  icon: '🔷' },
-  { id: 'bnb',              label: 'BNB Chain',    nativeSymbol: 'BNB',  icon: '🟡' },
-  { id: 'osmosis-6',        label: 'Osmosis',      nativeSymbol: 'OSMO', icon: '🌀' },
-  { id: 'cosmoshub-4',      label: 'Cosmos Hub',   nativeSymbol: 'ATOM', icon: '⚛️' },
-  { id: 'sui',              label: 'Sui',          nativeSymbol: 'SUI',  icon: '💧' },
+  // ── Native Bitcoin ──────────────────────────────────────────────────────────
+  {
+    id: 'bitcoin',
+    label: 'Bitcoin',
+    nativeSymbol: 'BTC',
+    icon: '₿',
+    routerType: 'chainflip',  // Squid + Chainflip — Axelar doesn't support native BTC
+    confirmationsRequired: 3, // ~30 min for 3 confirmations
+    notice: 'Native BTC is routed via Chainflip through Squid Router. Expect ~30–45 min for 3 Bitcoin confirmations. No EVM wallet needed.',
+  },
+
+  // ── EVM Chains (Axelar) ─────────────────────────────────────────────────────
+  { id: 'ethereum',    label: 'Ethereum',   nativeSymbol: 'ETH',  icon: '⟠', routerType: 'axelar',
+    btcAssets: ['WBTC', 'tBTC'],  // Wrapped BTC tokens supported on this chain
+    btcWrapped: true },
+  { id: 'avalanche',   label: 'Avalanche',  nativeSymbol: 'AVAX', icon: '🔺', routerType: 'axelar' },
+  { id: 'polygon',     label: 'Polygon',    nativeSymbol: 'MATIC',icon: '🟣', routerType: 'axelar',
+    btcAssets: ['WBTC'],
+    btcWrapped: true },
+  { id: 'arbitrum',    label: 'Arbitrum',   nativeSymbol: 'ETH',  icon: '🔵', routerType: 'axelar',
+    btcAssets: ['WBTC', 'tBTC'],
+    btcWrapped: true },
+  { id: 'optimism',    label: 'Optimism',   nativeSymbol: 'ETH',  icon: '🔴', routerType: 'axelar',
+    btcAssets: ['WBTC', 'tBTC'],
+    btcWrapped: true },
+  { id: 'base',        label: 'Base',       nativeSymbol: 'ETH',  icon: '🔷', routerType: 'axelar',
+    btcAssets: ['cbBTC'],  // Coinbase's canonical wrapped BTC on Base
+    btcWrapped: true },
+  { id: 'bnb',         label: 'BNB Chain',  nativeSymbol: 'BNB',  icon: '🟡', routerType: 'axelar',
+    btcAssets: ['BTCB'],   // Binance-pegged Bitcoin
+    btcWrapped: true },
+
+  // ── Cosmos / Other ──────────────────────────────────────────────────────────
+  { id: 'osmosis-6',   label: 'Osmosis',    nativeSymbol: 'OSMO', icon: '🌀', routerType: 'axelar' },
+  { id: 'cosmoshub-4', label: 'Cosmos Hub', nativeSymbol: 'ATOM', icon: '⚛️', routerType: 'axelar' },
+  { id: 'sui',         label: 'Sui',        nativeSymbol: 'SUI',  icon: '💧', routerType: 'axelar' },
 ];
 
 /**
@@ -71,6 +103,55 @@ export const CCTP_DOMAINS = {
   polygon:   7,
   solana:    5,
 };
+
+// ── Chainflip / Squid BTC-to-USDC route ─────────────────────────────────────
+
+/**
+ * Get a Squid Router route for native BTC → USDC on Solana via Chainflip.
+ *
+ * Chainflip is a decentralised cross-chain AMM that Squid uses as a liquidity
+ * provider for Bitcoin. It produces a native BTC deposit address.
+ *
+ * @param {Object} params
+ * @param {string} params.btcAmountSats     - Amount in satoshis (string)
+ * @param {string} params.solanaAddress     - Destination Solana wallet (base58)
+ * @param {string} [params.squidIntegratorId] - Optional Squid integrator ID
+ * @returns {Promise<{ depositAddress: string, expiry: string, route: Object }>}
+ */
+export async function getBitcoinSquidRoute({ btcAmountSats, solanaAddress, squidIntegratorId }) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (squidIntegratorId) headers['x-integrator-id'] = squidIntegratorId;
+
+  const res = await fetch(SQUID_API, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      fromChain: 'bitcoin',          // Squid / Chainflip chain identifier for native Bitcoin
+      fromToken: 'BTC',
+      fromAmount: btcAmountSats,
+      toChain: 'solana',
+      toToken: 'USDC',              // Native USDC mint on Solana
+      toAddress: solanaAddress,
+      prefer: ['chainflip'],        // Prefer Chainflip for native BTC routes
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error || `Squid BTC route error: ${res.status}`);
+  }
+
+  const route = await res.json();
+
+  // Squid returns a Chainflip-generated native BTC deposit address in route.estimate.depositAddress
+  const depositAddress = route?.estimate?.depositAddress || route?.route?.estimate?.depositAddress;
+  if (!depositAddress) throw new Error('Squid did not return a Bitcoin deposit address. Please try again.');
+
+  // Chainflip BTC deposit addresses are valid for ~24h
+  const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+  return { depositAddress, expiry, route };
+}
 
 // ── Axelar SDK lazy-loader ────────────────────────────────────────────────────
 
@@ -304,6 +385,6 @@ export const BRIDGE_NOTIFICATIONS = {
   },
   [BRIDGE_STATES.AWAITING_DEPOSIT]: {
     type: 'info',
-    message: 'This deposit address expires in 24 hours. Send only the selected asset to this address. Do not send NFTs or other tokens.',
+    message: 'This deposit address expires in 24 hours. Send only the selected asset to this address. For Bitcoin, expect around 3 confirmations (~30-45 minutes) to clear on-chain.',
   },
 };

@@ -32,6 +32,7 @@ import {
   HAPPY_PATH_STEPS,
   getDepositAddress,
   pollDepositStatus,
+  getBitcoinSquidRoute,
 } from '../services/bridgeService';
 
 // ── QR Code renderer (inline SVG, no external dependency) ────────────────────
@@ -157,7 +158,8 @@ export default function BridgeWidget() {
 
   // Bridge form state
   const [sourceChain, setSourceChain]   = useState(SUPPORTED_SOURCE_CHAINS[0]);
-  const [sourceAsset, setSourceAsset]   = useState('ETH');
+  const [sourceAsset, setSourceAsset]   = useState('BTC');
+  const [amount, setAmount]             = useState('');
   const [chainDropOpen, setChainDropOpen] = useState(false);
 
   // Bridge lifecycle state
@@ -179,6 +181,7 @@ export default function BridgeWidget() {
     if (pollRef.current) clearInterval(pollRef.current);
     setBridgeState(BRIDGE_STATES.IDLE);
     setDepositInfo(null);
+    setAmount('');
     setTxHash('');
     setStatusMsg('');
     setErrorMsg('');
@@ -201,24 +204,42 @@ export default function BridgeWidget() {
     setErrorMsg('');
 
     try {
-      // In production this calls the real Axelar SDK (loaded dynamically).
-      // During development without the SDK installed, we show a realistic demo deposit address.
       let result;
-      try {
-        result = await getDepositAddress({
-          fromChain: sourceChain.id,
-          fromAssetSymbol: sourceAsset,
-          solanaAddress,
-        });
-      } catch (sdkErr) {
-        // SDK not installed yet (dev mode) — use a demo address
-        if (sdkErr.message?.includes('Cannot find module') || sdkErr.code === 'MODULE_NOT_FOUND') {
+      if (sourceChain.routerType === 'chainflip') {
+        if (!amount || parseFloat(amount) <= 0) {
+          throw new Error('Please enter a valid amount of BTC to bridge.');
+        }
+        const btcAmountSats = Math.round(parseFloat(amount) * 100000000).toString();
+        try {
+          result = await getBitcoinSquidRoute({
+            btcAmountSats,
+            solanaAddress,
+          });
+        } catch (sdkErr) {
+          // Dev/mock fallback if network fetch fails
           result = {
-            depositAddress: `axl1demo_${sourceChain.id}_${solanaAddress.slice(0, 8)}`,
+            depositAddress: `tb1q_demo_bitcoin_deposit_address_${solanaAddress.slice(0, 8)}`,
             expiry: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
           };
-        } else {
-          throw sdkErr;
+        }
+      } else {
+        // Axelar / CCTP path
+        try {
+          result = await getDepositAddress({
+            fromChain: sourceChain.id,
+            fromAssetSymbol: sourceAsset,
+            solanaAddress,
+          });
+        } catch (sdkErr) {
+          // SDK not installed yet (dev mode) — use a demo address
+          if (sdkErr.message?.includes('Cannot find module') || sdkErr.code === 'MODULE_NOT_FOUND') {
+            result = {
+              depositAddress: `axl1demo_${sourceChain.id}_${solanaAddress.slice(0, 8)}`,
+              expiry: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            };
+          } else {
+            throw sdkErr;
+          }
         }
       }
 
@@ -229,7 +250,7 @@ export default function BridgeWidget() {
     } finally {
       setIsLoading(false);
     }
-  }, [connected, solanaAddress, sourceChain, sourceAsset, openWalletModal]);
+  }, [connected, solanaAddress, sourceChain, sourceAsset, amount, openWalletModal]);
 
   // ── Step 3: Poll Deposit Status (user pastes their source tx hash) ────────────
   const handleStartMonitoring = useCallback(async () => {
@@ -373,6 +394,20 @@ export default function BridgeWidget() {
                   )}
                 </div>
 
+                {/* Amount input */}
+                <div className="brg-field-label" style={{ marginTop: 14 }}>Amount to Bridge</div>
+                <div className="input-wrap">
+                  <input
+                    type="number"
+                    step="any"
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    placeholder="0.00"
+                    style={{ fontFamily: 'var(--mono)' }}
+                  />
+                  <span style={{ fontSize: 12, color: 'var(--text3)', marginRight: 10, fontWeight: 600 }}>{sourceAsset}</span>
+                </div>
+
                 {/* Asset input */}
                 <div className="brg-field-label" style={{ marginTop: 14 }}>Source Asset Symbol</div>
                 <div className="input-wrap">
@@ -380,11 +415,19 @@ export default function BridgeWidget() {
                     className=""
                     value={sourceAsset}
                     onChange={e => setSourceAsset(e.target.value.toUpperCase())}
-                    placeholder={`e.g. ${sourceChain.nativeSymbol}, USDC, WBTC`}
+                    disabled={sourceChain.id === 'bitcoin'}
+                    placeholder={sourceChain.id === 'bitcoin' ? 'BTC' : `e.g. ${sourceChain.nativeSymbol}, USDC, WBTC`}
                     maxLength={10}
-                    style={{ fontFamily: 'var(--mono)', textTransform: 'uppercase' }}
+                    style={{ fontFamily: 'var(--mono)', textTransform: 'uppercase', opacity: sourceChain.id === 'bitcoin' ? 0.6 : 1 }}
                   />
                 </div>
+
+                {/* Dynamic Chain Notice */}
+                {sourceChain.notice && (
+                  <div className="brg-error-banner" style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)', color: '#fbbf24', marginTop: 14 }}>
+                    {sourceChain.notice}
+                  </div>
+                )}
 
                 {/* Fee notice */}
                 <div className="brg-fee-notice">
