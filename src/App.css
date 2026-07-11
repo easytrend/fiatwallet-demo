@@ -2096,6 +2096,16 @@ footer a { color:var(--lime); text-decoration:none; }
   font-family: var(--ff);
 }
 
+.brg-modal-sheet::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: 24px;
+  right: 24px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(163, 230, 53, 0.35), transparent);
+}
+
 @keyframes brgPopIn {
   from { transform: scale(0.94); opacity: 0; }
   to   { transform: scale(1); opacity: 1; }
