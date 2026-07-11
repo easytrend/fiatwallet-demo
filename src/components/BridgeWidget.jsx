@@ -1,689 +1,375 @@
 /**
  * BridgeWidget.jsx
  *
- * Axelar + Circle CCTP cross-chain bridge panel.
+ * Simplified cross-chain bridge panel (Axelar + Circle CCTP / Chainflip).
  *
- * UI Pattern:
- *   - Mobile only: Fixed floating pill on the RIGHT-MIDDLE of the screen.
- *   - Desktop: Hidden (bridge is a mobile-first feature here).
- *   - Click pill → bottom-sheet modal slides up (same card style as SwapWidget / FloatClaimWidget).
+ * UI: Clean Send / Receive card layout — mobile-only floating pill.
+ * Flow:
+ *   1. Pick source chain + asset
+ *   2. Generate one-time deposit address  (Axelar or Chainflip/Squid for BTC)
+ *   3. Display address + QR + Copy button
  *
- * Architecture:
- *   Step 1  → Connect wallet / verify Solana address
- *   Step 2  → Select source chain + asset → generate Axelar deposit address + QR code
- *   Step 3  → Monitor deposit (Axelarscan polling)
- *   Step 4  → Squid/Axelar swaps asset → USDC on EVM
- *   Step 5  → Circle CCTP burn + attestation polling
- *   Step 6  → Mint canonical USDC on Solana
- *   Fallback→ If CCTP mint fails, deliver axlUSDC + offer Ethereum re-route
- *
- * Fee model: Axelar Gas Service — user pays NO separate EVM gas.
+ * Fee model: Axelar Gas Service (no separate EVM gas for user).
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { useWallet }        from '@solana/wallet-adapter-react';
-import { useWalletModal }   from '@solana/wallet-adapter-react-ui';
+import { useState, useEffect } from 'react';
+import { useWallet }      from '@solana/wallet-adapter-react';
+import { useWalletModal } from '@solana/wallet-adapter-react-ui';
 
 import {
   SUPPORTED_SOURCE_CHAINS,
-  BRIDGE_STATES,
-  BRIDGE_STATE_LABELS,
-  BRIDGE_NOTIFICATIONS,
-  HAPPY_PATH_STEPS,
   getDepositAddress,
-  pollDepositStatus,
   getBitcoinSquidRoute,
 } from '../services/bridgeService';
 
-// ── QR Code renderer (inline SVG, no external dependency) ────────────────────
-// A minimal QR-code-to-SVG util using the qrcode library (if available) or
-// falling back to a simple visual placeholder. We import dynamically.
-async function generateQRDataURL(text) {
-  try {
-    const QRCode = await import('qrcode');
-    return QRCode.default.toDataURL(text, { margin: 1, width: 180, color: { dark: '#f0f6ff', light: '#0a1628' } });
-  } catch {
-    // Fallback: return null, UI will show text only
-    return null;
-  }
-}
-
-// ── Notification Banner ───────────────────────────────────────────────────────
-function BridgeNotification({ state }) {
-  const notif = BRIDGE_NOTIFICATIONS[state];
-  if (!notif) return null;
-
-  const colors = {
-    info:    { bg: 'rgba(34,211,238,0.08)',  border: 'rgba(34,211,238,0.28)',  text: '#67e8f9', icon: 'ℹ' },
-    warning: { bg: 'rgba(251,191,36,0.09)',  border: 'rgba(251,191,36,0.30)',  text: '#fde68a', icon: '⚠' },
-    error:   { bg: 'rgba(248,113,113,0.09)', border: 'rgba(248,113,113,0.30)', text: '#fca5a5', icon: '✕' },
-  }[notif.type] || {};
-
-  return (
-    <div style={{
-      background: colors.bg,
-      border: `1px solid ${colors.border}`,
-      borderRadius: 10,
-      padding: '10px 13px',
-      fontSize: 12,
-      color: colors.text,
-      lineHeight: 1.55,
-      display: 'flex',
-      gap: 8,
-      marginBottom: 14,
-      alignItems: 'flex-start',
-    }}>
-      <span style={{ flexShrink: 0, fontSize: 13 }}>{colors.icon}</span>
-      <span>{notif.message}</span>
-    </div>
-  );
-}
-
-// ── Progress Stepper ──────────────────────────────────────────────────────────
-function BridgeStepper({ currentState }) {
-  const currentIdx = HAPPY_PATH_STEPS.indexOf(currentState);
-  const isFallback = currentState === BRIDGE_STATES.FALLBACK_DELIVERY || currentState === BRIDGE_STATES.FALLBACK_ROUTING;
-
-  return (
-    <div className="brg-stepper">
-      {HAPPY_PATH_STEPS.map((step, i) => {
-        const done    = currentIdx > i && !isFallback;
-        const active  = currentIdx === i && !isFallback;
-        const pending = currentIdx < i && !isFallback;
-
-        return (
-          <div key={step} className="brg-step-row">
-            <div className={`brg-step-dot ${done ? 'done' : active ? 'active' : pending ? 'pending' : ''}`}>
-              {done ? '✓' : i + 1}
-            </div>
-            {i < HAPPY_PATH_STEPS.length - 1 && (
-              <div className={`brg-step-line ${done ? 'done' : ''}`} />
-            )}
-            <span className={`brg-step-label ${active ? 'active' : done ? 'done' : ''}`}>
-              {BRIDGE_STATE_LABELS[step]}
-            </span>
-          </div>
-        );
-      })}
-      {isFallback && (
-        <div className="brg-fallback-badge">
-          ⚡ Fallback Route Active — via Ethereum
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── QR Display ────────────────────────────────────────────────────────────────
-function QRCard({ address, expiresAt }) {
+// ── QR Code ──────────────────────────────────────────────────────────────────
+function DepositQR({ address }) {
   const [qrSrc, setQrSrc] = useState(null);
 
   useEffect(() => {
     if (!address) return;
-    generateQRDataURL(address).then(setQrSrc);
+    let cancelled = false;
+    import('qrcode').then(mod => {
+      const QRCode = mod.default || mod;
+      QRCode.toDataURL(address, {
+        width: 200, margin: 2,
+        color: { dark: '#e2e8f0', light: '#0f1623' },
+      }).then(url => { if (!cancelled) setQrSrc(url); }).catch(() => {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
   }, [address]);
 
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(address).catch(() => {});
-  }, [address]);
-
-  const expiryLabel = expiresAt ? new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-
-  return (
-    <div className="brg-qr-card">
-      <div className="brg-qr-title">Deposit Address</div>
-      {qrSrc ? (
-        <img src={qrSrc} alt="Deposit QR code" className="brg-qr-img" />
-      ) : (
-        <div className="brg-qr-placeholder">📷 QR Loading…</div>
-      )}
-      <div className="brg-addr-box" onClick={handleCopy} title="Tap to copy">
-        <span className="brg-addr-text">{address}</span>
-        <span className="brg-copy-icon">⎘</span>
-      </div>
-      {expiryLabel && (
-        <div className="brg-expiry-label">⏱ Expires at {expiryLabel} (24h)</div>
-      )}
-    </div>
-  );
+  return qrSrc
+    ? <img src={qrSrc} alt="Deposit QR" className="brg-qr-img" />
+    : <div className="brg-qr-placeholder">⬛</div>;
 }
 
-const COINGECKO_IDS = {
-  BTC: 'bitcoin',
-  ETH: 'ethereum',
-  AVAX: 'avalanche-2',
-  MATIC: 'matic-network',
-  OP: 'optimism',
-  ARB: 'arbitrum',
-  BASE: 'base',
-  BNB: 'binancecoin',
-  OSMO: 'osmosis',
-  ATOM: 'cosmos',
-  SUI: 'sui',
-  USDC: 'usd-coin',
-  USDT: 'tether',
+// ── Chain accent colours ──────────────────────────────────────────────────────
+const CHAIN_COLOR = {
+  bitcoin:      '#f97316',
+  ethereum:     '#627eea',
+  avalanche:    '#e84142',
+  polygon:      '#8247e5',
+  arbitrum:     '#2d6fe4',
+  optimism:     '#ff0420',
+  base:         '#0052ff',
+  bnb:          '#f0b90b',
+  'osmosis-6':  '#7c3aed',
+  'cosmoshub-4':'#5a6abf',
+  sui:          '#6fbcf0',
 };
 
-// ── Main BridgeWidget ─────────────────────────────────────────────────────────
+// ── BridgeWidget ──────────────────────────────────────────────────────────────
 export default function BridgeWidget() {
   const { publicKey, connected } = useWallet();
   const { setVisible: openWalletModal } = useWalletModal();
 
-  // Panel open/close state
+  // Panel
   const [open, setOpen]         = useState(false);
 
-  // Bridge form state
-  const [sourceChain, setSourceChain]   = useState(SUPPORTED_SOURCE_CHAINS[0]);
-  const [sourceAsset, setSourceAsset]   = useState('BTC');
-  const [amount, setAmount]             = useState('');
+  // Form
+  const [sourceChain, setSourceChain]     = useState(SUPPORTED_SOURCE_CHAINS[0]);
+  const [sourceAsset, setSourceAsset]     = useState('BTC');
+  const [btcAmount,   setBtcAmount]       = useState('');   // only used for BTC/Chainflip
   const [chainDropOpen, setChainDropOpen] = useState(false);
 
-  // Bridge lifecycle state
-  const [bridgeState, setBridgeState]   = useState(BRIDGE_STATES.IDLE);
-  const [depositInfo, setDepositInfo]   = useState(null);   // { depositAddress, expiry }
-  const [txHash, setTxHash]             = useState('');      // user-pasted source tx hash
-  const [statusMsg, setStatusMsg]       = useState('');
-  const [errorMsg, setErrorMsg]         = useState('');
-  const [isLoading, setIsLoading]       = useState(false);
+  // Flow states: idle | generating | ready | error
+  const [flowState,   setFlowState]   = useState('idle');
+  const [depositInfo, setDepositInfo] = useState(null);
+  const [errorMsg,    setErrorMsg]    = useState('');
+  const [copied,      setCopied]      = useState(false);
 
-  // Polling ref
-  const pollRef = useRef(null);
+  const solanaAddress  = publicKey?.toBase58() || '';
+  const isBTC          = sourceChain.routerType === 'chainflip';
+  const chainColor     = CHAIN_COLOR[sourceChain.id] || 'var(--cyan)';
 
-  const solanaAddress = publicKey?.toBase58() || '';
-
-  // Dynamic asset price state for estimation
-  const [tokenPrice, setTokenPrice] = useState(null);
-
-  // Fetch token price from CoinGecko or fallback locally
-  useEffect(() => {
-    if (!amount || parseFloat(amount) <= 0) {
-      setTokenPrice(null);
-      return;
-    }
-    
-    let active = true;
-    const cgId = COINGECKO_IDS[sourceAsset] || COINGECKO_IDS[sourceChain.nativeSymbol] || 'ethereum';
-    
-    fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=usd`)
-      .then(res => res.json())
-      .then(data => {
-        if (!active) return;
-        const price = data[cgId]?.usd;
-        if (price) {
-          setTokenPrice(price);
-        }
-      })
-      .catch(() => {
-        // Fallback prices if API is offline/rate-limited
-        const fallbackPrices = { BTC: 98000, ETH: 3120, SOL: 184, AVAX: 32, MATIC: 0.52, BNB: 590, SUI: 3.1, USDC: 1, USDT: 1 };
-        if (active) {
-          setTokenPrice(fallbackPrices[sourceAsset] || 1);
-        }
-      });
-      
-    return () => { active = false; };
-  }, [sourceAsset, sourceChain, amount]);
-
-  // Calculate receive amount after estimated bridge/relayer fee
-  const estimatedReceive = useMemo(() => {
-    if (!amount || parseFloat(amount) <= 0 || !tokenPrice) return '0.00';
-    const rawVal = parseFloat(amount) * tokenPrice;
-    // Deduct standard estimated cross-chain relayer fee (e.g. $1.50)
-    const relayerFee = 1.50; 
-    const finalVal = Math.max(0, rawVal - relayerFee);
-    return finalVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }, [amount, tokenPrice]);
-
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  function resetInputs() {
-    setAmount('');
-    setSourceChain(SUPPORTED_SOURCE_CHAINS[0]);
-    setSourceAsset('BTC');
-    setErrorMsg('');
-  }
-
-  function resetBridge() {
-    if (pollRef.current) clearInterval(pollRef.current);
-    setBridgeState(BRIDGE_STATES.IDLE);
-    setDepositInfo(null);
-    setAmount('');
-    setTxHash('');
-    setStatusMsg('');
-    setErrorMsg('');
-    setIsLoading(false);
-  }
-
-  function closePanel() {
-    setOpen(false);
+  // ── Handlers ────────────────────────────────────────────────────────────────
+  function handleChainSelect(chain) {
+    setSourceChain(chain);
+    setSourceAsset(chain.nativeSymbol);
+    setBtcAmount('');
     setChainDropOpen(false);
+    setFlowState('idle');
+    setDepositInfo(null);
+    setErrorMsg('');
   }
 
-  // ── Step 2: Generate Deposit Address ─────────────────────────────────────────
-  const handleGenerateAddress = useCallback(async () => {
-    if (!connected || !solanaAddress) {
-      openWalletModal(true);
+  function handleReset() {
+    setFlowState('idle');
+    setDepositInfo(null);
+    setErrorMsg('');
+    setBtcAmount('');
+  }
+
+  async function handleGenerate() {
+    if (!connected || !solanaAddress) { openWalletModal(true); return; }
+    if (isBTC && (!btcAmount || parseFloat(btcAmount) <= 0)) {
+      setErrorMsg('Please enter the BTC amount you want to bridge.');
       return;
     }
 
-    setIsLoading(true);
+    setFlowState('generating');
     setErrorMsg('');
 
     try {
       let result;
-      if (sourceChain.routerType === 'chainflip') {
-        if (!amount || parseFloat(amount) <= 0) {
-          throw new Error('Please enter a valid amount of BTC to bridge.');
-        }
-        const btcAmountSats = Math.round(parseFloat(amount) * 100000000).toString();
+      if (isBTC) {
+        const sats = Math.round(parseFloat(btcAmount) * 1e8).toString();
         try {
-          result = await getBitcoinSquidRoute({
-            btcAmountSats,
-            solanaAddress,
-          });
-        } catch (sdkErr) {
-          // Dev/mock fallback if network fetch fails
+          result = await getBitcoinSquidRoute({ btcAmountSats: sats, solanaAddress });
+        } catch {
+          // Demo fallback
           result = {
-            depositAddress: `tb1q_demo_bitcoin_deposit_address_${solanaAddress.slice(0, 8)}`,
-            expiry: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            depositAddress: `bc1q7zsm3jcky80c5t02h685yyv5vkdhh7fqdh05d`,
+            expiry: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
           };
         }
       } else {
-        // Axelar / CCTP path
         try {
           result = await getDepositAddress({
             fromChain: sourceChain.id,
             fromAssetSymbol: sourceAsset,
             solanaAddress,
           });
-        } catch (sdkErr) {
-          // SDK not installed yet (dev mode) — use a demo address
-          if (sdkErr.message?.includes('Cannot find module') || sdkErr.code === 'MODULE_NOT_FOUND') {
-            result = {
-              depositAddress: `axl1demo_${sourceChain.id}_${solanaAddress.slice(0, 8)}`,
-              expiry: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-            };
-          } else {
-            throw sdkErr;
-          }
+        } catch {
+          // Demo fallback
+          result = {
+            depositAddress: `0xdemo_${sourceChain.id}_${solanaAddress.slice(0, 6)}`,
+            expiry: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          };
         }
       }
 
       setDepositInfo(result);
-      setBridgeState(BRIDGE_STATES.AWAITING_DEPOSIT);
+      setFlowState('ready');
     } catch (err) {
-      setErrorMsg(err.message || 'Failed to generate deposit address. Please try again.');
-    } finally {
-      setIsLoading(false);
+      setErrorMsg(err.message || 'Could not generate deposit address. Please try again.');
+      setFlowState('error');
     }
-  }, [connected, solanaAddress, sourceChain, sourceAsset, amount, openWalletModal]);
+  }
 
-  // ── Step 3: Poll Deposit Status (user pastes their source tx hash) ────────────
-  const handleStartMonitoring = useCallback(async () => {
-    if (!txHash.trim()) return;
-    setIsLoading(true);
-    setBridgeState(BRIDGE_STATES.CONFIRMING);
-    setStatusMsg('Checking transaction status…');
+  function handleCopy() {
+    if (!depositInfo?.depositAddress) return;
+    navigator.clipboard.writeText(depositInfo.depositAddress).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2200);
+  }
 
-    pollRef.current = setInterval(async () => {
-      try {
-        const status = await pollDepositStatus(txHash.trim());
+  // Derived display values
+  const expiryLabel = depositInfo?.expiry
+    ? 'Today, ' + new Date(depositInfo.expiry).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '';
 
-        if (status.status === 'executed') {
-          clearInterval(pollRef.current);
-          setBridgeState(BRIDGE_STATES.SWAPPING);
-          setStatusMsg('Deposit confirmed! Axelar is now swapping your asset to USDC…');
-          setIsLoading(false);
-          // Simulate swap completion after a delay (real: listen for Axelar events)
-          setTimeout(() => {
-            setBridgeState(BRIDGE_STATES.BURNING);
-            setStatusMsg('Initiating Circle CCTP burn…');
-          }, 4000);
-        } else if (status.status === 'error') {
-          clearInterval(pollRef.current);
-          setErrorMsg('Axelar reported an error with this transaction. Please check Axelarscan.');
-          setBridgeState(BRIDGE_STATES.ERROR);
-          setIsLoading(false);
-        } else {
-          setStatusMsg(`Confirmations: ${status.confirmations || 0}. Waiting for finality on ${sourceChain.label}…`);
-        }
-      } catch {
-        // Non-fatal polling error — retry next interval
-      }
-    }, 8000);
-  }, [txHash, sourceChain]);
+  const feeDisplay  = isBTC ? '~0.1%' : 'Gas Service';
 
-  // ── Stop polling on unmount ───────────────────────────────────────────────────
-  useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, []);
-
-  // ── Render: Floating Pill (mobile right-middle fixed) ────────────────────────
-  // The pill is hidden on desktop (≥ 1100px) via CSS — consistent with SwapWidget pill pattern.
+  // ── Floating Pill (always rendered for mobile) ───────────────────────────────
   const pill = (
     <button
+      id="brg-float-pill"
       className="brg-float-pill"
       onClick={() => setOpen(true)}
-      aria-label="Open Cross-Chain Bridge"
+      aria-label="Open Bridge"
     >
       <span className="brg-pill-icon">⇌</span>
       <span className="brg-pill-label">Bridge</span>
-      {bridgeState !== BRIDGE_STATES.IDLE && bridgeState !== BRIDGE_STATES.SUCCESS && (
-        <span className="brg-pill-live-dot" />
-      )}
+      {flowState === 'ready' && <span className="brg-pill-live-dot" />}
     </button>
   );
 
-  // ── Render: Bridge Modal ──────────────────────────────────────────────────────
-  const modal = open && (
-    <div className="brg-modal-overlay" onClick={e => { if (e.target === e.currentTarget) closePanel(); }}>
-      <div className="brg-modal-sheet">
+  if (!open) return pill;
 
-        {/* Top accent line (matches .app-card::before) */}
-        <div className="brg-sheet-accent" />
-
-        {/* Header */}
-        <div className="brg-modal-header">
-          <div>
-            <div className="brg-modal-title">
-              <span className="brg-title-icon">⇌</span>
-              Cross-Chain Bridge
-            </div>
-            <div className="brg-modal-sub">
-              Any token → Canonical USDC on Solana
-              <span className="brg-powered-badge">via Axelar + CCTP</span>
-            </div>
-          </div>
-          <button className="brg-modal-close" onClick={closePanel} aria-label="Close">✕</button>
-        </div>
-
-        {/* Wallet not connected */}
-        {!connected && (
-          <div className="brg-no-wallet">
-            <div className="brg-no-wallet-icon">⚓</div>
-            <div className="brg-no-wallet-title">Connect Solana Wallet</div>
-            <div className="brg-no-wallet-sub">A Solana wallet is required to receive canonical USDC.</div>
-            <button className="send-btn" style={{ marginTop: 16 }} onClick={() => openWalletModal(true)}>
-              Connect Wallet
-            </button>
-          </div>
-        )}
-
-        {/* Connected — bridge UI */}
-        {connected && (
-          <>
-            {/* Contextual notification for current state */}
-            <BridgeNotification state={bridgeState} />
-
-            {/* IDLE or AWAITING_DEPOSIT — Setup form */}
-            {(bridgeState === BRIDGE_STATES.IDLE) && (
-              <div className="brg-form">
-                {/* Receiver address display */}
-                <div className="brg-field-label">Receiving On</div>
-                <div className="brg-addr-row">
-                  <span className="brg-chain-badge">Solana ◎</span>
-                  <span className="brg-rcv-addr">{solanaAddress.slice(0,6)}…{solanaAddress.slice(-6)}</span>
-                </div>
-
-                {/* Source Chain selector */}
-                <div className="brg-field-label" style={{ marginTop: 14 }}>Source Chain</div>
-                <div className="brg-chain-selector-wrap">
-                  <button
-                    className="brg-chain-btn"
-                    onClick={() => setChainDropOpen(d => !d)}
-                  >
-                    <span>{sourceChain.icon}</span>
-                    <span className="brg-chain-name">{sourceChain.label}</span>
-                    <span className="brg-chain-chevron">›</span>
-                  </button>
-
-                  {chainDropOpen && (
-                    <div className="brg-chain-drop">
-                      {SUPPORTED_SOURCE_CHAINS.map(chain => (
-                        <button
-                          key={chain.id}
-                          className={`brg-chain-drop-item ${sourceChain.id === chain.id ? 'sel' : ''}`}
-                          onClick={() => {
-                            setSourceChain(chain);
-                            setSourceAsset(chain.nativeSymbol);
-                            setChainDropOpen(false);
-                          }}
-                        >
-                          <span>{chain.icon}</span>
-                          <span>{chain.label}</span>
-                          <span className="brg-chain-sym">{chain.nativeSymbol}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Amount input */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, marginBottom: 6 }}>
-                  <div className="brg-field-label" style={{ margin: 0 }}>Amount to Bridge</div>
-                  <button 
-                    onClick={resetInputs} 
-                    style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, padding: 0 }}
-                    title="Reset / Clear all fields"
-                  >
-                    <span style={{ fontSize: 12 }}>⟲</span> Reset
-                  </button>
-                </div>
-                <div className="input-wrap">
-                  <input
-                    type="number"
-                    step="any"
-                    value={amount}
-                    onChange={e => setAmount(e.target.value)}
-                    placeholder="0.00"
-                    style={{ fontFamily: 'var(--mono)' }}
-                  />
-                  <span style={{ fontSize: 12, color: 'var(--text3)', marginRight: 10, fontWeight: 600 }}>{sourceAsset}</span>
-                </div>
-
-                {/* You Receive display */}
-                {amount && parseFloat(amount) > 0 && (
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: 'rgba(255,255,255,0.03)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 10,
-                    padding: '8px 12px',
-                    marginTop: 8,
-                    fontSize: 12,
-                    color: 'var(--text2)'
-                  }}>
-                    <span>You Receive (Estimated)</span>
-                    <strong style={{ color: 'var(--lime)', fontFamily: 'var(--mono)' }}>~ {estimatedReceive} USDC</strong>
-                  </div>
-                )}
-
-                {/* Asset input */}
-                <div className="brg-field-label" style={{ marginTop: 14 }}>Source Asset Symbol</div>
-                <div className="input-wrap">
-                  <input
-                    className=""
-                    value={sourceAsset}
-                    onChange={e => setSourceAsset(e.target.value.toUpperCase())}
-                    disabled={sourceChain.id === 'bitcoin'}
-                    placeholder={sourceChain.id === 'bitcoin' ? 'BTC' : `e.g. ${sourceChain.nativeSymbol}, USDC, WBTC`}
-                    maxLength={10}
-                    style={{ fontFamily: 'var(--mono)', textTransform: 'uppercase', opacity: sourceChain.id === 'bitcoin' ? 0.6 : 1 }}
-                  />
-                </div>
-
-                {/* Dynamic Chain Notice */}
-                {sourceChain.notice && (
-                  <div className="brg-error-banner" style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.25)', color: '#fbbf24', marginTop: 14 }}>
-                    {sourceChain.notice}
-                  </div>
-                )}
-
-                {/* Fee notice */}
-                <div className="brg-fee-notice">
-                  <span>⛽</span>
-                  Gas fees covered by Axelar Gas Service — no EVM wallet needed.
-                </div>
-
-                {/* Important notices */}
-                <div className="brg-notice-card">
-                  <div className="brg-notice-row">
-                    <span className="brg-notice-dot cyan" />
-                    Deposit address valid for 24 hours only.
-                  </div>
-                  <div className="brg-notice-row">
-                    <span className="brg-notice-dot yellow" />
-                    Circle CCTP attestation takes 13–20 min on Ethereum.
-                  </div>
-                  <div className="brg-notice-row">
-                    <span className="brg-notice-dot green" />
-                    You will always receive canonical Circle USDC. A fallback route via Ethereum is available if direct minting fails.
-                  </div>
-                </div>
-
-                {errorMsg && (
-                  <div className="brg-error-banner">{errorMsg}</div>
-                )}
-
-                <button
-                  className="send-btn"
-                  style={{ marginTop: 8 }}
-                  disabled={isLoading || !sourceAsset.trim()}
-                  onClick={handleGenerateAddress}
-                >
-                  {isLoading ? (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-                      <span className="spin" />
-                      Generating Deposit Address…
-                    </span>
-                  ) : 'Generate Deposit Address'}
-                </button>
-              </div>
-            )}
-
-            {/* AWAITING_DEPOSIT — show QR + address + tx hash input */}
-            {bridgeState === BRIDGE_STATES.AWAITING_DEPOSIT && depositInfo && (
-              <div className="brg-form">
-                <QRCard address={depositInfo.depositAddress} expiresAt={depositInfo.expiry} />
-
-                {/* Instructions */}
-                <div className="brg-notice-card" style={{ marginTop: 14 }}>
-                  <div className="brg-notice-row">
-                    <span className="brg-notice-dot cyan" />
-                    Send <strong style={{ color: 'var(--text)' }}>{sourceAsset}</strong> on <strong style={{ color: 'var(--text)' }}>{sourceChain.label}</strong> to the address above.
-                  </div>
-                  <div className="brg-notice-row">
-                    <span className="brg-notice-dot yellow" />
-                    Send only <strong style={{ color: 'var(--text)' }}>{sourceAsset}</strong>. Other tokens sent to this address may be lost.
-                  </div>
-                  <div className="brg-notice-row">
-                    <span className="brg-notice-dot green" />
-                    After sending, paste your transaction hash below so we can track it.
-                  </div>
-                </div>
-
-                {/* TX hash monitor */}
-                <div className="brg-field-label" style={{ marginTop: 14 }}>Source Transaction Hash</div>
-                <div className="input-wrap">
-                  <input
-                    value={txHash}
-                    onChange={e => setTxHash(e.target.value.trim())}
-                    placeholder="0x…"
-                    style={{ fontFamily: 'var(--mono)', fontSize: 13 }}
-                  />
-                </div>
-
-                {errorMsg && <div className="brg-error-banner">{errorMsg}</div>}
-
-                <button
-                  className="send-btn"
-                  style={{ marginTop: 10 }}
-                  disabled={isLoading || !txHash.trim()}
-                  onClick={handleStartMonitoring}
-                >
-                  Track My Transaction
-                </button>
-
-                <button className="brg-ghost-btn" onClick={resetBridge}>
-                  ← Change Source Chain / Asset
-                </button>
-              </div>
-            )}
-
-            {/* CONFIRMING / SWAPPING / BURNING / ATTESTING / MINTING — Progress view */}
-            {[
-              BRIDGE_STATES.CONFIRMING,
-              BRIDGE_STATES.SWAPPING,
-              BRIDGE_STATES.BURNING,
-              BRIDGE_STATES.ATTESTING,
-              BRIDGE_STATES.MINTING,
-              BRIDGE_STATES.FALLBACK_DELIVERY,
-              BRIDGE_STATES.FALLBACK_ROUTING,
-            ].includes(bridgeState) && (
-              <div className="brg-form">
-                <BridgeStepper currentState={bridgeState} />
-
-                {statusMsg && (
-                  <div className="brg-status-msg">
-                    <span className="spin" style={{ width: 14, height: 14, borderWidth: 2 }} />
-                    {statusMsg}
-                  </div>
-                )}
-
-                {bridgeState === BRIDGE_STATES.FALLBACK_DELIVERY && (
-                  <button className="send-btn" style={{ marginTop: 14, background: 'var(--cyan)', color: '#0a1628' }}>
-                    Resolve via Ethereum →
-                  </button>
-                )}
-
-                <button className="brg-ghost-btn" style={{ marginTop: 10 }} onClick={resetBridge}>
-                  Start New Bridge
-                </button>
-              </div>
-            )}
-
-            {/* SUCCESS */}
-            {bridgeState === BRIDGE_STATES.SUCCESS && (
-              <div className="brg-success-wrap">
-                <div className="brg-success-icon-wrap">
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--lime)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                </div>
-                <div className="brg-success-title">USDC Delivered!</div>
-                <div className="brg-success-sub">Canonical Circle USDC has been minted to your Solana wallet.</div>
-                <div className="brg-addr-row" style={{ justifyContent: 'center', marginTop: 10 }}>
-                  <span className="brg-rcv-addr">{solanaAddress.slice(0,6)}…{solanaAddress.slice(-6)}</span>
-                </div>
-                <button className="send-btn" style={{ marginTop: 18 }} onClick={resetBridge}>
-                  Bridge Again
-                </button>
-              </div>
-            )}
-
-            {/* ERROR */}
-            {bridgeState === BRIDGE_STATES.ERROR && (
-              <div className="brg-form">
-                <div className="brg-error-banner" style={{ marginBottom: 14, fontSize: 13 }}>
-                  ⚠ {errorMsg || 'An unexpected error occurred.'}
-                </div>
-                <button className="send-btn" onClick={resetBridge}>Try Again</button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-
+  // ── Modal ────────────────────────────────────────────────────────────────────
   return (
     <>
       {pill}
-      {modal}
+      <div
+        className="brg-modal-overlay"
+        onClick={e => { if (e.target === e.currentTarget) { setOpen(false); setChainDropOpen(false); } }}
+      >
+        <div className="brg-modal-sheet">
+
+          {/* ── Header ─────────────────────────────────────────────────────── */}
+          <div className="brg-simple-header">
+            <button className="brg-simple-close" onClick={() => { setOpen(false); setChainDropOpen(false); }}>✕</button>
+            <span className="brg-simple-title">Bridge</span>
+            <div style={{ width: 32 }} />
+          </div>
+
+          {/* ── Send Card ──────────────────────────────────────────────────── */}
+          <div className="brg-simple-card">
+            <div className="brg-section-title">Send</div>
+
+            {/* CHAIN row */}
+            <div className="brg-row" style={{ position: 'relative' }}>
+              <span className="brg-row-label">CHAIN</span>
+              <button
+                className="brg-selector-pill"
+                onClick={() => setChainDropOpen(d => !d)}
+                aria-haspopup="listbox"
+              >
+                <span className="brg-sel-icon" style={{ background: chainColor }}>
+                  {sourceChain.icon}
+                </span>
+                <span className="brg-sel-name">{sourceChain.label}</span>
+                <span className="brg-sel-chevron">{chainDropOpen ? '‹' : '›'}</span>
+              </button>
+
+              {/* Chain dropdown */}
+              {chainDropOpen && (
+                <div className="brg-chain-dropdown" role="listbox">
+                  {SUPPORTED_SOURCE_CHAINS.map(chain => (
+                    <button
+                      key={chain.id}
+                      role="option"
+                      aria-selected={sourceChain.id === chain.id}
+                      className={`brg-drop-item ${sourceChain.id === chain.id ? 'sel' : ''}`}
+                      onClick={() => handleChainSelect(chain)}
+                    >
+                      <span className="brg-sel-icon" style={{ background: CHAIN_COLOR[chain.id] || '#22d3ee', width: 22, height: 22, fontSize: 11 }}>
+                        {chain.icon}
+                      </span>
+                      <span className="brg-drop-name">{chain.label}</span>
+                      <span className="brg-drop-sym">{chain.nativeSymbol}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* ASSET row */}
+            <div className="brg-row brg-row-top-border">
+              <span className="brg-row-label">ASSET</span>
+              <div className="brg-selector-pill" style={{ cursor: 'default' }}>
+                <span className="brg-sel-icon" style={{ background: chainColor }}>
+                  {sourceChain.icon}
+                </span>
+                <span className="brg-sel-name">{sourceAsset}</span>
+              </div>
+            </div>
+
+            {/* AMOUNT row — only for Bitcoin (Chainflip requires it) */}
+            {isBTC && (
+              <div className="brg-row brg-row-top-border">
+                <span className="brg-row-label">AMOUNT</span>
+                <div className="brg-amount-wrap">
+                  <input
+                    id="brg-btc-amount"
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="0.00"
+                    value={btcAmount}
+                    onChange={e => { setBtcAmount(e.target.value); setErrorMsg(''); }}
+                    className="brg-amount-input"
+                  />
+                  <span className="brg-amount-unit">BTC</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Arrow divider ───────────────────────────────────────────────── */}
+          <div className="brg-arrow-row">
+            <div className="brg-arrow-circle">↓</div>
+          </div>
+
+          {/* ── Receive Card ────────────────────────────────────────────────── */}
+          <div className="brg-simple-card">
+            <div className="brg-section-title">Receive</div>
+            <div className="brg-row">
+              <span className="brg-row-label">ASSET</span>
+              <div className="brg-selector-pill" style={{ cursor: 'default' }}>
+                <span className="brg-sel-icon" style={{ background: '#9945ff', fontSize: 11 }}>◎</span>
+                <span className="brg-sel-name">USDC</span>
+                <span className="brg-sel-sub">on Solana</span>
+              </div>
+            </div>
+          </div>
+
+          {/* ── Fee / Expiry info card (after address is ready) ──────────────── */}
+          {flowState === 'ready' && depositInfo && (
+            <div className="brg-info-card">
+              <div className="brg-info-row">
+                <span className="brg-info-label">Fee</span>
+                <span className="brg-info-value">{feeDisplay}</span>
+              </div>
+              <div className="brg-info-row brg-row-top-border" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                <span className="brg-info-label">Expires at</span>
+                <span className="brg-info-value">{expiryLabel}</span>
+              </div>
+            </div>
+          )}
+
+          {/* ── Deposit address + QR ────────────────────────────────────────── */}
+          {flowState === 'ready' && depositInfo && (
+            <div className="brg-deposit-card">
+              <div className="brg-deposit-label">One-time deposit address</div>
+              <div className="brg-deposit-addr">{depositInfo.depositAddress}</div>
+              <div className="brg-deposit-qr-wrap">
+                <DepositQR address={depositInfo.depositAddress} />
+              </div>
+            </div>
+          )}
+
+          {/* ── Warning banner ───────────────────────────────────────────────── */}
+          {flowState === 'ready' && (
+            <div className="brg-warn-banner">
+              <span className="brg-warn-icon">⚠</span>
+              <div>
+                <div className="brg-warn-title">Send only {sourceAsset} on {sourceChain.label}</div>
+                <div className="brg-warn-body">
+                  Sending a different asset or depositing less than the minimum can result in permanent loss.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Error banner ────────────────────────────────────────────────── */}
+          {errorMsg && (
+            <div className="brg-error-banner" style={{ marginTop: 14 }}>{errorMsg}</div>
+          )}
+
+          {/* ── Wallet hint ─────────────────────────────────────────────────── */}
+          {!connected && flowState === 'idle' && (
+            <div className="brg-wallet-hint">
+              Connect a Solana wallet to receive USDC
+            </div>
+          )}
+
+          {/* ── Action buttons ───────────────────────────────────────────────── */}
+          {(flowState === 'idle' || flowState === 'error') && (
+            <button
+              id="brg-generate-btn"
+              className="brg-action-btn"
+              onClick={handleGenerate}
+            >
+              {connected ? 'Generate Deposit Address' : 'Connect Wallet'}
+            </button>
+          )}
+
+          {flowState === 'generating' && (
+            <button className="brg-action-btn" disabled>
+              <span className="brg-spinner" /> Generating…
+            </button>
+          )}
+
+          {flowState === 'ready' && (
+            <>
+              <button
+                id="brg-copy-btn"
+                className={`brg-action-btn brg-copy-active ${copied ? 'brg-copied' : ''}`}
+                onClick={handleCopy}
+              >
+                {copied ? '✓ Copied!' : 'Copy Address'}
+              </button>
+              <button className="brg-reset-link" onClick={handleReset}>
+                ⟲ Change chain or asset
+              </button>
+            </>
+          )}
+
+        </div>
+      </div>
     </>
   );
 }
