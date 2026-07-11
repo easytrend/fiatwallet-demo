@@ -2099,11 +2099,13 @@ footer a { color:var(--lime); text-decoration:none; }
 .brg-modal-sheet::before {
   content: '';
   position: absolute;
-  top: -1px;
+  top: 0;
   left: 24px;
   right: 24px;
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(163, 230, 53, 0.35), transparent);
+  z-index: 10;
+  pointer-events: none;
 }
 
 @keyframes brgPopIn {
