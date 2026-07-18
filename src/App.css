@@ -2098,12 +2098,10 @@ footer a { color:var(--lime); text-decoration:none; }
 
 /* -- TxODDs Headline Marquee ---------------------------------------------- */
 .headline-ticker-container {
-  position: fixed;
-  top: 0;
-  left: 0;
+  position: relative;
   width: 100%;
   height: 40px;
-  z-index: 50;
+  z-index: 40;
   overflow: hidden;
   cursor: pointer;
   display: flex;

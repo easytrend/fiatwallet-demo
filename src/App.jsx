@@ -1042,6 +1042,9 @@ export default function App() {
         </div>
       </nav>
 
+      {/* TxODDs Headline Marquee Ticker */}
+      <HeadlineTicker onClickTicker={() => setShowGamesPanel(true)} />
+
       <FloatClaimWidget liveSolPrice={liveSolPrice} onClaimSuccess={fetchBalances} />
 
       <div className={`main tab-${activeTab}`}>
@@ -1272,9 +1275,6 @@ export default function App() {
           <span className="bnav-label">Swap</span>
         </button>
       </div>
-
-      {/* TxODDs Headline Marquee Ticker */}
-      <HeadlineTicker onClickTicker={() => setShowGamesPanel(true)} />
 
       {/* TxODDs Live Games Panel */}
       {showGamesPanel && (
