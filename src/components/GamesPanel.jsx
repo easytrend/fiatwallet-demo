@@ -46,7 +46,7 @@ export default function GamesPanel({ onClose }) {
                     <span className="game-sport">{game.sport} &bull; {game.competition}</span>
                     {game.isLive ? (
                       <span className="game-status live">
-                        <div className="live-dot"></div> LIVE • {game.time}
+                        <div className="ticker-live-dot"></div> LIVE • {game.time}
                       </span>
                     ) : (
                       <span className="game-status upcoming">{game.time}</span>
