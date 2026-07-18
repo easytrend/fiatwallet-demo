@@ -1244,7 +1244,7 @@ export default function App() {
       <BridgeWidget 
         connected={connected} 
         publicKey={publicKey}
-        onTriggerConnect={handleTriggerConnect}
+        onTriggerConnect={() => setVisible(true)}
       />
 
       {/* Bottom Navigation for mobile view */}
