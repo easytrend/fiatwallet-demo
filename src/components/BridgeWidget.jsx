@@ -60,17 +60,9 @@ const CHAIN_COLOR = {
 };
 
 // ── BridgeWidget ──────────────────────────────────────────────────────────────
-export default function BridgeWidget({
-  publicKey: propPublicKey,
-  connected: propConnected,
-  onTriggerConnect,
-}) {
-  const adapterWallet = useWallet();
-  const adapterWalletModal = useWalletModal();
-
-  const publicKey = propPublicKey !== undefined ? propPublicKey : adapterWallet.publicKey;
-  const connected = propConnected !== undefined ? propConnected : adapterWallet.connected;
-  const openWalletModal = onTriggerConnect || (() => adapterWalletModal.setVisible(true));
+export default function BridgeWidget() {
+  const { publicKey, connected } = useWallet();
+  const { setVisible: openWalletModal } = useWalletModal();
 
   // Panel
   const [open, setOpen]         = useState(false);
