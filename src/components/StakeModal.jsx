@@ -69,8 +69,8 @@ export default function StakeModal({ game, outcomeKey, onClose }) {
   const handlePlaceBet = useCallback(async () => {
     if (!connected || !publicKey) { setVisible(true); return; }
     
-    // Prevent actual betting and show "Coming soon" popup
-    alert('Coming soon!');
+    // Prevent actual betting and show fancy "Coming soon" state
+    setStep('coming-soon');
     return;
 
     if (stakeAmount < 1) { setErrorMsg('Minimum stake is 1 USDC.'); return; }
@@ -175,7 +175,7 @@ export default function StakeModal({ game, outcomeKey, onClose }) {
               value={stakeInput}
               onChange={(e) => setStakeInput(e.target.value)}
               placeholder="5.00"
-              disabled={step === 'signing' || step === 'sending' || step === 'success'}
+              disabled={step === 'signing' || step === 'sending' || step === 'success' || step === 'coming-soon'}
             />
             <span className="stake-currency-label">USDC</span>
           </div>
@@ -187,7 +187,7 @@ export default function StakeModal({ game, outcomeKey, onClose }) {
                 key={amt}
                 className={`stake-preset-btn${stakeAmount === amt ? ' active' : ''}`}
                 onClick={() => setStakeInput(String(amt))}
-                disabled={step === 'signing' || step === 'sending' || step === 'success'}
+                disabled={step === 'signing' || step === 'sending' || step === 'success' || step === 'coming-soon'}
               >
                 ${amt}
               </button>
@@ -196,7 +196,7 @@ export default function StakeModal({ game, outcomeKey, onClose }) {
               <button
                 className="stake-preset-btn stake-preset-max"
                 onClick={() => setStakeInput(fmt(usdcBalance))}
-                disabled={step === 'signing' || step === 'sending' || step === 'success'}
+                disabled={step === 'signing' || step === 'sending' || step === 'success' || step === 'coming-soon'}
               >
                 MAX
               </button>
@@ -236,6 +236,18 @@ export default function StakeModal({ game, outcomeKey, onClose }) {
           </div>
         )}
 
+        {/* Coming Soon state */}
+        {step === 'coming-soon' && (
+          <div className="stake-success-box" style={{ background: 'var(--tg-theme-secondary-bg-color, #f4f4f5)', border: '1px solid var(--tg-theme-hint-color, #999)' }}>
+            <div className="stake-success-icon" style={{ background: 'var(--tg-theme-hint-color, #999)' }}>⏳</div>
+            <div className="stake-success-title" style={{ color: 'var(--tg-theme-text-color, #000)' }}>Coming Soon</div>
+            <div className="stake-success-subtitle">
+              On-chain betting for {game?.competition} is not yet available. Stay tuned!
+            </div>
+            <button className="stake-btn-primary" onClick={onClose} style={{ marginTop: '16px' }}>Got it</button>
+          </div>
+        )}
+
         {/* Success state */}
         {step === 'success' && (
           <div className="stake-success-box">
@@ -259,7 +271,7 @@ export default function StakeModal({ game, outcomeKey, onClose }) {
         )}
 
         {/* CTA Button */}
-        {step !== 'success' && (
+        {step !== 'success' && step !== 'coming-soon' && (
           <div className="stake-cta-area">
             {!connected ? (
               <button
