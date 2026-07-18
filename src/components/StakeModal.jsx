@@ -68,13 +68,12 @@ export default function StakeModal({ game, outcomeKey, onClose }) {
 
   const handlePlaceBet = useCallback(async () => {
     if (!connected || !publicKey) { setVisible(true); return; }
-    if (stakeAmount < 1) { setErrorMsg('Minimum stake is 1 USDC.'); return; }
-    if (usdcBalance !== null && stakeAmount > usdcBalance) {
-      setErrorMsg(`Insufficient USDC. Your balance: ${fmt(usdcBalance)} USDC.`);
-      return;
-    }
+    
+    // Prevent actual betting and show "Coming soon" popup
+    alert('Coming soon!');
+    return;
 
-    setErrorMsg('');
+    if (stakeAmount < 1) { setErrorMsg('Minimum stake is 1 USDC.'); return; }
     setStep('signing');
 
     try {
