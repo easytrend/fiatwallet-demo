@@ -19,6 +19,8 @@ import FloatClaimWidget from './components/FloatClaimWidget';
 import SwapWidget from './components/SwapWidget';
 import P2PPanel from './components/P2PPanel';
 import BridgeWidget from './components/BridgeWidget';
+import HeadlineTicker from './components/HeadlineTicker';
+import GamesPanel from './components/GamesPanel';
 
 
 
@@ -312,6 +314,7 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, []);
 
+  const [showGamesPanel, setShowGamesPanel] = useState(false);
   const [bulkMode, setBulkMode] = useState(false);
   const [activeTab, setActiveTab] = useState('p2p');
   const [showModal, setShowModal] = useState(false);
@@ -1269,6 +1272,14 @@ export default function App() {
           <span className="bnav-label">Swap</span>
         </button>
       </div>
+
+      {/* TxODDs Headline Marquee Ticker */}
+      <HeadlineTicker onClickTicker={() => setShowGamesPanel(true)} />
+
+      {/* TxODDs Live Games Panel */}
+      {showGamesPanel && (
+        <GamesPanel onClose={() => setShowGamesPanel(false)} />
+      )}
     </div>
   );
 }
