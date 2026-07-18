@@ -1241,7 +1241,11 @@ export default function App() {
       )}
 
       {/* Bridge Widget — floating pill (mobile right-middle) + modal */}
-      <BridgeWidget />
+      <BridgeWidget 
+        connected={connected} 
+        publicKey={publicKey}
+        onTriggerConnect={handleTriggerConnect}
+      />
 
       {/* Bottom Navigation for mobile view */}
       <div className="bottom-nav">
